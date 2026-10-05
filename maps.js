@@ -296,8 +296,227 @@ function displayMapFallback(errorMsg = '') {
   if (window.lucide) lucide.createIcons();
 }
 
+// ==========================================
+// BROWSER GEOLOCATION & REVERSE GEOCODING
+// ==========================================
+
+function detectCurrentLocation() {
+  const locateBtn = document.getElementById('btnLocateMe');
+  const pickupInput = document.getElementById('inputPickup');
+
+  if (!navigator.geolocation) {
+    if (typeof showToast === 'function') {
+      showToast('Geolocation is not supported by your browser', 'error');
+    }
+    return;
+  }
+
+  // Visual loading feedback on locate button
+  if (locateBtn) {
+    locateBtn.innerHTML = `<i data-lucide="loader-2" class="w-4 h-4 text-blue-600 animate-spin"></i>`;
+    if (window.lucide) lucide.createIcons();
+  }
+
+  if (typeof showToast === 'function') {
+    showToast('Detecting your current location...', 'info');
+  }
+
+  navigator.geolocation.getCurrentPosition(
+    (position) => {
+      const lat = position.coords.latitude;
+      const lng = position.coords.longitude;
+      const latLng = { lat, lng };
+
+      if (window.google && google.maps && google.maps.Geocoder) {
+        const geocoder = new google.maps.Geocoder();
+        geocoder.geocode({ location: latLng }, (results, status) => {
+          if (status === 'OK' && results && results[0]) {
+            // Find a concise address or formatted address
+            const formatted = results[0].formatted_address;
+            const shortName = results[0].address_components?.[1]?.long_name || results[0].address_components?.[0]?.long_name;
+            const displayAddress = shortName ? `${shortName}, ${results[0].address_components?.[2]?.long_name || 'Hyderabad'}` : formatted;
+
+            if (pickupInput) {
+              pickupInput.value = displayAddress;
+            }
+            if (typeof state !== 'undefined') {
+              state.pickup = displayAddress;
+            }
+
+            // Recenter and re-route
+            const currentDrop = document.getElementById('inputDrop')?.value || 'Jangaon';
+            updateRouteOnMap(displayAddress, currentDrop);
+
+            if (typeof showToast === 'function') {
+              showToast(`Current location detected: ${displayAddress}`, 'success');
+            }
+          } else {
+            fallbackCoords(latLng);
+          }
+          resetLocateBtn();
+        });
+      } else {
+        fallbackCoords(latLng);
+        resetLocateBtn();
+      }
+    },
+    (err) => {
+      console.warn('Geolocation error:', err);
+      resetLocateBtn();
+      let msg = 'Unable to detect location. Please check browser permissions.';
+      if (err.code === err.PERMISSION_DENIED) {
+        msg = 'Location permission was denied. Please allow location access in your browser.';
+      }
+      if (typeof showToast === 'function') {
+        showToast(msg, 'error');
+      }
+    },
+    { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 }
+  );
+
+  function fallbackCoords(latLng) {
+    const coordStr = `Location (${latLng.lat.toFixed(4)}, ${latLng.lng.toFixed(4)})`;
+    if (pickupInput) pickupInput.value = coordStr;
+    if (typeof state !== 'undefined') state.pickup = coordStr;
+    const currentDrop = document.getElementById('inputDrop')?.value || 'Jangaon';
+    updateRouteOnMap(coordStr, currentDrop);
+  }
+
+  function resetLocateBtn() {
+    if (locateBtn) {
+      locateBtn.innerHTML = `<i data-lucide="locate-fixed" class="w-4 h-4"></i>`;
+      if (window.lucide) lucide.createIcons();
+    }
+  }
+}
+
+// ==========================================
+// LIVE TRIP TRACKING ENGINE (MAP & ANIMATION)
+// ==========================================
+
+let gTrackingMap = null;
+let gTrackingDirectionsRenderer = null;
+let gVehicleMarker = null;
+let gTrackingAnimId = null;
+
+function initTrackingMap(tripData) {
+  const container = document.getElementById('trackingMapCanvas');
+  if (!container) return;
+
+  const defaultTrip = tripData || {
+    pickup: 'Uppal Ring Road Metro',
+    drop: 'Jangaon Chowrasta',
+    vehicle: 'Bajaj Pulsar 150',
+    plate: 'TS 08 EK 4321',
+    driver: 'Ramesh Kumar',
+    vehicleType: 'bike'
+  };
+
+  try {
+    if (!gTrackingMap) {
+      gTrackingMap = new google.maps.Map(container, {
+        center: { lat: 17.5500, lng: 78.8500 },
+        zoom: 11,
+        styles: ROUTEMATE_MAP_STYLES,
+        disableDefaultUI: true,
+        zoomControl: true
+      });
+      gTrackingDirectionsRenderer = new google.maps.DirectionsRenderer({
+        map: gTrackingMap,
+        suppressMarkers: false,
+        polylineOptions: {
+          strokeColor: '#2563EB',
+          strokeWeight: 6,
+          strokeOpacity: 0.9
+        }
+      });
+    }
+
+    // Request route directions
+    const dirService = new google.maps.DirectionsService();
+    const originStr = defaultTrip.pickup.includes('India') ? defaultTrip.pickup : `${defaultTrip.pickup}, Telangana, India`;
+    const destStr = defaultTrip.drop.includes('India') ? defaultTrip.drop : `${defaultTrip.drop}, Telangana, India`;
+
+    dirService.route(
+      {
+        origin: originStr,
+        destination: destStr,
+        travelMode: google.maps.TravelMode.DRIVING
+      },
+      (res, status) => {
+        if (status === google.maps.DirectionsStatus.OK && res.routes && res.routes[0]) {
+          gTrackingDirectionsRenderer.setDirections(res);
+
+          const route = res.routes[0];
+          const leg = route.legs[0];
+          const pathPoints = route.overview_path;
+
+          // Update HUD
+          const etaEl = document.getElementById('trackingLiveEta');
+          const distEl = document.getElementById('trackingLiveDist');
+          const progressEl = document.getElementById('trackingProgressBar');
+
+          if (etaEl) etaEl.textContent = leg.duration.text || '18 mins';
+          if (distEl) distEl.textContent = leg.distance.text || '84 km';
+          if (progressEl) progressEl.style.width = '35%';
+
+          // Animate simulated vehicle along corridor
+          animateVehicleOnPath(pathPoints, defaultTrip.vehicleType);
+        } else {
+          console.warn('Tracking directions route failed:', status);
+        }
+      }
+    );
+  } catch (err) {
+    console.error('Tracking map initialization failed:', err);
+  }
+}
+
+// Animate vehicle marker along polyline coordinates
+function animateVehicleOnPath(points, vehicleType) {
+  if (!points || points.length === 0 || !gTrackingMap) return;
+
+  if (gVehicleMarker) {
+    gVehicleMarker.setMap(null);
+  }
+
+  // Start at 30% of route
+  let step = Math.floor(points.length * 0.28);
+  const startPos = points[step] || points[0];
+
+  const iconUrl = vehicleType === 'car'
+    ? 'https://maps.google.com/mapfiles/kml/shapes/cabs.png'
+    : 'https://maps.google.com/mapfiles/kml/shapes/motorcycling.png';
+
+  gVehicleMarker = new google.maps.Marker({
+    position: startPos,
+    map: gTrackingMap,
+    title: 'Live Vehicle',
+    icon: {
+      url: iconUrl,
+      scaledSize: new google.maps.Size(32, 32)
+    }
+  });
+
+  // Simulated live movement
+  if (gTrackingAnimId) clearInterval(gTrackingAnimId);
+  gTrackingAnimId = setInterval(() => {
+    if (step < points.length - 1) {
+      step += 1;
+      const nextPos = points[step];
+      if (gVehicleMarker && nextPos) {
+        gVehicleMarker.setPosition(nextPos);
+      }
+    } else {
+      clearInterval(gTrackingAnimId);
+    }
+  }, 4000);
+}
+
 // Export to window
 window.initGoogleMap = initGoogleMap;
 window.updateRouteOnMap = updateRouteOnMap;
 window.toggleMapTraffic = toggleMapTraffic;
 window.recenterMapOnCorridor = recenterMapOnCorridor;
+window.detectCurrentLocation = detectCurrentLocation;
+window.initTrackingMap = initTrackingMap;

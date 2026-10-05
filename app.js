@@ -651,11 +651,32 @@ function openBookingModal(rideId) {
         </div>
       </div>
 
+      <!-- Seat Selection Counter -->
+      <div class="mt-3.5 bg-slate-50 rounded-2xl p-3.5 border border-slate-200/80 flex items-center justify-between">
+        <div>
+          <label class="block font-bold text-slate-800 text-xs">Number of Seats to Book</label>
+          <p class="text-[11px] text-slate-500 mt-0.5">
+            <span id="bookingAvailableSeatsBadge" class="text-blue-600 font-semibold">${ride.seatsAvailable} seat${ride.seatsAvailable > 1 ? 's' : ''} available</span> in this ${ride.vehicleType}
+          </p>
+        </div>
+
+        <div class="flex items-center gap-2 bg-white border border-slate-200 rounded-xl p-1 shadow-xs">
+          <button type="button" onclick="adjustBookingSeats(-1, ${ride.seatsAvailable}, ${ride.perSeatPrice})" class="w-7 h-7 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold flex items-center justify-center transition active:scale-90 text-sm">
+            -
+          </button>
+          <span id="bookingSeatCountDisplay" class="w-6 text-center font-extrabold text-sm text-slate-900">1</span>
+          <button type="button" onclick="adjustBookingSeats(1, ${ride.seatsAvailable}, ${ride.perSeatPrice})" class="w-7 h-7 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-bold flex items-center justify-center transition active:scale-90 text-sm">
+            +
+          </button>
+        </div>
+        <input type="hidden" id="selectedSeatsCount" value="1" />
+      </div>
+
       <!-- Cost Breakdown -->
-      <div class="mt-4 bg-blue-50/70 rounded-2xl p-4 border border-blue-100">
+      <div class="mt-3.5 bg-blue-50/70 rounded-2xl p-4 border border-blue-100">
         <div class="flex items-center justify-between text-xs text-slate-600 mb-1">
-          <span>Fuel Contribution (${state.distance} km)</span>
-          <span class="font-semibold text-slate-900">₹${ride.perSeatPrice}</span>
+          <span id="bookingSeatFormulaText">Fuel Contribution (1 seat × ₹${ride.perSeatPrice})</span>
+          <span id="bookingFuelBasePrice" class="font-semibold text-slate-900">₹${ride.perSeatPrice}</span>
         </div>
         <div class="flex items-center justify-between text-xs text-slate-600 mb-2">
           <span>Routemate Platform Fee</span>
@@ -663,7 +684,7 @@ function openBookingModal(rideId) {
         </div>
         <div class="pt-2 border-t border-blue-200/70 flex items-center justify-between">
           <span class="text-sm font-bold text-slate-900">Total Contribution</span>
-          <span class="text-lg font-black text-blue-700">₹${ride.perSeatPrice}</span>
+          <span id="bookingTotalFareAmount" class="text-lg font-black text-blue-700">₹${ride.perSeatPrice}</span>
         </div>
       </div>
 
@@ -719,9 +740,9 @@ function openBookingModal(rideId) {
         <button onclick="closeModal('bookingModal')" class="w-1/3 py-3.5 border border-slate-200 hover:bg-slate-50 rounded-2xl text-xs font-bold text-slate-600">
           Cancel
         </button>
-        <button onclick="confirmBooking(${ride.id})" class="w-2/3 py-3.5 gradient-brand text-white rounded-2xl text-xs font-bold shadow-lg shadow-blue-500/25 active:scale-95 transition-all flex items-center justify-center gap-1.5">
+        <button id="btnConfirmBookingAction" onclick="confirmBooking(${ride.id})" class="w-2/3 py-3.5 gradient-brand text-white rounded-2xl text-xs font-bold shadow-lg shadow-blue-500/25 active:scale-95 transition-all flex items-center justify-center gap-1.5">
           <i data-lucide="shield-check" class="w-4 h-4"></i>
-          <span>Pay & Confirm Seat (₹${ride.perSeatPrice})</span>
+          <span id="bookingPayBtnLabel">Pay & Confirm Seat (₹${ride.perSeatPrice})</span>
         </button>
       </div>
     </div>
@@ -731,27 +752,54 @@ function openBookingModal(rideId) {
   lucide.createIcons();
 }
 
-// Confirm Booking logic with Razorpay Gateway Integration
+// Interactive Seat Selection Adjuster
+function adjustBookingSeats(delta, maxAvailable, perSeatPrice) {
+  const countEl = document.getElementById('bookingSeatCountDisplay');
+  const hiddenInput = document.getElementById('selectedSeatsCount');
+  const formulaText = document.getElementById('bookingSeatFormulaText');
+  const basePriceEl = document.getElementById('bookingFuelBasePrice');
+  const totalFareEl = document.getElementById('bookingTotalFareAmount');
+  const btnLabel = document.getElementById('bookingPayBtnLabel');
+
+  if (!countEl || !hiddenInput) return;
+
+  let current = parseInt(hiddenInput.value || 1, 10);
+  const maxSeats = Math.max(1, maxAvailable || 1);
+  const newCount = Math.min(maxSeats, Math.max(1, current + delta));
+
+  hiddenInput.value = newCount;
+  countEl.textContent = newCount;
+
+  const total = perSeatPrice * newCount;
+
+  if (formulaText) formulaText.textContent = `Fuel Contribution (${newCount} seat${newCount > 1 ? 's' : ''} × ₹${perSeatPrice})`;
+  if (basePriceEl) basePriceEl.textContent = `₹${total}`;
+  if (totalFareEl) totalFareEl.textContent = `₹${total}`;
+  if (btnLabel) btnLabel.textContent = `Pay & Confirm ${newCount} Seat${newCount > 1 ? 's' : ''} (₹${total})`;
+}
+
+// Confirm Booking logic with dynamic seats and Razorpay Gateway
 function confirmBooking(rideId) {
   const ride = availableRides.find(r => r.id === rideId);
   if (!ride) return;
 
+  const selectedSeats = parseInt(document.getElementById('selectedSeatsCount')?.value || 1, 10);
+  const totalFare = (ride.perSeatPrice || 108) * selectedSeats;
   const selectedMethod = document.querySelector('input[name="payMethod"]:checked')?.value || 'razorpay';
 
-  // 1. If Razorpay is chosen, launch the Razorpay Checkout gateway
+  // 1. If Razorpay is chosen, launch the Razorpay Checkout gateway for the total fare
   if (selectedMethod === 'razorpay' && window.routematePayment) {
+    const bookingRideObj = { ...ride, perSeatPrice: totalFare };
     window.routematePayment.initiatePayment(
-      ride,
-      // On Payment Success
+      bookingRideObj,
       function onPaymentSuccess(paymentData) {
         processSuccessfulBooking(ride, {
           method: 'razorpay',
           label: 'Paid via Razorpay',
           paymentId: paymentData.paymentId,
           isPaid: true
-        });
+        }, selectedSeats, totalFare);
       },
-      // On Payment Cancel / Error
       function onPaymentError(err) {
         showToast(err.message || 'Payment was not completed', 'info');
       }
@@ -766,12 +814,14 @@ function confirmBooking(rideId) {
     label: isUpi ? 'Direct UPI upon boarding' : 'Cash inside vehicle',
     paymentId: null,
     isPaid: false
-  });
+  }, selectedSeats, totalFare);
 }
 
 // Helper to record successful booking across local state & Supabase
-function processSuccessfulBooking(ride, paymentInfo) {
-  ride.seatsAvailable = Math.max(0, ride.seatsAvailable - 1);
+function processSuccessfulBooking(ride, paymentInfo, seatsBooked = 1, totalFare = null) {
+  const actualSeats = seatsBooked || 1;
+  const fare = totalFare || ((ride.perSeatPrice || 108) * actualSeats);
+  ride.seatsAvailable = Math.max(0, ride.seatsAvailable - actualSeats);
   const bookingPin = Math.floor(1000 + Math.random() * 9000).toString();
   const bookingId = `RM-${Math.floor(1000 + Math.random() * 9000)}`;
 
@@ -782,8 +832,8 @@ function processSuccessfulBooking(ride, paymentInfo) {
     vehicle: `${ride.vehicleName} (${ride.vehicleNumber})`,
     route: `${ride.pickup} ➔ ${ride.drop || ride.drop_location}`,
     time: ride.departureTime,
-    seats: 1,
-    fare: ride.perSeatPrice,
+    seats: actualSeats,
+    fare: fare,
     payment: paymentInfo.label + (paymentInfo.paymentId ? ` (${paymentInfo.paymentId})` : ''),
     paymentId: paymentInfo.paymentId,
     paymentMethod: paymentInfo.method,
@@ -799,35 +849,36 @@ function processSuccessfulBooking(ride, paymentInfo) {
     window.db.bookings.create({
       rideId: ride.id,
       riderName: 'Verified Commuter',
-      seats: 1,
-      fare: ride.perSeatPrice,
+      seats: actualSeats,
+      fare: fare,
       paymentMethod: paymentInfo.method,
       pin: bookingPin
     }).then(res => {
       if (res && res.success) {
-        console.log('✅ Booking successfully stored in Supabase with method:', paymentInfo.method);
+        console.log('✅ Booking successfully stored in Supabase with seats:', actualSeats);
       }
     }).catch(err => console.warn('Supabase booking sync warning:', err));
   }
 
-  showToast(`Seat Confirmed! ${paymentInfo.isPaid ? 'Payment Received via Razorpay' : 'Pay on boarding'}`, 'success');
-  openTicketModal(ride, paymentInfo, bookingId, bookingPin);
+  showToast(`${actualSeats} Seat${actualSeats > 1 ? 's' : ''} Confirmed! ${paymentInfo.isPaid ? 'Payment Received via Razorpay' : 'Pay on boarding'}`, 'success');
+  openTicketModal(ride, paymentInfo, bookingId, bookingPin, actualSeats, fare);
 }
 
 // Open Booking Ticket confirmation modal
-function openTicketModal(ride, paymentInfo = {}, bookingId = null, pin = null) {
+function openTicketModal(ride, paymentInfo = {}, bookingId = null, pin = null, seats = 1, totalFare = null) {
   const modal = document.getElementById('ticketModal');
   const content = document.getElementById('ticketModalContent');
   const bid = bookingId || `RM-${Math.floor(1000 + Math.random() * 9000)}`;
   const ticketPin = pin || '4821';
   const isRazorpay = paymentInfo.method === 'razorpay';
+  const fare = totalFare || ((ride.perSeatPrice || 108) * (seats || 1));
 
   content.innerHTML = `
     <div class="p-6 text-center">
       <div class="w-14 h-14 ${isRazorpay ? 'bg-emerald-100 text-emerald-600' : 'bg-blue-100 text-blue-600'} rounded-full flex items-center justify-center mx-auto mb-3">
         <i data-lucide="${isRazorpay ? 'check-check' : 'check'}" class="w-7 h-7 stroke-[3]"></i>
       </div>
-      <h3 class="text-lg font-extrabold text-slate-900">${isRazorpay ? 'Payment & Seat Confirmed!' : 'Seat Reserved!'}</h3>
+      <h3 class="text-lg font-extrabold text-slate-900">${isRazorpay ? 'Payment & Seats Confirmed!' : 'Seats Reserved!'}</h3>
       <p class="text-xs text-slate-500 mt-0.5">Booking ID: <strong class="text-blue-600 font-mono">${bid}</strong></p>
 
       <div class="mt-4 text-left bg-slate-50 rounded-2xl p-4 border border-slate-200/80 space-y-2.5 text-xs">
@@ -840,6 +891,10 @@ function openTicketModal(ride, paymentInfo = {}, bookingId = null, pin = null) {
           <span class="font-mono font-bold text-blue-700">${ride.vehicleNumber}</span>
         </div>
         <div class="flex justify-between items-center pb-2 border-b border-slate-200">
+          <span class="text-slate-500">Seats Reserved</span>
+          <span class="font-bold text-slate-900">${seats} Seat${seats > 1 ? 's' : ''}</span>
+        </div>
+        <div class="flex justify-between items-center pb-2 border-b border-slate-200">
           <span class="text-slate-500">Pickup</span>
           <span class="font-semibold text-slate-800">${ride.pickup}</span>
         </div>
@@ -848,9 +903,9 @@ function openTicketModal(ride, paymentInfo = {}, bookingId = null, pin = null) {
           <span class="font-bold text-emerald-600">${ride.departureTime}</span>
         </div>
         <div class="flex justify-between items-center">
-          <span class="text-slate-500">Fare Split</span>
+          <span class="text-slate-500">Total Contribution</span>
           <div class="text-right">
-            <span class="text-sm font-black text-slate-900">₹${ride.perSeatPrice}</span>
+            <span class="text-sm font-black text-slate-900">₹${fare}</span>
             ${isRazorpay ? '<span class="block text-[10px] text-emerald-600 font-bold">PAID IN FULL</span>' : '<span class="block text-[10px] text-amber-600 font-bold">DUE ON BOARDING</span>'}
           </div>
         </div>
@@ -877,7 +932,7 @@ function openTicketModal(ride, paymentInfo = {}, bookingId = null, pin = null) {
             <i data-lucide="banknote" class="w-5 h-5 text-slate-700"></i>
             <div>
               <p class="text-xs font-bold text-slate-900">Cash on Board</p>
-              <p class="text-[11px] text-slate-600">Please keep exact change of ₹${ride.perSeatPrice} ready upon boarding.</p>
+              <p class="text-[11px] text-slate-600">Please keep exact change of ₹${fare} ready upon boarding.</p>
             </div>
           </div>
         </div>
@@ -885,7 +940,7 @@ function openTicketModal(ride, paymentInfo = {}, bookingId = null, pin = null) {
         <!-- Driver Direct Payment QR Simulation -->
         <div class="mt-3.5 p-3.5 bg-purple-50/90 rounded-2xl border border-purple-200 flex items-center gap-3 text-left">
           <div class="w-16 h-16 bg-white p-1 rounded-xl flex items-center justify-center shadow-xs flex-shrink-0 border border-purple-200">
-            <img src="https://api.qrserver.com/v1/create-qr-code/?size=140x140&margin=2&data=${encodeURIComponent('upi://pay?pa=' + ride.driverName.toLowerCase().replace(/[^a-z]/g, '') + '@oksbi&pn=' + encodeURIComponent(ride.driverName) + '&am=' + ride.perSeatPrice + '&cu=INR')}" alt="UPI QR" class="w-full h-full object-contain rounded" />
+            <img src="https://api.qrserver.com/v1/create-qr-code/?size=140x140&margin=2&data=${encodeURIComponent('upi://pay?pa=' + ride.driverName.toLowerCase().replace(/[^a-z]/g, '') + '@oksbi&pn=' + encodeURIComponent(ride.driverName) + '&am=' + fare + '&cu=INR')}" alt="UPI QR" class="w-full h-full object-contain rounded" />
           </div>
           <div class="flex-1 min-w-0">
             <div class="flex items-center gap-1.5">
@@ -904,8 +959,14 @@ function openTicketModal(ride, paymentInfo = {}, bookingId = null, pin = null) {
         <span class="font-mono font-extrabold text-blue-700 text-sm tracking-wider">${ticketPin}</span>
       </div>
 
+      <!-- Live Tracking CTA -->
+      <button onclick="closeModal('ticketModal'); openLiveTrackingForRide(${ride.id}, '${ticketPin}');" class="mt-3 w-full py-3.5 gradient-brand text-white rounded-2xl text-xs font-bold shadow-lg shadow-blue-500/25 active:scale-95 transition flex items-center justify-center gap-2">
+        <i data-lucide="navigation" class="w-4 h-4"></i>
+        <span>Track Live Commute on Map</span>
+      </button>
+
       <!-- Quick Actions: Call & WhatsApp Share -->
-      <div class="mt-3 grid grid-cols-2 gap-2 text-xs">
+      <div class="mt-2.5 grid grid-cols-2 gap-2 text-xs">
         <button onclick="showToast('Calling driver ' + '${ride.driverName}' + ' (+91 98480 23145)...', 'info')" class="py-2.5 px-3 bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold rounded-xl transition flex items-center justify-center gap-1.5">
           <i data-lucide="phone" class="w-3.5 h-3.5 text-blue-600"></i>
           <span>Call Driver</span>
@@ -916,8 +977,8 @@ function openTicketModal(ride, paymentInfo = {}, bookingId = null, pin = null) {
         </button>
       </div>
 
-      <div class="mt-4 flex gap-2">
-        <button onclick="closeModal('ticketModal'); switchTab('myrides');" class="w-full py-3.5 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl text-xs font-bold transition shadow-sm">
+      <div class="mt-3 flex gap-2">
+        <button onclick="closeModal('ticketModal'); switchTab('myrides');" class="w-full py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold transition">
           View in My Rides
         </button>
       </div>
@@ -1207,10 +1268,22 @@ function declinePassengerRequest() {
 
 // Complete Current Active Commute
 function completeCurrentRide() {
-  const fare = state.activeDriverTrip ? state.activeDriverTrip.fareOffer : 108;
+  const trip = state.activeDriverTrip;
+  const fare = trip ? trip.fareOffer : 108;
   state.activeDriverTrip = null;
-  showToast(`Commute completed! ₹${fare} fuel contribution settled via Direct UPI.`, 'success');
+  showToast(`Commute completed! ₹${fare} fuel contribution settled.`, 'success');
   renderDriverIncomingRequest();
+
+  // Prompt Rating & Feedback Modal
+  setTimeout(() => {
+    openRatingModal(trip ? {
+      driverName: trip.name,
+      avatar: trip.avatar,
+      pickup: trip.pickup,
+      drop: trip.drop,
+      vehicleName: 'Passenger Commute'
+    } : null);
+  }, 600);
 }
 
 function callPassenger() {
@@ -1221,6 +1294,201 @@ function callPassenger() {
 function chatPassengerWhatsApp() {
   showToast('Opening WhatsApp chat with passenger...', 'success');
   window.open('https://api.whatsapp.com/send?text=Hi%20there,%20I%20am%20your%20Routemate%20driver.%20Arriving%20at%20pickup%20point.', '_blank');
+}
+
+function callCurrentDriver() {
+  showToast('Calling verified driver (+91 98480 23145)...', 'info');
+}
+
+// ==========================================
+// LIVE TRIP TRACKING LAUNCHERS (CUSTOMER & DRIVER)
+// ==========================================
+
+function openLiveTrackingForRide(rideOrId, pin = '4821') {
+  let ride = rideOrId;
+  if (typeof rideOrId === 'number' || typeof rideOrId === 'string') {
+    ride = availableRides.find(r => r.id === rideOrId) || availableRides[0];
+  }
+
+  const trackingData = {
+    pickup: ride.pickup || 'Uppal Ring Road Metro',
+    drop: ride.drop || 'Jangaon Chowrasta',
+    driver: ride.driverName || 'Verified Commuter',
+    vehicle: ride.vehicleName || 'Commuter Vehicle',
+    plate: ride.vehicleNumber || 'TS 08 EK 4321',
+    avatar: ride.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=120&h=120&q=80',
+    pin: pin || '4821',
+    vehicleType: ride.vehicleType || 'bike'
+  };
+
+  openLiveTrackingModal(trackingData);
+}
+
+function openLiveTrackingForDriver() {
+  const trip = state.activeDriverTrip || state.incomingRequest;
+  const trackingData = {
+    pickup: trip.pickup,
+    drop: trip.drop,
+    driver: trip.name,
+    vehicle: 'Co-Commuter Seat',
+    plate: 'TS 08 HG 8421',
+    avatar: trip.avatar,
+    pin: trip.pin || '4821',
+    vehicleType: state.vehicleType || 'bike'
+  };
+
+  openLiveTrackingModal(trackingData);
+}
+
+function openLiveTrackingModal(data) {
+  const modal = document.getElementById('liveTrackingModal');
+  if (!modal) return;
+
+  // Set HUD elements
+  const origEl = document.getElementById('trackingOriginLabel');
+  const destEl = document.getElementById('trackingDestLabel');
+  const nameEl = document.getElementById('trackingPartyName');
+  const vehEl = document.getElementById('trackingPartyVehicle');
+  const avatarEl = document.getElementById('trackingPartyAvatar');
+  const pinEl = document.getElementById('trackingPartyPin');
+
+  if (origEl) origEl.textContent = data.pickup;
+  if (destEl) destEl.textContent = data.drop;
+  if (nameEl) nameEl.textContent = data.driver;
+  if (vehEl) vehEl.textContent = `${data.vehicle} • ${data.plate}`;
+  if (avatarEl) avatarEl.src = data.avatar;
+  if (pinEl) pinEl.textContent = data.pin;
+
+  modal.classList.remove('hidden');
+  if (window.lucide) lucide.createIcons();
+
+  // Initialize tracking map canvas
+  setTimeout(() => {
+    if (window.initTrackingMap) {
+      window.initTrackingMap(data);
+    }
+  }, 200);
+
+  showToast('Live Highway corridor GPS tracking active', 'info');
+}
+
+// ==========================================
+// EMERGENCY HELP & 24x7 INCIDENT DESK
+// ==========================================
+
+function triggerEmergencyHelp() {
+  const msg = `EMERGENCY / SAFETY INCIDENT REPORT: Routemate commuter on NH 163 Corridor (${state.pickup} ➔ ${state.drop}). Distance: ${state.distance}km. Plate: TS 08 HG 8421. Immediate support requested.`;
+  const whatsappUrl = `https://api.whatsapp.com/send?phone=919848023145&text=${encodeURIComponent(msg)}`;
+  
+  showToast('Connecting to 24x7 Routemate Safety Response Desk...', 'error');
+  window.open(whatsappUrl, '_blank');
+}
+
+// ==========================================
+// POST-RIDE RATING & SAFETY FEEDBACK
+// ==========================================
+
+let currentRatingScore = 5;
+
+function openRatingModal(tripInfo = null) {
+  const modal = document.getElementById('ratingFeedbackModal');
+  if (!modal) return;
+
+  const info = tripInfo || {
+    driverName: 'Ramesh Kumar',
+    avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=120&h=120&q=80',
+    pickup: state.pickup || 'Uppal',
+    drop: state.drop || 'Jangaon',
+    vehicleName: 'Bajaj Pulsar 150'
+  };
+
+  const nameEl = document.getElementById('ratingDriverName');
+  const routeEl = document.getElementById('ratingDriverRoute');
+  const avatarEl = document.getElementById('ratingDriverAvatar');
+
+  if (nameEl) nameEl.textContent = info.driverName;
+  if (routeEl) routeEl.textContent = `${info.pickup} ➔ ${info.drop} • ${info.vehicleName}`;
+  if (avatarEl) avatarEl.src = info.avatar;
+
+  // Reset star selection to 5
+  setRatingStar(5);
+  toggleSafetyIssueBox(false);
+  const chk = document.getElementById('hasSafetyConcern');
+  if (chk) chk.checked = false;
+
+  modal.classList.remove('hidden');
+  if (window.lucide) lucide.createIcons();
+}
+
+function setRatingStar(num) {
+  currentRatingScore = num;
+  const input = document.getElementById('selectedStarValue');
+  const label = document.getElementById('ratingStarLabel');
+  const container = document.getElementById('starRatingContainer');
+
+  if (input) input.value = num;
+
+  const descriptions = {
+    1: 'Poor (1.0 / 5.0)',
+    2: 'Needs Improvement (2.0 / 5.0)',
+    3: 'Average (3.0 / 5.0)',
+    4: 'Good (4.0 / 5.0)',
+    5: 'Excellent (5.0 / 5.0)'
+  };
+  if (label) label.textContent = descriptions[num] || `${num}.0 / 5.0`;
+
+  if (container) {
+    const buttons = container.querySelectorAll('.star-btn');
+    buttons.forEach((btn, index) => {
+      if (index < num) {
+        btn.classList.add('text-amber-400');
+        btn.classList.remove('text-slate-200');
+      } else {
+        btn.classList.remove('text-amber-400');
+        btn.classList.add('text-slate-200');
+      }
+    });
+  }
+}
+
+function toggleFeedbackTag(btn) {
+  if (!btn) return;
+  const isSelected = btn.classList.contains('bg-blue-50');
+  if (isSelected) {
+    btn.className = 'tag-chip px-2.5 py-1 rounded-lg border border-slate-200 bg-slate-50 text-slate-700 font-medium text-[11px] transition';
+  } else {
+    btn.className = 'tag-chip px-2.5 py-1 rounded-lg border border-blue-200 bg-blue-50 text-blue-700 font-semibold text-[11px] transition';
+  }
+}
+
+function toggleSafetyIssueBox(checked) {
+  const box = document.getElementById('safetyFeedbackText');
+  if (!box) return;
+  if (checked) {
+    box.classList.remove('hidden');
+    box.focus();
+  } else {
+    box.classList.add('hidden');
+    box.value = '';
+  }
+}
+
+function submitRideRating(event) {
+  event.preventDefault();
+  const star = currentRatingScore;
+  const hasConcern = document.getElementById('hasSafetyConcern')?.checked;
+  const concernText = document.getElementById('safetyFeedbackText')?.value || '';
+
+  closeModal('ratingFeedbackModal');
+
+  if (hasConcern && concernText.trim()) {
+    showToast('Safety feedback recorded. Our Safety Desk is reviewing this report.', 'error');
+  } else {
+    showToast(`Thank you! Rated ${star}★. Review submitted to community.`, 'success');
+  }
+
+  // Switch to explore tab
+  switchTab('explore');
 }
 
 // Tab navigation handler
@@ -1284,6 +1552,30 @@ function renderMyRides() {
         <div class="mt-2.5 flex items-center justify-between text-xs pt-2 border-t border-slate-100">
           <span class="font-medium text-slate-600">${b.time}</span>
           <span class="font-extrabold text-blue-700">₹${b.fare}</span>
+        </div>
+        <div class="mt-3 pt-2.5 border-t border-slate-100 grid grid-cols-2 gap-2 text-xs">
+          <button onclick="openLiveTrackingForRide(${JSON.stringify({
+            pickup: b.route.split('➔')[0]?.trim() || 'Uppal Ring Road Metro',
+            drop: b.route.split('➔')[1]?.trim() || 'Jangaon Chowrasta',
+            driverName: b.driver,
+            vehicleName: b.vehicle,
+            vehicleNumber: 'TS 08 EK 4321',
+            vehicleType: 'bike',
+            avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=120&h=120&q=80'
+          }).replace(/"/g, '&quot;')}, '4821')" class="py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold rounded-xl flex items-center justify-center gap-1.5 transition">
+            <i data-lucide="navigation" class="w-3.5 h-3.5 text-blue-600"></i>
+            <span>Track Live</span>
+          </button>
+          <button onclick="openRatingModal(${JSON.stringify({
+            driverName: b.driver,
+            avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=120&h=120&q=80',
+            pickup: b.route.split('➔')[0]?.trim() || 'Uppal',
+            drop: b.route.split('➔')[1]?.trim() || 'Jangaon',
+            vehicleName: b.vehicle
+          }).replace(/"/g, '&quot;')})" class="py-2 bg-amber-50 hover:bg-amber-100 text-amber-800 font-bold rounded-xl border border-amber-200 flex items-center justify-center gap-1.5 transition">
+            <i data-lucide="star" class="w-3.5 h-3.5 text-amber-500"></i>
+            <span>Rate Trip</span>
+          </button>
         </div>
       </div>
     `).join('');

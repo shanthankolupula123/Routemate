@@ -125,15 +125,18 @@
             <!-- Route Dotted Connector Line -->
             <div class="route-connector"></div>
 
-            <!-- Pickup Location -->
-            <div class="flex items-center gap-3 bg-slate-50 border border-slate-200/90 rounded-2xl px-3.5 py-2.5 focus-within:border-blue-500 focus-within:bg-white transition">
+            <!-- Pickup Location with GPS Locate Button -->
+            <div class="flex items-center gap-3 bg-slate-50 border border-slate-200/90 rounded-2xl px-3.5 py-2.5 focus-within:border-blue-500 focus-within:bg-white transition relative">
               <div class="w-4 h-4 rounded-full bg-emerald-500 flex items-center justify-center flex-shrink-0 z-10">
                 <span class="w-1.5 h-1.5 rounded-full bg-white"></span>
               </div>
-              <div class="flex-1">
+              <div class="flex-1 pr-9">
                 <label class="block text-[10px] font-semibold text-slate-400 uppercase tracking-wider leading-tight">Pickup Location</label>
                 <input id="inputPickup" type="text" value="Uppal, Hyderabad" class="w-full bg-transparent text-sm font-bold text-slate-900 focus:outline-none placeholder-slate-400" placeholder="e.g. Uppal Depot or Metro" />
               </div>
+              <button id="btnLocateMe" type="button" onclick="detectCurrentLocation()" title="Use my current GPS location" class="absolute right-3.5 top-1/2 -translate-y-1/2 p-1.5 rounded-xl bg-white hover:bg-blue-50 text-blue-600 border border-slate-200 shadow-xs hover:border-blue-300 transition active:scale-95 flex items-center justify-center z-10">
+                <i data-lucide="locate-fixed" class="w-4 h-4"></i>
+              </button>
             </div>
 
             <!-- Swap Locations Button -->
@@ -626,15 +629,33 @@
         </div>
 
         <div class="mt-4 space-y-3 text-xs">
-          <!-- SOS Button -->
-          <div class="bg-rose-50 border border-rose-200 rounded-2xl p-3.5">
+          <!-- SOS 112 & Safety Help Dual Action Cards -->
+          <div class="bg-rose-50 border border-rose-200 rounded-2xl p-3.5 space-y-2.5">
             <div class="flex items-center justify-between">
               <div>
-                <h4 class="font-bold text-rose-900">Emergency 112 Dispatch</h4>
-                <p class="text-[10px] text-rose-700 mt-0.5">Instant connection with Highway Police Helpline</p>
+                <h4 class="font-bold text-rose-900 flex items-center gap-1.5">
+                  <i data-lucide="phone-call" class="w-4 h-4 text-rose-600"></i>
+                  Emergency 112 Dispatch
+                </h4>
+                <p class="text-[10px] text-rose-700 mt-0.5">Direct connection with Police & Highway Patrol</p>
               </div>
-              <button onclick="showToast('Connecting to Emergency Services (112)...', 'error')" class="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl font-bold text-xs shadow-sm">
+              <button onclick="showToast('Calling Highway Emergency Police Helpline (112)...', 'error')" class="px-3.5 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl font-bold text-xs shadow-sm active:scale-95 transition">
                 SOS Call
+              </button>
+            </div>
+
+            <!-- Emergency Safety Help Desk -->
+            <div class="pt-2 border-t border-rose-200/70 flex items-center justify-between">
+              <div>
+                <h4 class="font-bold text-slate-800 flex items-center gap-1.5">
+                  <i data-lucide="life-buoy" class="w-4 h-4 text-blue-600"></i>
+                  Routemate 24x7 Safety Help
+                </h4>
+                <p class="text-[10px] text-slate-500 mt-0.5">Live Incident Support Desk & Ride Monitor</p>
+              </div>
+              <button onclick="triggerEmergencyHelp()" class="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold text-xs shadow-xs active:scale-95 transition flex items-center gap-1">
+                <i data-lucide="shield" class="w-3.5 h-3.5"></i>
+                <span>Get Help</span>
               </button>
             </div>
           </div>
@@ -646,26 +667,30 @@
                 <h4 class="font-bold text-emerald-900">Share Live Corridor Trip</h4>
                 <p class="text-[10px] text-emerald-700 mt-0.5">Send route & vehicle number to family</p>
               </div>
-              <button onclick="shareTripWithFamily()" class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold text-xs shadow-sm flex items-center gap-1">
+              <button onclick="shareTripWithFamily()" class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold text-xs shadow-sm flex items-center gap-1 active:scale-95 transition">
                 <i data-lucide="share-2" class="w-3.5 h-3.5"></i>
                 <span>Share</span>
               </button>
             </div>
           </div>
 
-          <!-- Commuter Safety Rules -->
-          <div class="p-3 bg-slate-50 rounded-2xl border border-slate-200/80 space-y-1.5 text-[11px] text-slate-600">
-            <div class="flex items-center gap-2 text-slate-800 font-semibold">
-              <i data-lucide="check" class="w-3.5 h-3.5 text-emerald-600 stroke-[3]"></i>
-              <span>Both Rider & Driver must verify Govt ID</span>
+          <!-- Commuter Safety & ID Verification Rules -->
+          <div class="p-3.5 bg-slate-50 rounded-2xl border border-slate-200/80 space-y-2 text-[11px] text-slate-600">
+            <div class="flex items-start gap-2">
+              <span class="p-0.5 bg-amber-100 text-amber-800 rounded font-bold text-[9px] uppercase tracking-wider mt-0.5">Mandatory</span>
+              <p class="text-slate-800 font-semibold leading-tight">
+                <strong>Drivers (Ride Providers):</strong> Must verify Driving License & Vehicle RC before offering corridor seats.
+              </p>
             </div>
-            <div class="flex items-center gap-2 text-slate-800 font-semibold">
-              <i data-lucide="check" class="w-3.5 h-3.5 text-emerald-600 stroke-[3]"></i>
-              <span>Helmets mandatory for all two-wheeler rides</span>
+            <div class="flex items-start gap-2">
+              <span class="p-0.5 bg-emerald-100 text-emerald-800 rounded font-bold text-[9px] uppercase tracking-wider mt-0.5">Fast Pass</span>
+              <p class="text-slate-800 font-medium leading-tight">
+                <strong>Passengers (Riders):</strong> No Government ID required. Fast verification via phone number & OTP.
+              </p>
             </div>
-            <div class="flex items-center gap-2 text-slate-800 font-semibold">
-              <i data-lucide="check" class="w-3.5 h-3.5 text-emerald-600 stroke-[3]"></i>
-              <span>Direct cashless UPI payment encouraged</span>
+            <div class="flex items-center gap-2 text-slate-600 pt-1 border-t border-slate-200/60 text-[10px]">
+              <i data-lucide="check" class="w-3 h-3 text-emerald-600 stroke-[3]"></i>
+              <span>Helmets mandatory for all bike pillion commuters</span>
             </div>
           </div>
         </div>
@@ -673,6 +698,171 @@
         <button onclick="closeModal('safetyModal')" class="mt-5 w-full py-3 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold transition">
           Close Safety Hub
         </button>
+      </div>
+    </div>
+
+    <!-- Live Trip Tracking Modal (Customer & Driver) -->
+    <div id="liveTrackingModal" class="modal-backdrop fixed inset-0 z-50 flex items-center justify-center p-3 hidden">
+      <div class="bg-white rounded-3xl max-w-md w-full shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200 flex flex-col max-h-[92vh]">
+        <!-- Top Bar -->
+        <div class="p-4 border-b border-slate-100 flex items-center justify-between bg-white z-10">
+          <div class="flex items-center gap-2">
+            <span class="w-2.5 h-2.5 rounded-full bg-emerald-500 live-pulse"></span>
+            <div>
+              <h3 class="text-sm font-extrabold text-slate-900">Live Highway Corridor Tracking</h3>
+              <p class="text-[10px] text-slate-500">NH 163 Corridor • Live GPS Route</p>
+            </div>
+          </div>
+          <button onclick="closeModal('liveTrackingModal')" class="p-1.5 text-slate-400 hover:text-slate-600 rounded-full hover:bg-slate-100">
+            <i data-lucide="x" class="w-5 h-5"></i>
+          </button>
+        </div>
+
+        <!-- Live Google Map Canvas -->
+        <div class="relative w-full h-64 bg-slate-100 flex-shrink-0">
+          <div id="trackingMapCanvas" class="w-full h-full"></div>
+          
+          <!-- Live Floating Route HUD Badge -->
+          <div class="absolute top-3 left-3 z-10 bg-white/95 backdrop-blur-md px-3.5 py-2 rounded-2xl border border-slate-200 shadow-md">
+            <p class="text-[10px] text-slate-400 font-semibold uppercase">Estimated Arrival</p>
+            <div class="flex items-baseline gap-1.5">
+              <span id="trackingLiveEta" class="text-lg font-black text-blue-700">18 mins</span>
+              <span id="trackingLiveDist" class="text-xs font-bold text-slate-600">84 km</span>
+            </div>
+          </div>
+
+          <!-- Emergency Quick Access on Map -->
+          <div class="absolute top-3 right-3 z-10 flex flex-col gap-1.5">
+            <button onclick="showToast('Calling Emergency Services 112...', 'error')" title="Emergency SOS" class="w-8 h-8 rounded-full bg-rose-600 text-white shadow-md flex items-center justify-center font-bold text-xs hover:bg-rose-700 transition">
+              SOS
+            </button>
+            <button onclick="triggerEmergencyHelp()" title="Safety Help Desk" class="w-8 h-8 rounded-full bg-white text-blue-600 shadow-md border border-slate-200 flex items-center justify-center transition hover:bg-blue-50">
+              <i data-lucide="life-buoy" class="w-4 h-4"></i>
+            </button>
+          </div>
+        </div>
+
+        <!-- Trip Details & Actions -->
+        <div class="p-4 space-y-3 overflow-y-auto flex-1">
+          <!-- Progress Bar -->
+          <div>
+            <div class="flex justify-between text-[11px] font-semibold text-slate-600 mb-1">
+              <span id="trackingOriginLabel">Uppal Metro Gate 2</span>
+              <span id="trackingDestLabel">Jangaon Chowrasta</span>
+            </div>
+            <div class="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
+              <div id="trackingProgressBar" class="bg-blue-600 h-full rounded-full transition-all duration-500" style="width: 35%;"></div>
+            </div>
+          </div>
+
+          <!-- Driver / Co-Commuter Info -->
+          <div id="trackingPartyInfo" class="p-3 bg-slate-50 rounded-2xl border border-slate-200/80 flex items-center justify-between text-xs">
+            <div class="flex items-center gap-3">
+              <img id="trackingPartyAvatar" src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=120&h=120&q=80" class="w-10 h-10 rounded-full object-cover border border-blue-500" />
+              <div>
+                <p id="trackingPartyName" class="font-bold text-slate-900">Ramesh Kumar</p>
+                <p id="trackingPartyVehicle" class="text-[11px] text-slate-500">Bajaj Pulsar 150 • TS 08 EK 4321</p>
+              </div>
+            </div>
+            <div class="text-right">
+              <span class="text-[10px] font-bold text-blue-700 bg-blue-100 px-2 py-0.5 rounded-full">Boarding PIN</span>
+              <p id="trackingPartyPin" class="text-sm font-mono font-extrabold text-slate-900 mt-0.5">4821</p>
+            </div>
+          </div>
+
+          <!-- Quick Action Buttons -->
+          <div class="grid grid-cols-2 gap-2 text-xs">
+            <button onclick="callCurrentDriver()" class="py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold rounded-xl transition flex items-center justify-center gap-1.5">
+              <i data-lucide="phone" class="w-3.5 h-3.5 text-blue-600"></i>
+              <span>Call</span>
+            </button>
+            <button onclick="shareTripWithFamily()" class="py-2.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 font-bold rounded-xl border border-emerald-200 transition flex items-center justify-center gap-1.5">
+              <i data-lucide="share-2" class="w-3.5 h-3.5 text-emerald-600"></i>
+              <span>Share Trip</span>
+            </button>
+          </div>
+
+          <!-- Complete / Rate Commute shortcut -->
+          <button onclick="closeModal('liveTrackingModal'); openRatingModal();" class="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-sm transition flex items-center justify-center gap-1.5">
+            <i data-lucide="star" class="w-3.5 h-3.5"></i>
+            <span>Arrived? Rate & Finish Trip</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Post-Ride Rating & Safety Feedback Modal -->
+    <div id="ratingFeedbackModal" class="modal-backdrop fixed inset-0 z-50 flex items-center justify-center p-4 hidden">
+      <div class="bg-white rounded-3xl max-w-sm w-full shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200 p-6">
+        <div class="flex items-center justify-between pb-3 border-b border-slate-100">
+          <div class="flex items-center gap-2">
+            <div class="w-8 h-8 rounded-full bg-amber-100 text-amber-600 flex items-center justify-center">
+              <i data-lucide="star" class="w-4 h-4 fill-amber-500"></i>
+            </div>
+            <div>
+              <h3 class="text-base font-extrabold text-slate-900">Trip Completed!</h3>
+              <p class="text-[10px] text-slate-500">Rate your corridor co-commute</p>
+            </div>
+          </div>
+          <button onclick="closeModal('ratingFeedbackModal')" class="p-1.5 text-slate-400 hover:text-slate-600 rounded-full hover:bg-slate-100">
+            <i data-lucide="x" class="w-5 h-5"></i>
+          </button>
+        </div>
+
+        <form onsubmit="submitRideRating(event)" class="mt-4 space-y-4 text-xs">
+          <!-- Driver Info Preview -->
+          <div class="text-center">
+            <img id="ratingDriverAvatar" src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=120&h=120&q=80" class="w-16 h-16 rounded-full object-cover border-2 border-blue-600 mx-auto shadow-sm" />
+            <h4 id="ratingDriverName" class="font-bold text-slate-900 text-sm mt-2">Ramesh Kumar</h4>
+            <p id="ratingDriverRoute" class="text-[11px] text-slate-500">Uppal ➔ Jangaon • Pulsar 150</p>
+          </div>
+
+          <!-- 5-Star Interactive Rating -->
+          <div class="text-center">
+            <p class="text-[11px] font-semibold text-slate-600 mb-1.5">How was your ride experience?</p>
+            <div id="starRatingContainer" class="flex justify-center items-center gap-2">
+              <button type="button" onclick="setRatingStar(1)" class="star-btn p-1 text-amber-400 hover:scale-125 transition text-2xl">★</button>
+              <button type="button" onclick="setRatingStar(2)" class="star-btn p-1 text-amber-400 hover:scale-125 transition text-2xl">★</button>
+              <button type="button" onclick="setRatingStar(3)" class="star-btn p-1 text-amber-400 hover:scale-125 transition text-2xl">★</button>
+              <button type="button" onclick="setRatingStar(4)" class="star-btn p-1 text-amber-400 hover:scale-125 transition text-2xl">★</button>
+              <button type="button" onclick="setRatingStar(5)" class="star-btn p-1 text-amber-400 hover:scale-125 transition text-2xl">★</button>
+            </div>
+            <input type="hidden" id="selectedStarValue" value="5" />
+            <p id="ratingStarLabel" class="text-[11px] font-bold text-blue-600 mt-1">Excellent (5.0 / 5.0)</p>
+          </div>
+
+          <!-- Praise Tag Chips -->
+          <div>
+            <label class="block text-[11px] font-bold text-slate-700 mb-1.5">What did you like?</label>
+            <div class="flex flex-wrap gap-1.5">
+              <button type="button" onclick="toggleFeedbackTag(this)" class="tag-chip px-2.5 py-1 rounded-lg border border-blue-200 bg-blue-50 text-blue-700 font-semibold text-[11px] transition">
+                🛡️ Safe Driving
+              </button>
+              <button type="button" onclick="toggleFeedbackTag(this)" class="tag-chip px-2.5 py-1 rounded-lg border border-slate-200 bg-slate-50 text-slate-700 font-medium text-[11px] transition">
+                ⏰ On Time
+              </button>
+              <button type="button" onclick="toggleFeedbackTag(this)" class="tag-chip px-2.5 py-1 rounded-lg border border-slate-200 bg-slate-50 text-slate-700 font-medium text-[11px] transition">
+                🧹 Clean Vehicle
+              </button>
+              <button type="button" onclick="toggleFeedbackTag(this)" class="tag-chip px-2.5 py-1 rounded-lg border border-slate-200 bg-slate-50 text-slate-700 font-medium text-[11px] transition">
+                💬 Polite & Friendly
+              </button>
+            </div>
+          </div>
+
+          <!-- Safety Issue Toggle & Comment -->
+          <div class="pt-2 border-t border-slate-100">
+            <label class="flex items-center gap-2 cursor-pointer mb-2">
+              <input type="checkbox" id="hasSafetyConcern" onchange="toggleSafetyIssueBox(this.checked)" class="text-rose-600 rounded w-4 h-4" />
+              <span class="text-[11px] font-bold text-rose-700">Report a safety or driving concern</span>
+            </label>
+            <textarea id="safetyFeedbackText" placeholder="Describe any concerns (rash driving, route deviations, etc.). This is reviewed by Routemate Safety Desk." rows="2" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs text-slate-900 focus:bg-white focus:border-rose-500 focus:outline-none hidden"></textarea>
+          </div>
+
+          <button type="submit" class="w-full py-3.5 gradient-brand text-white rounded-2xl text-xs font-bold shadow-lg shadow-blue-500/25 active:scale-95 transition">
+            Submit Rating & Feedback
+          </button>
+        </form>
       </div>
     </div>
 
