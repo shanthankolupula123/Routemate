@@ -2,7 +2,7 @@
 // Configured with Project URL & Publishable Key
 
 const SUPABASE_CONFIG = {
-  url: 'https://hjieeizfbvubkhmlmdg.supabase.co',
+  url: 'https://hjieeilzfbvubkhmlmdg.supabase.co',
   publishableKey: 'sb_publishable_FD8-opedLq151SNuBbWp9g_bLI5hB_a'
 };
 
@@ -12,7 +12,7 @@ let supabase = null;
 if (typeof window !== 'undefined' && window.supabase && window.supabase.createClient) {
   try {
     supabase = window.supabase.createClient(SUPABASE_CONFIG.url, SUPABASE_CONFIG.publishableKey);
-    console.log('✅ Supabase client initialized for Routemate (hjieeizfbvubkhmlmdg.supabase.co)');
+    console.log('✅ Supabase client initialized for Routemate (hjieeilzfbvubkhmlmdg.supabase.co)');
   } catch (err) {
     console.warn('⚠️ Error initializing Supabase client:', err);
   }
