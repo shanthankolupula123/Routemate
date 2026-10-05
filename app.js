@@ -565,6 +565,9 @@ function swapLocations() {
   state.distance = estimateDistance(state.pickup, state.drop);
 
   updateUI();
+  if (window.updateRouteOnMap) {
+    window.updateRouteOnMap(state.pickup, state.drop);
+  }
   showToast('Route reversed', 'info');
 }
 
@@ -579,6 +582,9 @@ function setPresetRoute(pickup, drop) {
     state.drop = drop;
     state.distance = estimateDistance(pickup, drop);
     updateUI();
+    if (window.updateRouteOnMap) {
+      window.updateRouteOnMap(pickup, drop);
+    }
     showToast(`Route set to ${pickup} ➔ ${drop}`, 'info');
   }
 }
@@ -1482,6 +1488,14 @@ document.addEventListener('DOMContentLoaded', () => {
       state.drop = e.target.value;
       state.distance = estimateDistance(state.pickup, state.drop);
       updateUI();
+    });
+
+    pickupInput.addEventListener('change', () => {
+      if (window.updateRouteOnMap) window.updateRouteOnMap(state.pickup, state.drop);
+    });
+
+    dropInput.addEventListener('change', () => {
+      if (window.updateRouteOnMap) window.updateRouteOnMap(state.pickup, state.drop);
     });
   }
 
