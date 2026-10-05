@@ -131,10 +131,10 @@
                 <span class="w-1.5 h-1.5 rounded-full bg-white"></span>
               </div>
               <div class="flex-1 pr-9">
-                <label class="block text-[10px] font-semibold text-slate-400 uppercase tracking-wider leading-tight">Pickup Location</label>
-                <input id="inputPickup" type="text" value="Uppal, Hyderabad" class="w-full bg-transparent text-sm font-bold text-slate-900 focus:outline-none placeholder-slate-400" placeholder="e.g. Uppal Depot or Metro" />
+                <label class="block text-[10px] font-semibold text-slate-400 uppercase tracking-wider leading-tight">Pickup Location (Area / LandMark)</label>
+                <input id="inputPickup" type="text" value="Uppal Ring Road Metro, Hyderabad" class="w-full bg-transparent text-sm font-bold text-slate-900 focus:outline-none placeholder-slate-400" placeholder="e.g. Uppal Depot, Boduppal, Peerzadiguda" />
               </div>
-              <button id="btnLocateMe" type="button" onclick="detectCurrentLocation()" title="Use my current GPS location" class="absolute right-3.5 top-1/2 -translate-y-1/2 p-1.5 rounded-xl bg-white hover:bg-blue-50 text-blue-600 border border-slate-200 shadow-xs hover:border-blue-300 transition active:scale-95 flex items-center justify-center z-10">
+              <button id="btnLocateMe" type="button" onclick="detectCurrentLocation()" title="Detect my current area via GPS" class="absolute right-3.5 top-1/2 -translate-y-1/2 p-1.5 rounded-xl bg-white hover:bg-blue-50 text-blue-600 border border-slate-200 shadow-xs hover:border-blue-300 transition active:scale-95 flex items-center justify-center z-10">
                 <i data-lucide="locate-fixed" class="w-4 h-4"></i>
               </button>
             </div>
@@ -146,15 +146,18 @@
               </button>
             </div>
 
-            <!-- Drop Location -->
-            <div class="flex items-center gap-3 bg-slate-50 border border-slate-200/90 rounded-2xl px-3.5 py-2.5 focus-within:border-blue-500 focus-within:bg-white transition">
+            <!-- Drop Location with Quick Select Button -->
+            <div class="flex items-center gap-3 bg-slate-50 border border-slate-200/90 rounded-2xl px-3.5 py-2.5 focus-within:border-blue-500 focus-within:bg-white transition relative">
               <div class="w-4 h-4 rounded-full bg-blue-600 flex items-center justify-center flex-shrink-0 z-10">
                 <span class="w-1.5 h-1.5 rounded-full bg-white"></span>
               </div>
-              <div class="flex-1">
-                <label class="block text-[10px] font-semibold text-slate-400 uppercase tracking-wider leading-tight">Drop Location</label>
-                <input id="inputDrop" type="text" value="Jangaon" class="w-full bg-transparent text-sm font-bold text-slate-900 focus:outline-none placeholder-slate-400" placeholder="e.g. Jangaon Railway Station" />
+              <div class="flex-1 pr-9">
+                <label class="block text-[10px] font-semibold text-slate-400 uppercase tracking-wider leading-tight">Destination (Area / Town / Station)</label>
+                <input id="inputDrop" type="text" value="Jangaon Bus Depot / Chowrasta" class="w-full bg-transparent text-sm font-bold text-slate-900 focus:outline-none placeholder-slate-400" placeholder="e.g. Jangaon Chowrasta, Bhongir Fort, Hanamkonda" />
               </div>
+              <button id="btnDropQuickSelect" type="button" onclick="promptDropQuickSelect()" title="Choose destination area" class="absolute right-3.5 top-1/2 -translate-y-1/2 p-1.5 rounded-xl bg-white hover:bg-blue-50 text-blue-600 border border-slate-200 shadow-xs hover:border-blue-300 transition active:scale-95 flex items-center justify-center z-10">
+                <i data-lucide="map-pin" class="w-4 h-4"></i>
+              </button>
             </div>
           </div>
 
@@ -597,8 +600,8 @@
 
     <!-- Modals -->
     <!-- Booking Modal -->
-    <div id="bookingModal" class="modal-backdrop fixed inset-0 z-50 flex items-center justify-center p-4 hidden">
-      <div id="bookingModalContent" class="bg-white rounded-3xl max-w-sm w-full shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200">
+    <div id="bookingModal" class="modal-backdrop fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 hidden">
+      <div id="bookingModalContent" class="bg-white rounded-3xl max-w-md w-full max-h-[92vh] overflow-y-auto shadow-2xl animate-in fade-in zoom-in duration-200">
         <!-- Populated via openBookingModal() in app.js -->
       </div>
     </div>
@@ -782,16 +785,24 @@
             </button>
           </div>
 
-          <!-- Complete / Rate Commute shortcut -->
-          <button onclick="closeModal('liveTrackingModal'); openRatingModal();" class="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-sm transition flex items-center justify-center gap-1.5">
-            <i data-lucide="star" class="w-3.5 h-3.5"></i>
-            <span>Arrived? Rate & Finish Trip</span>
-          </button>
+          <!-- Complete / Rate Commute shortcut (Passenger Only vs Driver) -->
+          <div id="trackingPassengerActionContainer">
+            <button onclick="closeModal('liveTrackingModal'); openRatingModal();" class="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-sm transition flex items-center justify-center gap-1.5">
+              <i data-lucide="star" class="w-3.5 h-3.5"></i>
+              <span>Arrived? Rate Driver & Finish Trip</span>
+            </button>
+          </div>
+          <div id="trackingDriverActionContainer" class="hidden">
+            <button onclick="closeModal('liveTrackingModal');" class="w-full py-3 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold shadow-sm transition flex items-center justify-center gap-1.5">
+              <i data-lucide="check" class="w-3.5 h-3.5"></i>
+              <span>Close Live Tracking</span>
+            </button>
+          </div>
         </div>
       </div>
     </div>
 
-    <!-- Post-Ride Rating & Safety Feedback Modal -->
+    <!-- Post-Ride Rating & Safety Feedback Modal (Passenger Only) -->
     <div id="ratingFeedbackModal" class="modal-backdrop fixed inset-0 z-50 flex items-center justify-center p-4 hidden">
       <div class="bg-white rounded-3xl max-w-sm w-full shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200 p-6">
         <div class="flex items-center justify-between pb-3 border-b border-slate-100">
@@ -800,8 +811,8 @@
               <i data-lucide="star" class="w-4 h-4 fill-amber-500"></i>
             </div>
             <div>
-              <h3 class="text-base font-extrabold text-slate-900">Trip Completed!</h3>
-              <p class="text-[10px] text-slate-500">Rate your corridor co-commute</p>
+              <h3 class="text-base font-extrabold text-slate-900">Rate Your Driver</h3>
+              <p class="text-[10px] text-slate-500">Customer Journey & Driver Feedback</p>
             </div>
           </div>
           <button onclick="closeModal('ratingFeedbackModal')" class="p-1.5 text-slate-400 hover:text-slate-600 rounded-full hover:bg-slate-100">

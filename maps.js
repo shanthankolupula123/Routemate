@@ -136,7 +136,7 @@ function attachPlacesAutocomplete() {
 
   const options = {
     componentRestrictions: { country: 'in' },
-    fields: ['address_components', 'geometry', 'name', 'formatted_address']
+    fields: ['address_components', 'geometry', 'name', 'formatted_address', 'vicinity']
   };
 
   if (pickupInput) {
@@ -144,14 +144,34 @@ function attachPlacesAutocomplete() {
       gPickupAutocomplete = new google.maps.places.Autocomplete(pickupInput, options);
       gPickupAutocomplete.addListener('place_changed', () => {
         const place = gPickupAutocomplete.getPlace();
-        if (place && place.name) {
-          pickupInput.value = place.formatted_address || place.name;
-          if (typeof state !== 'undefined') {
-            state.pickup = pickupInput.value;
+        if (place) {
+          let fullLocation = place.formatted_address || place.name || '';
+          if (place.name && place.formatted_address && !place.formatted_address.toLowerCase().includes(place.name.toLowerCase())) {
+            fullLocation = `${place.name}, ${place.formatted_address}`;
           }
-          const currentDrop = document.getElementById('inputDrop')?.value || 'Jangaon';
-          updateRouteOnMap(pickupInput.value, currentDrop);
+          pickupInput.value = fullLocation;
+          if (typeof state !== 'undefined') {
+            state.pickup = fullLocation;
+            if (typeof estimateDistance === 'function') {
+              state.distance = estimateDistance(state.pickup, state.drop);
+              if (typeof updateUI === 'function') updateUI();
+            }
+          }
+          const currentDrop = document.getElementById('inputDrop')?.value || 'Jangaon Bus Depot / Chowrasta';
+          updateRouteOnMap(fullLocation, currentDrop);
         }
+      });
+
+      pickupInput.addEventListener('change', () => {
+        if (typeof state !== 'undefined') {
+          state.pickup = pickupInput.value;
+          if (typeof estimateDistance === 'function') {
+            state.distance = estimateDistance(state.pickup, state.drop);
+            if (typeof updateUI === 'function') updateUI();
+          }
+        }
+        const currentDrop = document.getElementById('inputDrop')?.value || 'Jangaon Bus Depot / Chowrasta';
+        updateRouteOnMap(pickupInput.value, currentDrop);
       });
     } catch (e) {
       console.warn('Autocomplete setup for pickup input skipped:', e);
@@ -163,18 +183,108 @@ function attachPlacesAutocomplete() {
       gDropAutocomplete = new google.maps.places.Autocomplete(dropInput, options);
       gDropAutocomplete.addListener('place_changed', () => {
         const place = gDropAutocomplete.getPlace();
-        if (place && place.name) {
-          dropInput.value = place.formatted_address || place.name;
-          if (typeof state !== 'undefined') {
-            state.drop = dropInput.value;
+        if (place) {
+          let fullLocation = place.formatted_address || place.name || '';
+          if (place.name && place.formatted_address && !place.formatted_address.toLowerCase().includes(place.name.toLowerCase())) {
+            fullLocation = `${place.name}, ${place.formatted_address}`;
           }
-          const currentPickup = document.getElementById('inputPickup')?.value || 'Uppal, Hyderabad';
-          updateRouteOnMap(currentPickup, dropInput.value);
+          dropInput.value = fullLocation;
+          if (typeof state !== 'undefined') {
+            state.drop = fullLocation;
+            if (typeof estimateDistance === 'function') {
+              state.distance = estimateDistance(state.pickup, state.drop);
+              if (typeof updateUI === 'function') updateUI();
+            }
+          }
+          const currentPickup = document.getElementById('inputPickup')?.value || 'Uppal Ring Road Metro, Hyderabad';
+          updateRouteOnMap(currentPickup, fullLocation);
         }
+      });
+
+      dropInput.addEventListener('change', () => {
+        if (typeof state !== 'undefined') {
+          state.drop = dropInput.value;
+          if (typeof estimateDistance === 'function') {
+            state.distance = estimateDistance(state.pickup, state.drop);
+            if (typeof updateUI === 'function') updateUI();
+          }
+        }
+        const currentPickup = document.getElementById('inputPickup')?.value || 'Uppal Ring Road Metro, Hyderabad';
+        updateRouteOnMap(currentPickup, dropInput.value);
       });
     } catch (e) {
       console.warn('Autocomplete setup for drop input skipped:', e);
     }
+  }
+}
+
+// Quick modal selector for destination hubs with complete area names
+function promptDropQuickSelect() {
+  const options = [
+    'Jangaon Bus Depot / Chowrasta',
+    'Warangal Railway Station / Hanamkonda',
+    'Bhongir Fort Chowrasta',
+    'Aler Highway Junction',
+    'Ghatkesar Town / ORR Exit 9',
+    'Bibinagar AIIMS Highway Junction',
+    'Yadagirigutta Temple Arch'
+  ];
+
+  let dropdownMenu = document.getElementById('dropQuickSelectMenu');
+  if (dropdownMenu) dropdownMenu.remove();
+
+  dropdownMenu = document.createElement('div');
+  dropdownMenu.id = 'dropQuickSelectMenu';
+  dropdownMenu.className = 'fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs';
+  
+  dropdownMenu.innerHTML = `
+    <div class="bg-white rounded-3xl max-w-sm w-full p-5 shadow-2xl space-y-3 animate-in fade-in zoom-in duration-200">
+      <div class="flex items-center justify-between pb-2 border-b border-slate-100">
+        <div class="flex items-center gap-2">
+          <div class="w-8 h-8 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center">
+            <i data-lucide="map-pin" class="w-4 h-4"></i>
+          </div>
+          <div>
+            <h4 class="font-bold text-slate-900 text-sm">Select Destination Area</h4>
+            <p class="text-[10px] text-slate-500">Popular Highway Corridor Hubs</p>
+          </div>
+        </div>
+        <button onclick="document.getElementById('dropQuickSelectMenu').remove()" class="p-1.5 text-slate-400 hover:text-slate-600 rounded-full hover:bg-slate-100">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+      <div class="space-y-1.5 max-h-64 overflow-y-auto pt-1">
+        ${options.map(opt => `
+          <button type="button" onclick="selectDestinationArea('${opt}')" class="w-full text-left p-3 rounded-2xl hover:bg-blue-50 border border-slate-100 hover:border-blue-200 transition flex items-center justify-between group">
+            <span class="text-xs font-bold text-slate-800 group-hover:text-blue-700">${opt}</span>
+            <i data-lucide="chevron-right" class="w-4 h-4 text-slate-300 group-hover:text-blue-600"></i>
+          </button>
+        `).join('')}
+      </div>
+    </div>
+  `;
+  document.body.appendChild(dropdownMenu);
+  if (window.lucide) lucide.createIcons();
+}
+
+function selectDestinationArea(destinationName) {
+  const dropInput = document.getElementById('inputDrop');
+  if (dropInput) {
+    dropInput.value = destinationName;
+    if (typeof state !== 'undefined') {
+      state.drop = destinationName;
+      if (typeof estimateDistance === 'function') {
+        state.distance = estimateDistance(state.pickup, state.drop);
+      }
+      if (typeof updateUI === 'function') updateUI();
+    }
+    const currentPickup = document.getElementById('inputPickup')?.value || 'Uppal Ring Road Metro, Hyderabad';
+    updateRouteOnMap(currentPickup, destinationName);
+  }
+  const menu = document.getElementById('dropQuickSelectMenu');
+  if (menu) menu.remove();
+  if (typeof showToast === 'function') {
+    showToast(`Destination area set: ${destinationName}`, 'success');
   }
 }
 
@@ -318,47 +428,100 @@ function detectCurrentLocation() {
   }
 
   if (typeof showToast === 'function') {
-    showToast('Detecting your current location...', 'info');
+    showToast('Detecting your current area...', 'info');
   }
 
   navigator.geolocation.getCurrentPosition(
-    (position) => {
+    async (position) => {
       const lat = position.coords.latitude;
       const lng = position.coords.longitude;
       const latLng = { lat, lng };
 
-      if (window.google && google.maps && google.maps.Geocoder) {
-        const geocoder = new google.maps.Geocoder();
-        geocoder.geocode({ location: latLng }, (results, status) => {
-          if (status === 'OK' && results && results[0]) {
-            // Find a concise address or formatted address
-            const formatted = results[0].formatted_address;
-            const shortName = results[0].address_components?.[1]?.long_name || results[0].address_components?.[0]?.long_name;
-            const displayAddress = shortName ? `${shortName}, ${results[0].address_components?.[2]?.long_name || 'Hyderabad'}` : formatted;
+      let resolvedAreaName = '';
 
-            if (pickupInput) {
-              pickupInput.value = displayAddress;
-            }
-            if (typeof state !== 'undefined') {
-              state.pickup = displayAddress;
-            }
-
-            // Recenter and re-route
-            const currentDrop = document.getElementById('inputDrop')?.value || 'Jangaon';
-            updateRouteOnMap(displayAddress, currentDrop);
-
-            if (typeof showToast === 'function') {
-              showToast(`Current location detected: ${displayAddress}`, 'success');
-            }
-          } else {
-            fallbackCoords(latLng);
+      // Tier 1: Try Google Maps Geocoder if available
+      try {
+        if (window.google && google.maps && google.maps.Geocoder) {
+          const geocoder = new google.maps.Geocoder();
+          const googleResult = await new Promise((resolve) => {
+            geocoder.geocode({ location: latLng }, (results, status) => {
+              if (status === 'OK' && results && results.length > 0) {
+                // Use formatted address or meaningful locality/sublocality
+                const formatted = results[0].formatted_address;
+                const components = results[0].address_components || [];
+                const sublocality = components.find(c => c.types.includes('sublocality') || c.types.includes('neighborhood'))?.long_name;
+                const locality = components.find(c => c.types.includes('locality'))?.long_name;
+                
+                if (sublocality && locality) {
+                  resolve(`${sublocality}, ${locality}`);
+                } else if (formatted) {
+                  resolve(formatted);
+                } else {
+                  resolve(null);
+                }
+              } else {
+                resolve(null);
+              }
+            });
+          });
+          if (googleResult) {
+            resolvedAreaName = googleResult;
           }
-          resetLocateBtn();
-        });
-      } else {
-        fallbackCoords(latLng);
-        resetLocateBtn();
+        }
+      } catch (e) {
+        console.warn('Google geocoder lookup notice:', e);
       }
+
+      // Tier 2: Reverse Geocode via OpenStreetMap Nominatim for exact locality & area name
+      if (!resolvedAreaName) {
+        try {
+          const response = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}`, {
+            headers: { 'Accept': 'application/json' }
+          });
+          if (response.ok) {
+            const data = await response.json();
+            if (data && data.address) {
+              const addr = data.address;
+              const placeOrColony = addr.suburb || addr.neighbourhood || addr.residential || addr.road || addr.village || addr.town || addr.hamlet || '';
+              const talukOrCity = addr.town || addr.city || addr.state_district || 'Hyderabad';
+              if (placeOrColony) {
+                resolvedAreaName = `${placeOrColony}, ${talukOrCity}`;
+              } else if (data.display_name) {
+                const parts = data.display_name.split(',').map(s => s.trim());
+                resolvedAreaName = parts.slice(0, 3).join(', ');
+              }
+            }
+          }
+        } catch (fetchErr) {
+          console.warn('Nominatim reverse geocode notice:', fetchErr);
+        }
+      }
+
+      // Tier 3: Corridor Proximity Matrix (Guarantees real landmark / area name, never raw coordinates)
+      if (!resolvedAreaName) {
+        resolvedAreaName = resolveCorridorProximityArea(lat, lng);
+      }
+
+      // Update Pickup Input and Global State
+      if (pickupInput) {
+        pickupInput.value = resolvedAreaName;
+      }
+      if (typeof state !== 'undefined') {
+        state.pickup = resolvedAreaName;
+        if (typeof estimateDistance === 'function') {
+          state.distance = estimateDistance(state.pickup, state.drop);
+        }
+        if (typeof updateUI === 'function') updateUI();
+      }
+
+      const currentDrop = document.getElementById('inputDrop')?.value || 'Jangaon Bus Depot / Chowrasta';
+      updateRouteOnMap(resolvedAreaName, currentDrop);
+
+      if (typeof showToast === 'function') {
+        showToast(`Area detected: ${resolvedAreaName}`, 'success');
+      }
+
+      resetLocateBtn();
     },
     (err) => {
       console.warn('Geolocation error:', err);
@@ -371,16 +534,8 @@ function detectCurrentLocation() {
         showToast(msg, 'error');
       }
     },
-    { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 }
+    { enableHighAccuracy: true, timeout: 9000, maximumAge: 0 }
   );
-
-  function fallbackCoords(latLng) {
-    const coordStr = `Location (${latLng.lat.toFixed(4)}, ${latLng.lng.toFixed(4)})`;
-    if (pickupInput) pickupInput.value = coordStr;
-    if (typeof state !== 'undefined') state.pickup = coordStr;
-    const currentDrop = document.getElementById('inputDrop')?.value || 'Jangaon';
-    updateRouteOnMap(coordStr, currentDrop);
-  }
 
   function resetLocateBtn() {
     if (locateBtn) {
@@ -388,6 +543,35 @@ function detectCurrentLocation() {
       if (window.lucide) lucide.createIcons();
     }
   }
+}
+
+// Landmark and area resolution along Hyderabad - Warangal Corridor
+function resolveCorridorProximityArea(lat, lng) {
+  const corridorAreas = [
+    { name: 'Uppal Ring Road Metro, Hyderabad', lat: 17.4024, lng: 78.5604 },
+    { name: 'Boduppal / Peerzadiguda, Hyderabad', lat: 17.4168, lng: 78.5832 },
+    { name: 'Swarnagiri Colony, Ghatkesar, Medchal', lat: 17.4221, lng: 78.6507 },
+    { name: 'Ghatkesar Town / ORR Exit 9', lat: 17.4526, lng: 78.6821 },
+    { name: 'Bibinagar AIIMS Highway Junction', lat: 17.4725, lng: 78.7915 },
+    { name: 'Bhongir Fort Chowrasta, Yadadri', lat: 17.5126, lng: 78.8912 },
+    { name: 'Aler Highway Junction', lat: 17.6534, lng: 79.0512 },
+    { name: 'Jangaon Bus Depot / Chowrasta', lat: 17.7241, lng: 79.1623 },
+    { name: 'Kazipet Junction, Warangal', lat: 17.9734, lng: 79.5218 },
+    { name: 'Hanamkonda Bus Stand, Warangal', lat: 18.0125, lng: 79.5621 }
+  ];
+
+  let closest = corridorAreas[0];
+  let minDiff = Infinity;
+
+  corridorAreas.forEach(wp => {
+    const diff = Math.hypot(lat - wp.lat, lng - wp.lng);
+    if (diff < minDiff) {
+      minDiff = diff;
+      closest = wp;
+    }
+  });
+
+  return closest.name;
 }
 
 // ==========================================

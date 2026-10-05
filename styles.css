@@ -177,3 +177,37 @@ body {
 .request-timer-bar {
   animation: shrink-timer 45s linear forwards;
 }
+
+/* Google Maps Places Autocomplete Dropdown Styling */
+.pac-container {
+  z-index: 99999 !important;
+  border-radius: 1rem !important;
+  border: 1px solid #cbd5e1 !important;
+  box-shadow: 0 10px 25px -5px rgba(15, 23, 42, 0.2) !important;
+  font-family: 'Plus Jakarta Sans', sans-serif !important;
+  margin-top: 6px !important;
+  padding: 4px 0 !important;
+  background-color: #ffffff !important;
+}
+
+.pac-item {
+  padding: 10px 14px !important;
+  cursor: pointer !important;
+  border-top: 1px solid #f1f5f9 !important;
+  font-size: 13px !important;
+}
+
+.pac-item:hover, .pac-item-selected {
+  background-color: #eff6ff !important;
+}
+
+.pac-item-query {
+  font-size: 13px !important;
+  font-weight: 700 !important;
+  color: #0f172a !important;
+}
+
+.pac-matched {
+  font-weight: 800 !important;
+  color: #2563eb !important;
+}

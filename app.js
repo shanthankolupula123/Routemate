@@ -26,8 +26,8 @@ const state = {
   mode: 'rider', // 'rider' | 'driver'
   activeTab: 'explore', // 'explore' | 'myrides' | 'profile'
   vehicleType: 'bike', // 'bike' | 'car'
-  pickup: 'Uppal, Hyderabad',
-  drop: 'Jangaon',
+  pickup: 'Uppal Ring Road Metro, Hyderabad',
+  drop: 'Jangaon Bus Depot / Chowrasta',
   distance: 84, // km
   fuelPrice: 105.5, // INR per Litre
   myBookings: [
@@ -691,11 +691,11 @@ function openBookingModal(rideId) {
       <!-- Payment Method -->
       <div class="mt-4">
         <label class="block text-xs font-bold text-slate-700 mb-2">Select Payment Method:</label>
-        <div class="space-y-2 text-xs">
+        <div class="space-y-2.5 text-xs">
           <!-- Option 1: Razorpay Instant Online Pay (UPI, Cards, Netbanking) -->
-          <label class="flex items-center justify-between p-3 border-2 border-blue-600 bg-blue-50/70 rounded-2xl cursor-pointer transition hover:bg-blue-50/90 shadow-xs">
+          <div id="payCardRazorpay" onclick="selectBookingPayMethod('razorpay')" class="flex items-center justify-between p-3.5 border-2 border-blue-600 bg-blue-50/80 rounded-2xl cursor-pointer transition shadow-xs">
             <div class="flex items-center gap-2.5">
-              <input type="radio" name="payMethod" value="razorpay" checked class="text-blue-600 w-4 h-4" />
+              <input type="radio" id="payRadioRazorpay" name="payMethod" value="razorpay" checked class="text-blue-600 w-4 h-4" />
               <div>
                 <div class="flex items-center gap-1.5">
                   <p class="font-extrabold text-slate-900">Razorpay Instant Pay</p>
@@ -704,40 +704,40 @@ function openBookingModal(rideId) {
                 <p class="text-[11px] text-slate-500 mt-0.5">UPI (GPay / PhonePe / Paytm), Debit/Credit Cards</p>
               </div>
             </div>
-            <div class="text-right">
+            <div class="text-right flex-shrink-0">
               <span class="text-[10px] font-extrabold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full">0% Fee</span>
             </div>
-          </label>
+          </div>
 
           <!-- Option 2: Direct UPI to Driver -->
-          <label class="flex items-center justify-between p-3 border border-slate-200 rounded-2xl cursor-pointer hover:bg-slate-50 transition">
+          <div id="payCardUpi" onclick="selectBookingPayMethod('upi')" class="flex items-center justify-between p-3.5 border border-slate-200 bg-white hover:bg-slate-50 rounded-2xl cursor-pointer transition">
             <div class="flex items-center gap-2.5">
-              <input type="radio" name="payMethod" value="upi" class="text-blue-600 w-4 h-4" />
+              <input type="radio" id="payRadioUpi" name="payMethod" value="upi" class="text-blue-600 w-4 h-4" />
               <div>
                 <p class="font-bold text-slate-900">Direct Driver UPI</p>
                 <p class="text-[11px] text-slate-500 mt-0.5">Scan driver's personal QR code upon boarding</p>
               </div>
             </div>
-            <span class="text-[10px] font-semibold text-purple-700 bg-purple-50 px-2 py-0.5 rounded">P2P Scan</span>
-          </label>
+            <span class="text-[10px] font-semibold text-purple-700 bg-purple-50 px-2 py-0.5 rounded flex-shrink-0">P2P Scan</span>
+          </div>
 
           <!-- Option 3: Cash on Board -->
-          <label class="flex items-center justify-between p-3 border border-slate-200 rounded-2xl cursor-pointer hover:bg-slate-50 transition">
+          <div id="payCardCash" onclick="selectBookingPayMethod('cash')" class="flex items-center justify-between p-3.5 border border-slate-200 bg-white hover:bg-slate-50 rounded-2xl cursor-pointer transition">
             <div class="flex items-center gap-2.5">
-              <input type="radio" name="payMethod" value="cash" class="text-blue-600 w-4 h-4" />
+              <input type="radio" id="payRadioCash" name="payMethod" value="cash" class="text-blue-600 w-4 h-4" />
               <div>
                 <p class="font-bold text-slate-900">Cash on Board</p>
                 <p class="text-[11px] text-slate-500 mt-0.5">Hand physical cash to driver inside vehicle</p>
               </div>
             </div>
-            <span class="text-[10px] font-semibold text-slate-600 bg-slate-100 px-2 py-0.5 rounded">Hand-to-Hand</span>
-          </label>
+            <span class="text-[10px] font-semibold text-slate-600 bg-slate-100 px-2 py-0.5 rounded flex-shrink-0">Hand-to-Hand</span>
+          </div>
         </div>
       </div>
 
       <!-- Action Button -->
-      <div class="mt-6 flex items-center gap-3">
-        <button onclick="closeModal('bookingModal')" class="w-1/3 py-3.5 border border-slate-200 hover:bg-slate-50 rounded-2xl text-xs font-bold text-slate-600">
+      <div class="mt-6 pt-2 pb-2 flex items-center gap-3">
+        <button onclick="closeModal('bookingModal')" class="w-1/3 py-3.5 border border-slate-200 hover:bg-slate-50 rounded-2xl text-xs font-bold text-slate-600 transition">
           Cancel
         </button>
         <button id="btnConfirmBookingAction" onclick="confirmBooking(${ride.id})" class="w-2/3 py-3.5 gradient-brand text-white rounded-2xl text-xs font-bold shadow-lg shadow-blue-500/25 active:scale-95 transition-all flex items-center justify-center gap-1.5">
@@ -750,6 +750,38 @@ function openBookingModal(rideId) {
 
   modal.classList.remove('hidden');
   lucide.createIcons();
+}
+
+// Payment method visual switcher
+function selectBookingPayMethod(method) {
+  const radio = document.querySelector(`input[name="payMethod"][value="${method}"]`);
+  if (radio) radio.checked = true;
+
+  const cardRazorpay = document.getElementById('payCardRazorpay');
+  const cardUpi = document.getElementById('payCardUpi');
+  const cardCash = document.getElementById('payCardCash');
+  const btnLabel = document.getElementById('bookingPayBtnLabel');
+
+  const activeClass = 'flex items-center justify-between p-3.5 border-2 border-blue-600 bg-blue-50/80 rounded-2xl cursor-pointer transition shadow-xs';
+  const inactiveClass = 'flex items-center justify-between p-3.5 border border-slate-200 bg-white hover:bg-slate-50 rounded-2xl cursor-pointer transition';
+
+  if (cardRazorpay) cardRazorpay.className = (method === 'razorpay' ? activeClass : inactiveClass);
+  if (cardUpi) cardUpi.className = (method === 'upi' ? activeClass : inactiveClass);
+  if (cardCash) cardCash.className = (method === 'cash' ? activeClass : inactiveClass);
+
+  const fareVal = document.getElementById('bookingTotalFareAmount')?.textContent?.replace('₹', '') || '108';
+  const seatsVal = document.getElementById('selectedSeatsCount')?.value || '1';
+  const seatWord = parseInt(seatsVal, 10) > 1 ? `${seatsVal} Seats` : 'Seat';
+
+  if (btnLabel) {
+    if (method === 'razorpay') {
+      btnLabel.textContent = `Pay & Confirm ${seatWord} (₹${fareVal})`;
+    } else if (method === 'upi') {
+      btnLabel.textContent = `Reserve with Driver UPI (₹${fareVal})`;
+    } else {
+      btnLabel.textContent = `Reserve with Cash on Board (₹${fareVal})`;
+    }
+  }
 }
 
 // Interactive Seat Selection Adjuster
@@ -775,7 +807,19 @@ function adjustBookingSeats(delta, maxAvailable, perSeatPrice) {
   if (formulaText) formulaText.textContent = `Fuel Contribution (${newCount} seat${newCount > 1 ? 's' : ''} × ₹${perSeatPrice})`;
   if (basePriceEl) basePriceEl.textContent = `₹${total}`;
   if (totalFareEl) totalFareEl.textContent = `₹${total}`;
-  if (btnLabel) btnLabel.textContent = `Pay & Confirm ${newCount} Seat${newCount > 1 ? 's' : ''} (₹${total})`;
+
+  const currentMethod = document.querySelector('input[name="payMethod"]:checked')?.value || 'razorpay';
+  const seatWord = newCount > 1 ? `${newCount} Seats` : 'Seat';
+
+  if (btnLabel) {
+    if (currentMethod === 'razorpay') {
+      btnLabel.textContent = `Pay & Confirm ${seatWord} (₹${total})`;
+    } else if (currentMethod === 'upi') {
+      btnLabel.textContent = `Reserve with Driver UPI (₹${total})`;
+    } else {
+      btnLabel.textContent = `Reserve with Cash on Board (₹${total})`;
+    }
+  }
 }
 
 // Confirm Booking logic with dynamic seats and Razorpay Gateway
@@ -1266,24 +1310,13 @@ function declinePassengerRequest() {
   renderDriverIncomingRequest();
 }
 
-// Complete Current Active Commute
+// Complete Current Active Commute (Driver settling fuel contribution - No rating modal for driver)
 function completeCurrentRide() {
   const trip = state.activeDriverTrip;
   const fare = trip ? trip.fareOffer : 108;
   state.activeDriverTrip = null;
-  showToast(`Commute completed! ₹${fare} fuel contribution settled.`, 'success');
+  showToast(`Commute completed! ₹${fare} fuel contribution settled directly.`, 'success');
   renderDriverIncomingRequest();
-
-  // Prompt Rating & Feedback Modal
-  setTimeout(() => {
-    openRatingModal(trip ? {
-      driverName: trip.name,
-      avatar: trip.avatar,
-      pickup: trip.pickup,
-      drop: trip.drop,
-      vehicleName: 'Passenger Commute'
-    } : null);
-  }, 600);
 }
 
 function callPassenger() {
@@ -1334,7 +1367,8 @@ function openLiveTrackingForDriver() {
     plate: 'TS 08 HG 8421',
     avatar: trip.avatar,
     pin: trip.pin || '4821',
-    vehicleType: state.vehicleType || 'bike'
+    vehicleType: state.vehicleType || 'bike',
+    isDriver: true
   };
 
   openLiveTrackingModal(trackingData);
@@ -1358,6 +1392,19 @@ function openLiveTrackingModal(data) {
   if (vehEl) vehEl.textContent = `${data.vehicle} • ${data.plate}`;
   if (avatarEl) avatarEl.src = data.avatar;
   if (pinEl) pinEl.textContent = data.pin;
+
+  // Ensure rating action is passenger-only
+  const passContainer = document.getElementById('trackingPassengerActionContainer');
+  const driverContainer = document.getElementById('trackingDriverActionContainer');
+  if (passContainer && driverContainer) {
+    if (data.isDriver) {
+      passContainer.classList.add('hidden');
+      driverContainer.classList.remove('hidden');
+    } else {
+      passContainer.classList.remove('hidden');
+      driverContainer.classList.add('hidden');
+    }
+  }
 
   modal.classList.remove('hidden');
   if (window.lucide) lucide.createIcons();
