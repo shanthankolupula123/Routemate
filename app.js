@@ -663,33 +663,59 @@ function openBookingModal(rideId) {
 
       <!-- Payment Method -->
       <div class="mt-4">
-        <label class="block text-xs font-bold text-slate-700 mb-2">Payment Preference to Driver:</label>
-        <div class="grid grid-cols-2 gap-2 text-xs">
-          <label class="flex items-center gap-2 p-3 border-2 border-blue-600 bg-blue-50/50 rounded-xl cursor-pointer">
-            <input type="radio" name="payMethod" value="upi" checked class="text-blue-600" />
-            <div>
-              <p class="font-bold text-slate-900">Direct UPI</p>
-              <p class="text-[10px] text-slate-500">GPay / PhonePe QR</p>
+        <label class="block text-xs font-bold text-slate-700 mb-2">Select Payment Method:</label>
+        <div class="space-y-2 text-xs">
+          <!-- Option 1: Razorpay Instant Online Pay (UPI, Cards, Netbanking) -->
+          <label class="flex items-center justify-between p-3 border-2 border-blue-600 bg-blue-50/70 rounded-2xl cursor-pointer transition hover:bg-blue-50/90 shadow-xs">
+            <div class="flex items-center gap-2.5">
+              <input type="radio" name="payMethod" value="razorpay" checked class="text-blue-600 w-4 h-4" />
+              <div>
+                <div class="flex items-center gap-1.5">
+                  <p class="font-extrabold text-slate-900">Razorpay Instant Pay</p>
+                  <span class="text-[9px] font-extrabold bg-blue-600 text-white px-1.5 py-0.5 rounded-full uppercase tracking-wider">Fast & Secure</span>
+                </div>
+                <p class="text-[11px] text-slate-500 mt-0.5">UPI (GPay / PhonePe / Paytm), Debit/Credit Cards</p>
+              </div>
+            </div>
+            <div class="text-right">
+              <span class="text-[10px] font-extrabold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full">0% Fee</span>
             </div>
           </label>
-          <label class="flex items-center gap-2 p-3 border border-slate-200 rounded-xl cursor-pointer hover:bg-slate-50">
-            <input type="radio" name="payMethod" value="cash" class="text-blue-600" />
-            <div>
-              <p class="font-bold text-slate-900">Cash on Board</p>
-              <p class="text-[10px] text-slate-500">Pay inside vehicle</p>
+
+          <!-- Option 2: Direct UPI to Driver -->
+          <label class="flex items-center justify-between p-3 border border-slate-200 rounded-2xl cursor-pointer hover:bg-slate-50 transition">
+            <div class="flex items-center gap-2.5">
+              <input type="radio" name="payMethod" value="upi" class="text-blue-600 w-4 h-4" />
+              <div>
+                <p class="font-bold text-slate-900">Direct Driver UPI</p>
+                <p class="text-[11px] text-slate-500 mt-0.5">Scan driver's personal QR code upon boarding</p>
+              </div>
             </div>
+            <span class="text-[10px] font-semibold text-purple-700 bg-purple-50 px-2 py-0.5 rounded">P2P Scan</span>
+          </label>
+
+          <!-- Option 3: Cash on Board -->
+          <label class="flex items-center justify-between p-3 border border-slate-200 rounded-2xl cursor-pointer hover:bg-slate-50 transition">
+            <div class="flex items-center gap-2.5">
+              <input type="radio" name="payMethod" value="cash" class="text-blue-600 w-4 h-4" />
+              <div>
+                <p class="font-bold text-slate-900">Cash on Board</p>
+                <p class="text-[11px] text-slate-500 mt-0.5">Hand physical cash to driver inside vehicle</p>
+              </div>
+            </div>
+            <span class="text-[10px] font-semibold text-slate-600 bg-slate-100 px-2 py-0.5 rounded">Hand-to-Hand</span>
           </label>
         </div>
       </div>
 
       <!-- Action Button -->
       <div class="mt-6 flex items-center gap-3">
-        <button onclick="closeModal('bookingModal')" class="w-1/3 py-3 border border-slate-200 hover:bg-slate-50 rounded-xl text-xs font-bold text-slate-600">
+        <button onclick="closeModal('bookingModal')" class="w-1/3 py-3.5 border border-slate-200 hover:bg-slate-50 rounded-2xl text-xs font-bold text-slate-600">
           Cancel
         </button>
-        <button onclick="confirmBooking(${ride.id})" class="w-2/3 py-3 gradient-brand text-white rounded-xl text-xs font-bold shadow-lg shadow-blue-500/25 active:scale-95 transition-all flex items-center justify-center gap-1.5">
-          <i data-lucide="check-circle" class="w-4 h-4"></i>
-          <span>Confirm & Split Fare</span>
+        <button onclick="confirmBooking(${ride.id})" class="w-2/3 py-3.5 gradient-brand text-white rounded-2xl text-xs font-bold shadow-lg shadow-blue-500/25 active:scale-95 transition-all flex items-center justify-center gap-1.5">
+          <i data-lucide="shield-check" class="w-4 h-4"></i>
+          <span>Pay & Confirm Seat (₹${ride.perSeatPrice})</span>
         </button>
       </div>
     </div>
@@ -699,23 +725,63 @@ function openBookingModal(rideId) {
   lucide.createIcons();
 }
 
-// Confirm Booking logic
+// Confirm Booking logic with Razorpay Gateway Integration
 function confirmBooking(rideId) {
   const ride = availableRides.find(r => r.id === rideId);
   if (!ride) return;
 
-  ride.seatsAvailable -= 1;
+  const selectedMethod = document.querySelector('input[name="payMethod"]:checked')?.value || 'razorpay';
 
-  // Add to user bookings
+  // 1. If Razorpay is chosen, launch the Razorpay Checkout gateway
+  if (selectedMethod === 'razorpay' && window.routematePayment) {
+    window.routematePayment.initiatePayment(
+      ride,
+      // On Payment Success
+      function onPaymentSuccess(paymentData) {
+        processSuccessfulBooking(ride, {
+          method: 'razorpay',
+          label: 'Paid via Razorpay',
+          paymentId: paymentData.paymentId,
+          isPaid: true
+        });
+      },
+      // On Payment Cancel / Error
+      function onPaymentError(err) {
+        showToast(err.message || 'Payment was not completed', 'info');
+      }
+    );
+    return;
+  }
+
+  // 2. Direct UPI or Cash
+  const isUpi = (selectedMethod === 'upi');
+  processSuccessfulBooking(ride, {
+    method: selectedMethod,
+    label: isUpi ? 'Direct UPI upon boarding' : 'Cash inside vehicle',
+    paymentId: null,
+    isPaid: false
+  });
+}
+
+// Helper to record successful booking across local state & Supabase
+function processSuccessfulBooking(ride, paymentInfo) {
+  ride.seatsAvailable = Math.max(0, ride.seatsAvailable - 1);
+  const bookingPin = Math.floor(1000 + Math.random() * 9000).toString();
+  const bookingId = `RM-${Math.floor(1000 + Math.random() * 9000)}`;
+
+  // Add to user bookings state
   state.myBookings.unshift({
-    id: `RM-${Math.floor(1000 + Math.random() * 9000)}`,
+    id: bookingId,
     driver: ride.driverName,
     vehicle: `${ride.vehicleName} (${ride.vehicleNumber})`,
-    route: `${ride.pickup} ➔ ${ride.drop}`,
+    route: `${ride.pickup} ➔ ${ride.drop || ride.drop_location}`,
     time: ride.departureTime,
     seats: 1,
     fare: ride.perSeatPrice,
-    payment: 'Direct UPI upon boarding',
+    payment: paymentInfo.label + (paymentInfo.paymentId ? ` (${paymentInfo.paymentId})` : ''),
+    paymentId: paymentInfo.paymentId,
+    paymentMethod: paymentInfo.method,
+    isPaid: paymentInfo.isPaid,
     status: 'Confirmed'
   });
 
@@ -729,29 +795,36 @@ function confirmBooking(rideId) {
       riderName: 'Verified Commuter',
       seats: 1,
       fare: ride.perSeatPrice,
-      paymentMethod: 'upi',
-      pin: '4821'
+      paymentMethod: paymentInfo.method,
+      pin: bookingPin
+    }).then(res => {
+      if (res && res.success) {
+        console.log('✅ Booking successfully stored in Supabase with method:', paymentInfo.method);
+      }
     }).catch(err => console.warn('Supabase booking sync warning:', err));
   }
 
-  // Show ticket success modal
-  openTicketModal(ride);
+  showToast(`Seat Confirmed! ${paymentInfo.isPaid ? 'Payment Received via Razorpay' : 'Pay on boarding'}`, 'success');
+  openTicketModal(ride, paymentInfo, bookingId, bookingPin);
 }
 
 // Open Booking Ticket confirmation modal
-function openTicketModal(ride) {
+function openTicketModal(ride, paymentInfo = {}, bookingId = null, pin = null) {
   const modal = document.getElementById('ticketModal');
   const content = document.getElementById('ticketModalContent');
+  const bid = bookingId || `RM-${Math.floor(1000 + Math.random() * 9000)}`;
+  const ticketPin = pin || '4821';
+  const isRazorpay = paymentInfo.method === 'razorpay';
 
   content.innerHTML = `
     <div class="p-6 text-center">
-      <div class="w-14 h-14 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto mb-3">
-        <i data-lucide="check" class="w-7 h-7 stroke-[3]"></i>
+      <div class="w-14 h-14 ${isRazorpay ? 'bg-emerald-100 text-emerald-600' : 'bg-blue-100 text-blue-600'} rounded-full flex items-center justify-center mx-auto mb-3">
+        <i data-lucide="${isRazorpay ? 'check-check' : 'check'}" class="w-7 h-7 stroke-[3]"></i>
       </div>
-      <h3 class="text-lg font-extrabold text-slate-900">Seat Confirmed!</h3>
-      <p class="text-xs text-slate-500 mt-0.5">Booking ID: <strong class="text-blue-600 font-mono">RM-${Math.floor(1000 + Math.random() * 9000)}</strong></p>
+      <h3 class="text-lg font-extrabold text-slate-900">${isRazorpay ? 'Payment & Seat Confirmed!' : 'Seat Reserved!'}</h3>
+      <p class="text-xs text-slate-500 mt-0.5">Booking ID: <strong class="text-blue-600 font-mono">${bid}</strong></p>
 
-      <div class="mt-5 text-left bg-slate-50 rounded-2xl p-4 border border-slate-200/80 space-y-2.5 text-xs">
+      <div class="mt-4 text-left bg-slate-50 rounded-2xl p-4 border border-slate-200/80 space-y-2.5 text-xs">
         <div class="flex justify-between items-center pb-2 border-b border-slate-200">
           <span class="text-slate-500">Driver</span>
           <span class="font-bold text-slate-800">${ride.driverName}</span>
@@ -769,40 +842,76 @@ function openTicketModal(ride) {
           <span class="font-bold text-emerald-600">${ride.departureTime}</span>
         </div>
         <div class="flex justify-between items-center">
-          <span class="text-slate-500">Amount Due</span>
-          <span class="text-sm font-black text-slate-900">₹${ride.perSeatPrice}</span>
+          <span class="text-slate-500">Fare Split</span>
+          <div class="text-right">
+            <span class="text-sm font-black text-slate-900">₹${ride.perSeatPrice}</span>
+            ${isRazorpay ? '<span class="block text-[10px] text-emerald-600 font-bold">PAID IN FULL</span>' : '<span class="block text-[10px] text-amber-600 font-bold">DUE ON BOARDING</span>'}
+          </div>
         </div>
       </div>
 
-      <!-- Driver Direct Payment QR Simulation -->
-      <div class="mt-4 p-3.5 bg-purple-50/90 rounded-2xl border border-purple-200 flex items-center gap-3 text-left">
-        <div class="w-16 h-16 bg-white p-1 rounded-xl flex items-center justify-center shadow-xs flex-shrink-0 border border-purple-200">
-          <img src="https://api.qrserver.com/v1/create-qr-code/?size=140x140&margin=2&data=${encodeURIComponent('upi://pay?pa=' + ride.driverName.toLowerCase().replace(/[^a-z]/g, '') + '@oksbi&pn=' + encodeURIComponent(ride.driverName) + '&am=' + ride.perSeatPrice + '&cu=INR')}" alt="UPI QR" class="w-full h-full object-contain rounded" />
-        </div>
-        <div class="flex-1 min-w-0">
-          <div class="flex items-center gap-1.5">
-            <span class="text-[10px] font-bold uppercase tracking-wider text-purple-700 bg-purple-100 px-1.5 py-0.5 rounded">UPI Direct</span>
-            <span class="text-[10px] text-emerald-600 font-bold bg-emerald-50 px-1.5 py-0.5 rounded">0% Fee</span>
+      <!-- Payment Status Block -->
+      ${isRazorpay ? `
+        <div class="mt-3.5 p-3.5 bg-emerald-50 rounded-2xl border border-emerald-200 text-left">
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-2">
+              <span class="w-6 h-6 rounded-full bg-emerald-500 text-white flex items-center justify-center font-bold text-xs">✓</span>
+              <div>
+                <p class="text-xs font-bold text-emerald-900">Paid via Razorpay</p>
+                <p class="text-[10px] font-mono text-emerald-700">${paymentInfo.paymentId || 'Verified Escrow'}</p>
+              </div>
+            </div>
+            <span class="text-[10px] font-extrabold bg-emerald-200 text-emerald-900 px-2 py-0.5 rounded-full uppercase">Settled</span>
           </div>
-          <p class="text-xs font-mono font-bold text-slate-800 truncate mt-1">${ride.driverName.toLowerCase().replace(/[^a-z]/g, '')}@oksbi</p>
-          <p class="text-[10px] text-slate-500 mt-0.5">Scan via GPay / PhonePe / Paytm upon boarding</p>
+          <p class="text-[11px] text-emerald-700 mt-2">Zero cash needed. Direct digital settlement processed.</p>
         </div>
+      ` : (paymentInfo.method === 'cash' ? `
+        <div class="mt-3.5 p-3.5 bg-slate-100 rounded-2xl border border-slate-200 text-left">
+          <div class="flex items-center gap-2">
+            <i data-lucide="banknote" class="w-5 h-5 text-slate-700"></i>
+            <div>
+              <p class="text-xs font-bold text-slate-900">Cash on Board</p>
+              <p class="text-[11px] text-slate-600">Please keep exact change of ₹${ride.perSeatPrice} ready upon boarding.</p>
+            </div>
+          </div>
+        </div>
+      ` : `
+        <!-- Driver Direct Payment QR Simulation -->
+        <div class="mt-3.5 p-3.5 bg-purple-50/90 rounded-2xl border border-purple-200 flex items-center gap-3 text-left">
+          <div class="w-16 h-16 bg-white p-1 rounded-xl flex items-center justify-center shadow-xs flex-shrink-0 border border-purple-200">
+            <img src="https://api.qrserver.com/v1/create-qr-code/?size=140x140&margin=2&data=${encodeURIComponent('upi://pay?pa=' + ride.driverName.toLowerCase().replace(/[^a-z]/g, '') + '@oksbi&pn=' + encodeURIComponent(ride.driverName) + '&am=' + ride.perSeatPrice + '&cu=INR')}" alt="UPI QR" class="w-full h-full object-contain rounded" />
+          </div>
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-1.5">
+              <span class="text-[10px] font-bold uppercase tracking-wider text-purple-700 bg-purple-100 px-1.5 py-0.5 rounded">UPI Direct</span>
+              <span class="text-[10px] text-emerald-600 font-bold bg-emerald-50 px-1.5 py-0.5 rounded">0% Fee</span>
+            </div>
+            <p class="text-xs font-mono font-bold text-slate-800 truncate mt-1">${ride.driverName.toLowerCase().replace(/[^a-z]/g, '')}@oksbi</p>
+            <p class="text-[10px] text-slate-500 mt-0.5">Scan via GPay / PhonePe / Paytm upon boarding</p>
+          </div>
+        </div>
+      `)}
+
+      <!-- Commute PIN Badge -->
+      <div class="mt-3 py-2 px-3 bg-blue-50 border border-blue-200 rounded-xl flex items-center justify-between text-xs">
+        <span class="text-slate-600 font-medium">Boarding Verification PIN:</span>
+        <span class="font-mono font-extrabold text-blue-700 text-sm tracking-wider">${ticketPin}</span>
       </div>
 
       <!-- Quick Actions: Call & WhatsApp Share -->
       <div class="mt-3 grid grid-cols-2 gap-2 text-xs">
-        <button onclick="showToast('Calling driver ' + '${ride.driverName}' + ' (+91 98480 23145)...', 'info')" class="py-2 px-3 bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold rounded-xl transition flex items-center justify-center gap-1.5">
+        <button onclick="showToast('Calling driver ' + '${ride.driverName}' + ' (+91 98480 23145)...', 'info')" class="py-2.5 px-3 bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold rounded-xl transition flex items-center justify-center gap-1.5">
           <i data-lucide="phone" class="w-3.5 h-3.5 text-blue-600"></i>
           <span>Call Driver</span>
         </button>
-        <button onclick="shareTripWithFamily()" class="py-2 px-3 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 font-bold rounded-xl border border-emerald-200 transition flex items-center justify-center gap-1.5">
+        <button onclick="shareTripWithFamily()" class="py-2.5 px-3 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 font-bold rounded-xl border border-emerald-200 transition flex items-center justify-center gap-1.5">
           <i data-lucide="share-2" class="w-3.5 h-3.5 text-emerald-600"></i>
           <span>Share Trip</span>
         </button>
       </div>
 
       <div class="mt-4 flex gap-2">
-        <button onclick="closeModal('ticketModal'); switchTab('myrides');" class="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition shadow-sm">
+        <button onclick="closeModal('ticketModal'); switchTab('myrides');" class="w-full py-3.5 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl text-xs font-bold transition shadow-sm">
           View in My Rides
         </button>
       </div>
