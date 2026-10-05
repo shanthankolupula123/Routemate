@@ -1,0 +1,702 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Routemate - Peer-to-Peer Ride Sharing | Split the Cost</title>
+  
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50: '#eff6ff',
+              100: '#dbeafe',
+              200: '#bfdbfe',
+              500: '#3b82f6',
+              600: '#2563eb',
+              700: '#1d4ed8',
+              800: '#1e40af',
+              900: '#1e3a8a',
+            }
+          }
+        }
+      }
+    }
+  </script>
+
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+
+  <!-- Custom Styles -->
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body class="bg-slate-100 min-h-screen text-slate-800 antialiased pb-36 md:pb-24">
+
+  <!-- Desktop Wrapper Container for Mobile-First Experience -->
+  <div class="app-container min-h-screen flex flex-col bg-white border-x border-slate-200/80 shadow-2xl relative">
+
+    <!-- 1. Top Header -->
+    <header class="sticky top-0 z-30 glass-header border-b border-slate-100 px-4 py-3.5 transition-all">
+      <div class="flex items-center justify-between">
+        <!-- Logo & Branding -->
+        <div class="flex items-center gap-2.5">
+          <div class="w-10 h-10 rounded-2xl gradient-brand flex items-center justify-center text-white shadow-md shadow-blue-500/20 flex-shrink-0">
+            <i data-lucide="split" class="w-5 h-5 stroke-[2.5] transform -rotate-45"></i>
+          </div>
+          <div>
+            <div class="flex items-center gap-1.5">
+              <h1 class="text-xl font-extrabold tracking-tight text-slate-900 leading-none">Routemate</h1>
+              <span class="text-[10px] font-bold uppercase tracking-wider bg-blue-100 text-blue-800 px-1.5 py-0.5 rounded-full">P2P</span>
+            </div>
+            <p class="text-[11px] font-medium text-slate-500 mt-0.5 tracking-tight">Share the Ride, Split the Cost</p>
+          </div>
+        </div>
+
+        <!-- Top Right Actions -->
+        <div class="flex items-center gap-2">
+          <!-- Active Corridor Indicator -->
+          <div class="hidden sm:flex items-center gap-1.5 bg-emerald-50 text-emerald-700 border border-emerald-200/80 px-2 py-1 rounded-full text-[11px] font-semibold">
+            <span class="w-2 h-2 rounded-full bg-emerald-500 live-pulse"></span>
+            <span>Uppal ➔ Jangaon Live</span>
+          </div>
+
+          <!-- Safety & SOS Shield Button -->
+          <button onclick="openSafetyModal()" title="Safety & SOS Center" class="w-9 h-9 rounded-full bg-emerald-50 hover:bg-emerald-100 text-emerald-700 flex items-center justify-center transition border border-emerald-200">
+            <i data-lucide="shield-check" class="w-4 h-4"></i>
+          </button>
+
+          <!-- Notification Bell -->
+          <button onclick="showToast('No new ride notifications at this moment.', 'info')" class="w-9 h-9 rounded-full bg-slate-50 hover:bg-slate-100 text-slate-600 flex items-center justify-center transition border border-slate-200/60 relative">
+            <i data-lucide="bell" class="w-4 h-4"></i>
+            <span class="absolute top-1.5 right-1.5 w-2 h-2 bg-blue-600 rounded-full ring-2 ring-white"></span>
+          </button>
+
+          <!-- User Avatar -->
+          <button onclick="switchTab('profile')" class="relative flex items-center">
+            <img src="https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=100&h=100&q=80" alt="Profile" class="w-9 h-9 rounded-full object-cover border-2 border-blue-600 shadow-xs" />
+            <span class="absolute -bottom-0.5 -right-0.5 bg-emerald-500 w-3 h-3 rounded-full border-2 border-white"></span>
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <!-- Main Dynamic Content Views -->
+    <main class="flex-1">
+
+      <!-- MAIN EXPLORE TAB -->
+      <section id="mainAppView" class="p-4 pb-32 space-y-4">
+
+        <!-- 2. Smart Toggle Switch -->
+        <div class="bg-slate-100 p-1 rounded-2xl relative shadow-inner">
+          <div class="mode-toggle-bg relative flex items-center">
+            <!-- Animated Background Pill -->
+            <div id="modeActivePill" class="mode-pill-active"></div>
+
+            <!-- Mode 1: Customer / Rider -->
+            <button id="btnModeRider" onclick="switchMode('rider')" class="relative z-10 w-1/2 py-2.5 text-center text-xs font-bold text-blue-700 transition-all flex items-center justify-center gap-1.5">
+              <i data-lucide="search" class="w-4 h-4"></i>
+              <span>I need a Ride</span>
+            </button>
+
+            <!-- Mode 2: Driver -->
+            <button id="btnModeDriver" onclick="switchMode('driver')" class="relative z-10 w-1/2 py-2.5 text-center text-xs font-medium text-slate-600 transition-all flex items-center justify-center gap-1.5">
+              <i data-lucide="plus-circle" class="w-4 h-4"></i>
+              <span>Offer a Ride</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- 3. Location & Route Input Section (Shared / Dynamic) -->
+        <div class="bg-white rounded-3xl p-4.5 border border-slate-200 shadow-sm relative overflow-hidden">
+          <div class="flex items-center justify-between mb-3">
+            <h2 class="text-xs font-bold uppercase tracking-wider text-slate-400">Route & Waypoints</h2>
+            <div class="flex items-center gap-1 text-[11px] font-semibold text-blue-700 bg-blue-50 px-2 py-0.5 rounded-full">
+              <i data-lucide="map-pin" class="w-3 h-3"></i>
+              <span class="dynamic-distance-val">84 km</span>
+            </div>
+          </div>
+
+          <!-- Pickup & Drop Input Group -->
+          <div class="relative space-y-2">
+            <!-- Route Dotted Connector Line -->
+            <div class="route-connector"></div>
+
+            <!-- Pickup Location -->
+            <div class="flex items-center gap-3 bg-slate-50 border border-slate-200/90 rounded-2xl px-3.5 py-2.5 focus-within:border-blue-500 focus-within:bg-white transition">
+              <div class="w-4 h-4 rounded-full bg-emerald-500 flex items-center justify-center flex-shrink-0 z-10">
+                <span class="w-1.5 h-1.5 rounded-full bg-white"></span>
+              </div>
+              <div class="flex-1">
+                <label class="block text-[10px] font-semibold text-slate-400 uppercase tracking-wider leading-tight">Pickup Location</label>
+                <input id="inputPickup" type="text" value="Uppal, Hyderabad" class="w-full bg-transparent text-sm font-bold text-slate-900 focus:outline-none placeholder-slate-400" placeholder="e.g. Uppal Depot or Metro" />
+              </div>
+            </div>
+
+            <!-- Swap Locations Button -->
+            <div class="absolute right-4 top-1/2 -translate-y-1/2 z-10">
+              <button onclick="swapLocations()" title="Swap Pickup & Drop" class="w-8 h-8 rounded-full bg-white border border-slate-300 shadow-sm hover:border-blue-500 hover:text-blue-600 flex items-center justify-center text-slate-500 transition active:scale-90">
+                <i data-lucide="arrow-up-down" class="w-4 h-4"></i>
+              </button>
+            </div>
+
+            <!-- Drop Location -->
+            <div class="flex items-center gap-3 bg-slate-50 border border-slate-200/90 rounded-2xl px-3.5 py-2.5 focus-within:border-blue-500 focus-within:bg-white transition">
+              <div class="w-4 h-4 rounded-full bg-blue-600 flex items-center justify-center flex-shrink-0 z-10">
+                <span class="w-1.5 h-1.5 rounded-full bg-white"></span>
+              </div>
+              <div class="flex-1">
+                <label class="block text-[10px] font-semibold text-slate-400 uppercase tracking-wider leading-tight">Drop Location</label>
+                <input id="inputDrop" type="text" value="Jangaon" class="w-full bg-transparent text-sm font-bold text-slate-900 focus:outline-none placeholder-slate-400" placeholder="e.g. Jangaon Railway Station" />
+              </div>
+            </div>
+          </div>
+
+          <!-- Quick Corridor Selector Chips -->
+          <div class="mt-3 pt-3 border-t border-slate-100">
+            <p class="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Popular Corridors:</p>
+            <div class="flex items-center gap-1.5 overflow-x-auto pb-1 text-[11px] no-scrollbar">
+              <button onclick="setPresetRoute('Uppal, Hyderabad', 'Jangaon')" class="flex-shrink-0 px-2.5 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 font-semibold rounded-lg border border-blue-200/60 transition">
+                Uppal ➔ Jangaon (84km)
+              </button>
+              <button onclick="setPresetRoute('Uppal, Hyderabad', 'Bhongir')" class="flex-shrink-0 px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium rounded-lg transition">
+                Uppal ➔ Bhongir (38km)
+              </button>
+              <button onclick="setPresetRoute('Hitec City', 'Warangal')" class="flex-shrink-0 px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium rounded-lg transition">
+                Hitec City ➔ Warangal
+              </button>
+              <button onclick="setPresetRoute('LB Nagar', 'Suryapet')" class="flex-shrink-0 px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium rounded-lg transition">
+                LB Nagar ➔ Suryapet
+              </button>
+            </div>
+          </div>
+
+          <!-- Real-Time Fuel-Share Price Calculator Banner -->
+          <div class="mt-3.5 bg-gradient-to-br from-blue-900 to-indigo-950 text-white rounded-2xl p-4 shadow-sm relative overflow-hidden">
+            <div class="absolute top-0 right-0 transform translate-x-4 -translate-y-4 w-28 h-28 bg-blue-500/20 rounded-full blur-xl pointer-events-none"></div>
+
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-2">
+                <span class="p-1.5 bg-blue-800/80 rounded-lg text-blue-200">
+                  <i data-lucide="calculator" class="w-4 h-4"></i>
+                </span>
+                <div>
+                  <h3 class="text-xs font-bold text-white tracking-wide">Real-Time Fuel-Share Math</h3>
+                  <p class="text-[10px] text-blue-200">Fair split algorithm @ ₹105.5/L petrol</p>
+                </div>
+              </div>
+              <span id="calcSavingsBadge" class="text-[10px] font-extrabold bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 px-2 py-0.5 rounded-full">
+                Save 65% vs Cabs
+              </span>
+            </div>
+
+            <div class="mt-3.5 grid grid-cols-3 gap-2 text-center pt-3 border-t border-blue-800/60">
+              <div class="bg-blue-900/60 rounded-xl p-2 border border-blue-800/40">
+                <p class="text-[10px] text-blue-300 uppercase font-semibold">Distance</p>
+                <p class="text-base font-extrabold text-white mt-0.5 dynamic-distance-val">84 km</p>
+              </div>
+              <div class="bg-blue-900/60 rounded-xl p-2 border border-blue-800/40">
+                <p class="text-[10px] text-blue-300 uppercase font-semibold">Total Fuel</p>
+                <p id="calcTotalFuelCost" class="text-base font-extrabold text-white mt-0.5">₹196</p>
+                <p id="calcFuelLitres" class="text-[9px] text-blue-200">~1.9 L</p>
+              </div>
+              <div class="bg-blue-600 rounded-xl p-2 shadow-sm border border-blue-400/50">
+                <p class="text-[10px] text-blue-100 uppercase font-bold">Your Split</p>
+                <p id="calcPerSeatCost" class="text-lg font-black text-white mt-0.5">₹110</p>
+                <p class="text-[9px] text-blue-100 font-medium">per seat</p>
+              </div>
+            </div>
+
+            <p id="calcCabCompare" class="text-[10px] text-blue-200 text-center mt-2.5 opacity-90">
+              Commercial taxi charges ₹1,200+ for the same corridor
+            </p>
+          </div>
+        </div>
+
+        <!-- 4. Vehicle Type Selection Cards -->
+        <div>
+          <div class="flex items-center justify-between mb-2 px-1">
+            <h3 class="text-xs font-bold text-slate-700 uppercase tracking-wider">Choose Vehicle Type</h3>
+            <span class="text-[11px] text-blue-600 font-semibold">Both single & shared seats</span>
+          </div>
+
+          <div class="grid grid-cols-2 gap-3">
+            <!-- Bike Option Card -->
+            <div id="vehicleCardBike" onclick="selectVehicle('bike')" class="vehicle-card selected bg-white rounded-2xl p-3.5 cursor-pointer relative shadow-sm">
+              <div class="flex items-center justify-between mb-2">
+                <div class="w-9 h-9 rounded-xl bg-blue-100 text-blue-700 flex items-center justify-center">
+                  <i data-lucide="bike" class="w-5 h-5"></i>
+                </div>
+                <span class="text-[10px] font-extrabold bg-blue-600 text-white px-1.5 py-0.5 rounded-full">
+                  Fastest
+                </span>
+              </div>
+              <h4 class="font-bold text-sm text-slate-900 leading-tight">Bike Pillion</h4>
+              <p class="text-[11px] text-slate-500 mt-0.5">1 passenger seat • Helmet provided</p>
+              <div class="mt-3 pt-2 border-t border-slate-100 flex items-baseline justify-between">
+                <span class="text-[10px] text-slate-400 uppercase font-semibold">Split Fare</span>
+                <span id="bikeCardCost" class="text-base font-extrabold text-blue-700">₹110</span>
+              </div>
+            </div>
+
+            <!-- Car Option Card -->
+            <div id="vehicleCardCar" onclick="selectVehicle('car')" class="vehicle-card bg-white rounded-2xl p-3.5 cursor-pointer relative shadow-sm">
+              <div class="flex items-center justify-between mb-2">
+                <div class="w-9 h-9 rounded-xl bg-indigo-100 text-indigo-700 flex items-center justify-center">
+                  <i data-lucide="car" class="w-5 h-5"></i>
+                </div>
+                <span class="text-[10px] font-extrabold bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded-full">
+                  AC Comfort
+                </span>
+              </div>
+              <h4 class="font-bold text-sm text-slate-900 leading-tight">Car Pooling</h4>
+              <p class="text-[11px] text-slate-500 mt-0.5">2-4 shared seats • Luggage space</p>
+              <div class="mt-3 pt-2 border-t border-slate-100 flex items-baseline justify-between">
+                <span class="text-[10px] text-slate-400 uppercase font-semibold">Split Fare</span>
+                <span id="carCardCost" class="text-base font-extrabold text-slate-800">₹185</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Rider Primary Action Button: Find Rides -->
+        <button id="btnFindRides" onclick="findRidesAction()" class="w-full py-3.5 gradient-brand text-white rounded-2xl text-xs font-bold shadow-lg shadow-blue-500/25 active:scale-95 transition-all flex items-center justify-center gap-2">
+          <i data-lucide="search" class="w-4 h-4"></i>
+          <span>Find Available Rides</span>
+        </button>
+
+        <!-- 5. RIDER MODE VIEW: Matching Rides List -->
+        <div id="riderModeView" class="space-y-3 pt-1">
+          <div class="flex items-center justify-between px-1">
+            <div>
+              <h3 class="text-sm font-bold text-slate-900">Matching Driver Corridors</h3>
+              <p id="matchingRidesCount" class="text-xs text-slate-500">Checking verified drivers traveling today</p>
+            </div>
+            <!-- Quick Filter Pill -->
+            <button onclick="showToast('Rides sorted by earliest departure time', 'info')" class="flex items-center gap-1 text-[11px] font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 px-2.5 py-1 rounded-lg transition">
+              <i data-lucide="sliders-horizontal" class="w-3 h-3 text-slate-500"></i>
+              <span>Earliest</span>
+            </button>
+          </div>
+
+          <!-- Corridor Timeline Stops Banner -->
+          <div class="bg-blue-50/70 border border-blue-200/80 rounded-2xl p-3 text-xs">
+            <div class="flex items-center justify-between mb-2">
+              <span class="font-bold text-slate-800 text-[11px] flex items-center gap-1.5">
+                <i data-lucide="route" class="w-3.5 h-3.5 text-blue-600"></i>
+                Highway Corridor Route Stops
+              </span>
+              <span class="text-[10px] text-blue-700 font-semibold bg-blue-100/70 px-2 py-0.5 rounded-full">NH 163 Corridor</span>
+            </div>
+            <div class="flex items-center justify-between text-[11px] font-medium text-slate-600 relative px-1">
+              <div class="text-center">
+                <div class="w-2.5 h-2.5 rounded-full bg-emerald-500 mx-auto mb-1"></div>
+                <span class="block font-bold text-slate-900">Uppal</span>
+                <span class="text-[9px] text-slate-400">0 km</span>
+              </div>
+              <div class="flex-1 h-0.5 bg-slate-300 mx-1 mb-4"></div>
+              <div class="text-center">
+                <div class="w-2 rounded-full bg-blue-400 mx-auto mb-1.5"></div>
+                <span class="block text-slate-700">Bhongir</span>
+                <span class="text-[9px] text-slate-400">38 km</span>
+              </div>
+              <div class="flex-1 h-0.5 bg-slate-300 mx-1 mb-4"></div>
+              <div class="text-center">
+                <div class="w-2 rounded-full bg-blue-400 mx-auto mb-1.5"></div>
+                <span class="block text-slate-700">Aler</span>
+                <span class="text-[9px] text-slate-400">65 km</span>
+              </div>
+              <div class="flex-1 h-0.5 bg-slate-300 mx-1 mb-4"></div>
+              <div class="text-center">
+                <div class="w-2.5 h-2.5 rounded-full bg-blue-600 mx-auto mb-1"></div>
+                <span class="block font-bold text-slate-900">Jangaon</span>
+                <span class="text-[9px] text-slate-400">84 km</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Filter Chips -->
+          <div class="flex items-center gap-1.5 overflow-x-auto pb-1 text-[11px] no-scrollbar">
+            <button id="filterBtnAll" onclick="setRideFilter('all')" class="flex-shrink-0 px-3 py-1.5 rounded-xl font-bold transition bg-blue-600 text-white shadow-xs">
+              All Rides
+            </button>
+            <button id="filterBtnUpi" onclick="setRideFilter('upi')" class="flex-shrink-0 px-3 py-1.5 rounded-xl font-semibold transition bg-slate-100 text-slate-700 hover:bg-slate-200">
+              ⚡ Direct UPI Only
+            </button>
+            <button id="filterBtnRated" onclick="setRideFilter('rated')" class="flex-shrink-0 px-3 py-1.5 rounded-xl font-semibold transition bg-slate-100 text-slate-700 hover:bg-slate-200">
+              ★ Top Rated (4.8+)
+            </button>
+          </div>
+
+          <!-- Dynamic Ride Cards Container -->
+          <div id="rideListingsContainer" class="space-y-3">
+            <!-- Injected dynamically via app.js -->
+          </div>
+        </div>
+
+        <!-- 5. DRIVER MODE UI COMPONENT & INTERACTION BLOCK -->
+        <div id="driverModeView" class="hidden space-y-4 pt-1 pb-24">
+
+          <!-- 1. Master "Go Online" Toggle Card -->
+          <div class="bg-white rounded-3xl p-5 border border-slate-200 shadow-sm relative overflow-hidden">
+            <div class="flex items-center justify-between gap-3">
+              <div class="flex items-center gap-3">
+                <div class="relative">
+                  <div id="driverOnlineBeaconRing" class="absolute inset-0 rounded-2xl bg-emerald-500/30 radar-ring"></div>
+                  <div id="driverOnlineBadgeIcon" class="relative z-10 w-12 h-12 rounded-2xl bg-emerald-500 text-white flex items-center justify-center shadow-md shadow-emerald-500/25 transition-all">
+                    <i id="driverOnlineStatusIcon" data-lucide="radio" class="w-6 h-6 stroke-[2.5]"></i>
+                  </div>
+                </div>
+                <div>
+                  <div class="flex items-center gap-2">
+                    <h3 id="driverOnlineTitle" class="text-base font-extrabold text-slate-900 leading-tight">You are Online</h3>
+                    <span id="driverStatusPill" class="text-[10px] font-extrabold uppercase tracking-wider bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full">
+                      Broadcasting
+                    </span>
+                  </div>
+                  <p id="driverOnlineSubtitle" class="text-xs text-slate-500 mt-0.5">
+                    Uppal ➔ Jangaon corridor • Ready for passenger requests
+                  </p>
+                </div>
+              </div>
+
+              <!-- Go Online Toggle Switch Button -->
+              <button onclick="toggleDriverOnline()" id="btnDriverOnlineToggle" class="w-16 h-9 rounded-full bg-emerald-500 p-1 flex items-center transition-colors shadow-inner flex-shrink-0 cursor-pointer">
+                <div id="driverTogglePill" class="w-7 h-7 rounded-full bg-white shadow-md transform translate-x-7 driver-toggle-thumb flex items-center justify-center">
+                  <span id="driverToggleDot" class="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
+                </div>
+              </button>
+            </div>
+          </div>
+
+          <!-- 2. Live Fuel-Share Calculation Display Block -->
+          <div class="bg-gradient-to-br from-blue-900 to-indigo-950 text-white rounded-3xl p-5 shadow-lg shadow-blue-950/20 relative overflow-hidden">
+            <div class="absolute -right-4 -bottom-4 w-32 h-32 bg-blue-500/15 rounded-full blur-2xl pointer-events-none"></div>
+
+            <div class="flex items-start justify-between">
+              <div>
+                <span class="inline-flex items-center gap-1 text-[10px] font-extrabold uppercase tracking-wider bg-blue-800/80 text-blue-200 px-2.5 py-0.5 rounded-full border border-blue-700/50">
+                  <i data-lucide="calculator" class="w-3 h-3 text-cyan-300"></i>
+                  Live Fuel-Share Math
+                </span>
+                <p class="text-xs text-blue-200 mt-2">Recommended Contribution per Seat:</p>
+                <div class="flex items-baseline gap-1 mt-0.5">
+                  <span class="text-xs font-semibold text-blue-300">₹</span>
+                  <span id="driverRecCostPerSeat" class="text-3xl font-black text-white tracking-tight">108</span>
+                  <span class="text-xs text-blue-200 font-medium">/ seat</span>
+                </div>
+              </div>
+
+              <div class="text-right">
+                <span class="text-[10px] font-bold uppercase tracking-wider bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 px-2 py-0.5 rounded-full">
+                  0% Fee Platform
+                </span>
+                <p class="text-[11px] text-blue-200 font-semibold mt-2.5">100% direct to driver</p>
+              </div>
+            </div>
+
+            <!-- Distance and Corridor Math Breakdown -->
+            <div class="mt-4 pt-3.5 border-t border-blue-800/60 grid grid-cols-3 gap-2 text-center text-xs">
+              <div class="bg-blue-950/60 rounded-xl p-2.5 border border-blue-800/40">
+                <p class="text-[10px] text-blue-300 uppercase font-semibold">Corridor Distance</p>
+                <p id="driverLiveDistance" class="text-sm font-extrabold text-white mt-0.5">84 km</p>
+                <p class="text-[9px] text-blue-200 truncate">Uppal ➔ Jangaon</p>
+              </div>
+              <div class="bg-blue-950/60 rounded-xl p-2.5 border border-blue-800/40">
+                <p class="text-[10px] text-blue-300 uppercase font-semibold">Petrol Rate</p>
+                <p class="text-sm font-extrabold text-white mt-0.5">₹105.5/L</p>
+                <p class="text-[9px] text-blue-200">~1.9 L fuel</p>
+              </div>
+              <div class="bg-blue-600/80 rounded-xl p-2.5 border border-blue-400/40 shadow-xs">
+                <p class="text-[10px] text-blue-100 uppercase font-bold">Driver Share</p>
+                <p class="text-sm font-black text-white mt-0.5">50% Split</p>
+                <p class="text-[9px] text-blue-100">Exact Fuel Split</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- 3. Fuel Contribution Preference Options -->
+          <div class="bg-white rounded-3xl p-5 border border-slate-200 shadow-sm space-y-3">
+            <div>
+              <h3 class="font-bold text-slate-900 text-sm">Fuel Contribution Preference</h3>
+              <p class="text-xs text-slate-500 mt-0.5">Choose how co-commuters will pay for their fuel share:</p>
+            </div>
+
+            <div class="grid grid-cols-3 gap-2.5">
+              <!-- Direct UPI Option -->
+              <button type="button" id="prefBtnUpi" onclick="setDriverPayPreference('upi')" class="p-3 rounded-2xl border-2 border-slate-200 bg-slate-50 text-left transition hover:bg-slate-100 flex flex-col justify-between">
+                <div class="w-8 h-8 rounded-xl bg-purple-100 text-purple-700 flex items-center justify-center mb-2">
+                  <i data-lucide="qr-code" class="w-4 h-4"></i>
+                </div>
+                <div>
+                  <p class="font-bold text-xs text-slate-900 leading-tight">Direct UPI</p>
+                  <p class="text-[10px] text-slate-500 mt-0.5">GPay/PhonePe</p>
+                </div>
+              </button>
+
+              <!-- Cash Option -->
+              <button type="button" id="prefBtnCash" onclick="setDriverPayPreference('cash')" class="p-3 rounded-2xl border-2 border-slate-200 bg-slate-50 text-left transition hover:bg-slate-100 flex flex-col justify-between">
+                <div class="w-8 h-8 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center mb-2">
+                  <i data-lucide="banknote" class="w-4 h-4"></i>
+                </div>
+                <div>
+                  <p class="font-bold text-xs text-slate-900 leading-tight">Cash</p>
+                  <p class="text-[10px] text-slate-500 mt-0.5">Hand-to-hand</p>
+                </div>
+              </button>
+
+              <!-- Either Option (Default / Active) -->
+              <button type="button" id="prefBtnEither" onclick="setDriverPayPreference('either')" class="p-3 rounded-2xl border-2 border-blue-600 bg-blue-50/80 text-left transition flex flex-col justify-between shadow-xs">
+                <div class="w-8 h-8 rounded-xl bg-blue-600 text-white flex items-center justify-center mb-2">
+                  <i data-lucide="check" class="w-4 h-4 stroke-[3]"></i>
+                </div>
+                <div>
+                  <p class="font-bold text-xs text-slate-900 leading-tight">Either</p>
+                  <p class="text-[10px] text-blue-700 font-semibold mt-0.5">Recommended</p>
+                </div>
+              </button>
+            </div>
+          </div>
+
+          <!-- 4. Active Incoming Passenger Request Card Section -->
+          <div id="driverPassengerRequestSection" class="space-y-3">
+            <!-- Dynamically populated via app.js: shows incoming request card or accepted state -->
+          </div>
+
+        </div>
+
+      </section>
+
+      <!-- MY RIDES / ACTIVITY TAB -->
+      <section id="myRidesView" class="hidden p-4 space-y-4">
+        <div class="flex items-center justify-between pb-2 border-b border-slate-200">
+          <div>
+            <h2 class="text-lg font-bold text-slate-900">My Rides & Bookings</h2>
+            <p class="text-xs text-slate-500">Track your upcoming commutes and fuel savings</p>
+          </div>
+          <button onclick="switchTab('explore')" class="text-xs text-blue-600 font-bold hover:underline">
+            + New Ride
+          </button>
+        </div>
+
+        <div id="myRidesListContainer">
+          <!-- Injected via app.js -->
+        </div>
+      </section>
+
+      <!-- PROFILE & VEHICLE REGISTRATION TAB -->
+      <section id="profileView" class="hidden p-4 space-y-4">
+        <div class="bg-white rounded-3xl p-5 border border-slate-200 shadow-sm text-center">
+          <div class="relative w-20 h-20 mx-auto mb-3">
+            <img src="https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=200&h=200&q=80" alt="Avatar" class="w-20 h-20 rounded-full object-cover border-4 border-blue-600 shadow-md" />
+            <span class="absolute bottom-0 right-0 bg-emerald-500 text-white p-1 rounded-full border-2 border-white">
+              <i data-lucide="check" class="w-3.5 h-3.5 stroke-[3]"></i>
+            </span>
+          </div>
+          <h2 class="text-base font-bold text-slate-900">Shantanu (You)</h2>
+          <p class="text-xs text-slate-500">Daily Commuter • Uppal ➔ Warangal Corridor</p>
+          <div class="mt-3 flex items-center justify-center gap-2">
+            <span class="text-xs font-bold text-blue-700 bg-blue-50 px-2.5 py-1 rounded-full border border-blue-200">
+              Aadhaar & DL Verified
+            </span>
+            <span class="text-xs font-bold text-amber-700 bg-amber-50 px-2.5 py-1 rounded-full border border-amber-200">
+              ★ 5.0 Rating
+            </span>
+          </div>
+        </div>
+
+        <!-- Registered Vehicles -->
+        <div class="bg-white rounded-3xl p-5 border border-slate-200 shadow-sm space-y-3">
+          <div class="flex items-center justify-between pb-2 border-b border-slate-100">
+            <h3 class="font-bold text-slate-900 text-sm">Registered Vehicles</h3>
+            <button onclick="openAddVehicleModal()" class="text-xs text-blue-600 font-bold hover:underline">+ Add Vehicle</button>
+          </div>
+
+          <div id="registeredVehiclesContainer" class="space-y-2">
+            <!-- Rendered dynamically via app.js -->
+          </div>
+        </div>
+
+        <!-- Direct UPI Settlement VPA -->
+        <div class="bg-white rounded-3xl p-5 border border-slate-200 shadow-sm space-y-3">
+          <h3 class="font-bold text-slate-900 text-sm">Direct UPI Receiving VPA</h3>
+          <p class="text-xs text-slate-500">Riders pay directly to this UPI address when you offer rides.</p>
+          <div class="flex items-center gap-2">
+            <input type="text" value="shantanu@okhdfcbank" class="flex-1 bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-mono font-bold text-slate-800" readonly />
+            <button onclick="showToast('UPI Address Saved', 'success')" class="px-3 py-2.5 bg-slate-800 hover:bg-slate-900 text-white rounded-xl text-xs font-bold">
+              Update
+            </button>
+          </div>
+        </div>
+      </section>
+
+    </main>
+
+    <!-- 6. Clean Footer / Bottom Navigation -->
+    <nav class="fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-200 py-2 shadow-lg md:absolute">
+      <div class="max-w-md mx-auto px-6 grid grid-cols-3 gap-2">
+        <!-- Explore / Rides -->
+        <button id="nav-explore" onclick="switchTab('explore')" class="nav-item active flex flex-col items-center justify-center py-1 text-slate-400 hover:text-blue-600 transition">
+          <i data-lucide="compass" class="w-5 h-5 mb-0.5"></i>
+          <span class="text-[10px]">Rides</span>
+        </button>
+
+        <!-- My Bookings -->
+        <button id="nav-myrides" onclick="switchTab('myrides')" class="nav-item flex flex-col items-center justify-center py-1 text-slate-400 hover:text-blue-600 transition">
+          <i data-lucide="calendar" class="w-5 h-5 mb-0.5"></i>
+          <span class="text-[10px]">Activity</span>
+        </button>
+
+        <!-- Profile & Vehicle -->
+        <button id="nav-profile" onclick="switchTab('profile')" class="nav-item flex flex-col items-center justify-center py-1 text-slate-400 hover:text-blue-600 transition">
+          <i data-lucide="user" class="w-5 h-5 mb-0.5"></i>
+          <span class="text-[10px]">Account</span>
+        </button>
+      </div>
+    </nav>
+
+    <!-- Modals -->
+    <!-- Booking Modal -->
+    <div id="bookingModal" class="modal-backdrop fixed inset-0 z-50 flex items-center justify-center p-4 hidden">
+      <div id="bookingModalContent" class="bg-white rounded-3xl max-w-sm w-full shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200">
+        <!-- Populated via openBookingModal() in app.js -->
+      </div>
+    </div>
+
+    <!-- Ticket / Confirmation Modal -->
+    <div id="ticketModal" class="modal-backdrop fixed inset-0 z-50 flex items-center justify-center p-4 hidden">
+      <div id="ticketModalContent" class="bg-white rounded-3xl max-w-sm w-full shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200">
+        <!-- Populated via openTicketModal() in app.js -->
+      </div>
+    </div>
+
+    <!-- Safety & SOS Modal -->
+    <div id="safetyModal" class="modal-backdrop fixed inset-0 z-50 flex items-center justify-center p-4 hidden">
+      <div class="bg-white rounded-3xl max-w-sm w-full shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200 p-6">
+        <div class="flex items-center justify-between pb-3 border-b border-slate-100">
+          <div class="flex items-center gap-2">
+            <div class="w-8 h-8 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center">
+              <i data-lucide="shield-alert" class="w-4 h-4"></i>
+            </div>
+            <div>
+              <h3 class="text-base font-bold text-slate-900">Safety & Trust Shield</h3>
+              <p class="text-[10px] text-slate-500">Commuter Protection Hub</p>
+            </div>
+          </div>
+          <button onclick="closeModal('safetyModal')" class="p-1.5 text-slate-400 hover:text-slate-600 rounded-full hover:bg-slate-100">
+            <i data-lucide="x" class="w-5 h-5"></i>
+          </button>
+        </div>
+
+        <div class="mt-4 space-y-3 text-xs">
+          <!-- SOS Button -->
+          <div class="bg-rose-50 border border-rose-200 rounded-2xl p-3.5">
+            <div class="flex items-center justify-between">
+              <div>
+                <h4 class="font-bold text-rose-900">Emergency 112 Dispatch</h4>
+                <p class="text-[10px] text-rose-700 mt-0.5">Instant connection with Highway Police Helpline</p>
+              </div>
+              <button onclick="showToast('Connecting to Emergency Services (112)...', 'error')" class="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl font-bold text-xs shadow-sm">
+                SOS Call
+              </button>
+            </div>
+          </div>
+
+          <!-- Share Location via WhatsApp -->
+          <div class="bg-emerald-50 border border-emerald-200 rounded-2xl p-3.5">
+            <div class="flex items-center justify-between">
+              <div>
+                <h4 class="font-bold text-emerald-900">Share Live Corridor Trip</h4>
+                <p class="text-[10px] text-emerald-700 mt-0.5">Send route & vehicle number to family</p>
+              </div>
+              <button onclick="shareTripWithFamily()" class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold text-xs shadow-sm flex items-center gap-1">
+                <i data-lucide="share-2" class="w-3.5 h-3.5"></i>
+                <span>Share</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Commuter Safety Rules -->
+          <div class="p-3 bg-slate-50 rounded-2xl border border-slate-200/80 space-y-1.5 text-[11px] text-slate-600">
+            <div class="flex items-center gap-2 text-slate-800 font-semibold">
+              <i data-lucide="check" class="w-3.5 h-3.5 text-emerald-600 stroke-[3]"></i>
+              <span>Both Rider & Driver must verify Govt ID</span>
+            </div>
+            <div class="flex items-center gap-2 text-slate-800 font-semibold">
+              <i data-lucide="check" class="w-3.5 h-3.5 text-emerald-600 stroke-[3]"></i>
+              <span>Helmets mandatory for all two-wheeler rides</span>
+            </div>
+            <div class="flex items-center gap-2 text-slate-800 font-semibold">
+              <i data-lucide="check" class="w-3.5 h-3.5 text-emerald-600 stroke-[3]"></i>
+              <span>Direct cashless UPI payment encouraged</span>
+            </div>
+          </div>
+        </div>
+
+        <button onclick="closeModal('safetyModal')" class="mt-5 w-full py-3 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold transition">
+          Close Safety Hub
+        </button>
+      </div>
+    </div>
+
+    <!-- Add Vehicle Modal -->
+    <div id="addVehicleModal" class="modal-backdrop fixed inset-0 z-50 flex items-center justify-center p-4 hidden">
+      <div class="bg-white rounded-3xl max-w-sm w-full shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200 p-6">
+        <div class="flex items-center justify-between pb-3 border-b border-slate-100">
+          <h3 class="text-base font-bold text-slate-900">Register New Vehicle</h3>
+          <button onclick="closeModal('addVehicleModal')" class="p-1.5 text-slate-400 hover:text-slate-600 rounded-full hover:bg-slate-100">
+            <i data-lucide="x" class="w-5 h-5"></i>
+          </button>
+        </div>
+
+        <form onsubmit="handleAddVehicleSubmit(event)" class="mt-4 space-y-3.5 text-xs">
+          <div>
+            <label class="block font-bold text-slate-700 mb-1">Vehicle Category</label>
+            <div class="grid grid-cols-2 gap-2">
+              <label class="flex items-center justify-center gap-2 p-2.5 bg-slate-50 border border-slate-200 rounded-xl cursor-pointer has-[:checked]:border-blue-600 has-[:checked]:bg-blue-50">
+                <input type="radio" name="newVehType" value="bike" checked class="text-blue-600" />
+                <span class="font-bold text-slate-800">Motorcycle</span>
+              </label>
+              <label class="flex items-center justify-center gap-2 p-2.5 bg-slate-50 border border-slate-200 rounded-xl cursor-pointer has-[:checked]:border-blue-600 has-[:checked]:bg-blue-50">
+                <input type="radio" name="newVehType" value="car" class="text-blue-600" />
+                <span class="font-bold text-slate-800">Car / Sedan</span>
+              </label>
+            </div>
+          </div>
+
+          <div>
+            <label class="block font-bold text-slate-700 mb-1">Vehicle Make & Model</label>
+            <input id="newVehModel" type="text" placeholder="e.g. Maruti Suzuki Swift or Pulsar 150" required class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-semibold text-slate-900 focus:bg-white focus:border-blue-500 focus:outline-none" />
+          </div>
+
+          <div>
+            <label class="block font-bold text-slate-700 mb-1">Registration Plate No.</label>
+            <input id="newVehPlate" type="text" placeholder="TS 09 AB 1234" required class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-mono font-bold text-slate-900 uppercase focus:bg-white focus:border-blue-500 focus:outline-none" />
+          </div>
+
+          <div class="pt-2">
+            <button type="submit" class="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition shadow-sm">
+              Save & Verify Vehicle
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Toast Notification -->
+    <div id="appToast" class="fixed bottom-20 left-1/2 -translate-x-1/2 z-50 transition-all duration-300 transform translate-y-24 opacity-0 pointer-events-none w-11/12 max-w-sm">
+      <div class="bg-slate-900/95 backdrop-blur text-white px-4 py-3 rounded-2xl shadow-xl flex items-center gap-2.5 text-xs font-semibold border border-slate-800">
+        <i id="toastIcon" data-lucide="info" class="w-4 h-4 text-blue-400 flex-shrink-0"></i>
+        <span id="toastMessage" class="flex-1">Notification message</span>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Scripts -->
+  <script src="app.js"></script>
+</body>
+</html>
