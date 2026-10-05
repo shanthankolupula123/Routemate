@@ -722,6 +722,18 @@ function confirmBooking(rideId) {
   closeModal('bookingModal');
   updateUI();
 
+  // Persist booking to Supabase database
+  if (window.db && window.db.bookings) {
+    window.db.bookings.create({
+      rideId: ride.id,
+      riderName: 'Verified Commuter',
+      seats: 1,
+      fare: ride.perSeatPrice,
+      paymentMethod: 'upi',
+      pin: '4821'
+    }).catch(err => console.warn('Supabase booking sync warning:', err));
+  }
+
   // Show ticket success modal
   openTicketModal(ride);
 }
@@ -1040,6 +1052,19 @@ function acceptPassengerRequest() {
   state.activeDriverTrip = state.incomingRequest;
   showToast(`Ride Accepted! Navigating to ${state.incomingRequest.pickup}`, 'success');
   renderDriverIncomingRequest();
+
+  // Persist accepted incoming request to Supabase bookings
+  if (window.db && window.db.bookings && state.incomingRequest) {
+    window.db.bookings.create({
+      rideId: state.incomingRequest.id,
+      riderName: state.incomingRequest.name,
+      riderPhone: state.incomingRequest.phone,
+      seats: state.incomingRequest.seatCount || 1,
+      fare: state.incomingRequest.fareOffer || 108,
+      paymentMethod: state.incomingRequest.paymentMethod === 'Direct UPI' ? 'upi' : 'cash',
+      pin: state.incomingRequest.pin
+    }).catch(e => console.warn('Supabase booking sync warning:', e));
+  }
 }
 
 // Decline Passenger Request Action
@@ -1296,6 +1321,41 @@ function shareTripWithFamily() {
   window.open(url, '_blank');
 }
 
+// Sync live rides from Supabase Database
+async function syncRidesFromDatabase() {
+  if (!window.db || !window.db.rides) return;
+  try {
+    const data = await window.db.rides.fetchAll();
+    if (data && Array.isArray(data) && data.length > 0) {
+      console.log(`✅ Loaded ${data.length} live rides from Supabase table`);
+      availableRides = data.map(r => ({
+        id: r.id,
+        driverName: r.driver_name,
+        driverRole: r.driver_role || 'Verified Commuter',
+        rating: parseFloat(r.rating) || 4.9,
+        totalRides: 45,
+        avatar: r.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=120&h=120&q=80',
+        vehicleType: r.vehicle_type,
+        vehicleName: r.vehicle_name,
+        vehicleNumber: r.vehicle_number,
+        pickup: r.pickup,
+        drop: r.drop_location,
+        departureTime: r.departure_time,
+        seatsAvailable: r.seats_available,
+        perSeatPrice: parseFloat(r.per_seat_price),
+        paymentPreference: r.payment_preference,
+        verified: r.verified !== false,
+        helmetProvided: Boolean(r.helmet_provided),
+        ac: Boolean(r.ac),
+        notes: r.notes || ''
+      }));
+      updateUI();
+    }
+  } catch (err) {
+    console.warn('⚠️ Supabase sync fallback to local cache:', err);
+  }
+}
+
 // Initialize on DOM load
 document.addEventListener('DOMContentLoaded', () => {
   // Input change listeners
@@ -1335,4 +1395,7 @@ document.addEventListener('DOMContentLoaded', () => {
   updateUI();
   renderRegisteredVehicles();
   lucide.createIcons();
+
+  // Load from Supabase Database
+  syncRidesFromDatabase();
 });
