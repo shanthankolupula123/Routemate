@@ -1,0 +1,19 @@
+{
+  "appId": "com.routemate.app",
+  "appName": "Routemate",
+  "webDir": "www",
+  "server": {
+    "androidScheme": "https",
+    "cleartext": true
+  },
+  "android": {
+    "allowMixedContent": true,
+    "webContentsDebuggingEnabled": true
+  },
+  "plugins": {
+    "StatusBar": {
+      "style": "DARK",
+      "backgroundColor": "#1D4ED8"
+    }
+  }
+}

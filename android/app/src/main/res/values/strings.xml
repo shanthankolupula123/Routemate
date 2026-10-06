@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Routemate</string>
+    <string name="title_activity_main">Routemate</string>
+    <string name="package_name">com.routemate.app</string>
+    <string name="custom_url_scheme">com.routemate.app</string>
+</resources>

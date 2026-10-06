@@ -1,0 +1,33 @@
+{
+  "name": "routemate",
+  "version": "1.0.0",
+  "description": "> **\"Share the Ride, Split the Cost\"**",
+  "main": "app.js",
+  "scripts": {
+    "build": "node prepare-www.js",
+    "cap:add": "npx cap add android",
+    "cap:sync": "npm run build && npx cap sync android",
+    "cap:open": "npx cap open android",
+    "build:apk": "npm run build && npx cap sync android && cd android && gradlew.bat assembleDebug",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/shanthankolupula123/Routemate.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/shanthankolupula123/Routemate/issues"
+  },
+  "homepage": "https://github.com/shanthankolupula123/Routemate#readme",
+  "dependencies": {
+    "@capacitor/android": "^8.5.2",
+    "@capacitor/cli": "^8.5.2",
+    "@capacitor/core": "^8.5.2",
+    "@capacitor/geolocation": "^8.2.3",
+    "@capacitor/status-bar": "^8.0.4"
+  }
+}
