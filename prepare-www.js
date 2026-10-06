@@ -13,7 +13,8 @@ const filesToCopy = [
   'app.js',
   'maps.js',
   'payment.js',
-  'supabaseClient.js'
+  'supabaseClient.js',
+  'app-logo.png'
 ];
 
 filesToCopy.forEach(file => {
