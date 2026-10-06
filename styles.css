@@ -211,3 +211,17 @@ body {
   font-weight: 800 !important;
   color: #2563eb !important;
 }
+
+/* 6-Digit OTP Box Styling */
+.otp-box {
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  caret-color: #2563eb;
+}
+
+.otp-box:focus {
+  border-color: #2563eb !important;
+  background-color: #ffffff !important;
+  box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.15) !important;
+  transform: translateY(-1px);
+}
+

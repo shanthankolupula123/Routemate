@@ -9,20 +9,144 @@ const SUPABASE_CONFIG = {
 // Initialize Supabase Client using global @supabase/supabase-js
 let supabase = null;
 
-if (typeof window !== 'undefined' && window.supabase && window.supabase.createClient) {
-  try {
-    supabase = window.supabase.createClient(SUPABASE_CONFIG.url, SUPABASE_CONFIG.publishableKey);
-    console.log('✅ Supabase client initialized for Routemate (hjieeilzfbvubkhmlmdg.supabase.co)');
-  } catch (err) {
-    console.warn('⚠️ Error initializing Supabase client:', err);
+function getSupabaseClient() {
+  if (!supabase && typeof window !== 'undefined' && window.supabase && window.supabase.createClient) {
+    try {
+      supabase = window.supabase.createClient(SUPABASE_CONFIG.url, SUPABASE_CONFIG.publishableKey);
+      console.log('✅ Supabase client initialized for Routemate (hjieeilzfbvubkhmlmdg.supabase.co)');
+    } catch (err) {
+      console.warn('⚠️ Error initializing Supabase client:', err);
+    }
   }
-} else {
-  console.warn('⚠️ Supabase JS library not loaded yet; fallback mock mode active.');
+  return supabase;
 }
 
-// Database helper functions for rides, profiles, and bookings
+// Initial attempt
+getSupabaseClient();
+
+// Database and Authentication helper functions
 const db = {
-  client: supabase,
+  get client() {
+    return getSupabaseClient();
+  },
+
+  // ==========================================
+  // SUPABASE AUTH HELPERS (PHONE OTP)
+  // ==========================================
+  auth: {
+    // Fetch active Supabase session
+    async getSession() {
+      const client = getSupabaseClient();
+      if (!client) return null;
+      try {
+        const { data, error } = await client.auth.getSession();
+        if (error) {
+          console.warn('Supabase getSession error:', error.message);
+          return null;
+        }
+        return data ? data.session : null;
+      } catch (e) {
+        console.warn('Error fetching Supabase session:', e);
+        return null;
+      }
+    },
+
+    // Fetch active user
+    async getUser() {
+      const client = getSupabaseClient();
+      if (!client) return null;
+      try {
+        const { data, error } = await client.auth.getUser();
+        if (error) return null;
+        return data ? data.user : null;
+      } catch (e) {
+        return null;
+      }
+    },
+
+    // Send OTP to Phone
+    async signInWithOtp(phone) {
+      const client = getSupabaseClient();
+      if (!client) {
+        return { success: false, error: 'Supabase client library not loaded yet.' };
+      }
+      try {
+        console.log(`📱 Sending OTP via Supabase to: ${phone}`);
+        const { data, error } = await client.auth.signInWithOtp({
+          phone: phone, // Must be E.164, e.g. +919848023145
+        });
+
+        if (error) {
+          console.warn('Supabase signInWithOtp error response:', error);
+          return {
+            success: false,
+            error: error.message,
+            errorCode: error.code || error.error_code,
+            rawError: error
+          };
+        }
+
+        console.log('✅ Supabase signInWithOtp success:', data);
+        return { success: true, data };
+      } catch (e) {
+        console.error('Exception in signInWithOtp:', e);
+        return { success: false, error: e.message || 'Network error sending OTP' };
+      }
+    },
+
+    // Verify 6-digit OTP Token
+    async verifyOtp(phone, token) {
+      const client = getSupabaseClient();
+      if (!client) {
+        return { success: false, error: 'Supabase client not loaded.' };
+      }
+      try {
+        console.log(`🔑 Verifying OTP token for ${phone}...`);
+        const { data, error } = await client.auth.verifyOtp({
+          phone: phone,
+          token: token,
+          type: 'sms'
+        });
+
+        if (error) {
+          console.warn('Supabase verifyOtp error response:', error);
+          return {
+            success: false,
+            error: error.message,
+            errorCode: error.code || error.error_code,
+            rawError: error
+          };
+        }
+
+        console.log('✅ Supabase verifyOtp success:', data);
+        return { success: true, data };
+      } catch (e) {
+        console.error('Exception in verifyOtp:', e);
+        return { success: false, error: e.message || 'Verification exception' };
+      }
+    },
+
+    // Sign Out
+    async signOut() {
+      const client = getSupabaseClient();
+      if (!client) return { success: true };
+      try {
+        const { error } = await client.auth.signOut();
+        if (error) console.warn('Supabase signOut warning:', error.message);
+        return { success: true };
+      } catch (e) {
+        console.warn('Exception during signOut:', e);
+        return { success: true };
+      }
+    },
+
+    // Auth state listener
+    onAuthStateChange(callback) {
+      const client = getSupabaseClient();
+      if (!client) return { data: { subscription: { unsubscribe: () => {} } } };
+      return client.auth.onAuthStateChange(callback);
+    }
+  },
 
   // ==========================================
   // RIDES TABLE HELPERS
@@ -30,9 +154,10 @@ const db = {
   rides: {
     // Fetch all active rides from Supabase
     async fetchAll(vehicleType = null) {
-      if (!supabase) return null;
+      const client = getSupabaseClient();
+      if (!client) return null;
       try {
-        let query = supabase
+        let query = client
           .from('rides')
           .select('*')
           .eq('status', 'active')
@@ -56,7 +181,8 @@ const db = {
 
     // Insert new driver ride
     async create(rideData) {
-      if (!supabase) return { success: false, data: null };
+      const client = getSupabaseClient();
+      if (!client) return { success: false, data: null };
       try {
         const payload = {
           driver_name: rideData.driverName || 'Verified Commuter',
@@ -79,7 +205,7 @@ const db = {
           notes: rideData.notes || 'Commuter ride on Highway corridor.'
         };
 
-        const { data, error } = await supabase
+        const { data, error } = await client
           .from('rides')
           .insert([payload])
           .select();
@@ -103,9 +229,10 @@ const db = {
   // ==========================================
   profiles: {
     async getById(profileId) {
-      if (!supabase) return null;
+      const client = getSupabaseClient();
+      if (!client) return null;
       try {
-        const { data, error } = await supabase
+        const { data, error } = await client
           .from('profiles')
           .select('*')
           .eq('id', profileId)
@@ -118,10 +245,70 @@ const db = {
       }
     },
 
-    async upsert(profileData) {
-      if (!supabase) return null;
+    async getOrCreateByPhone(phone, customName = null) {
+      const client = getSupabaseClient();
+      if (!client) {
+        return {
+          id: 'local-' + Date.now(),
+          phone: phone,
+          name: customName || 'Verified Commuter',
+          role: 'Daily Commuter',
+          rating: 5.0,
+          total_rides: 1,
+          is_verified: true
+        };
+      }
       try {
-        const { data, error } = await supabase
+        const { data: existing, error } = await client
+          .from('profiles')
+          .select('*')
+          .eq('phone', phone)
+          .maybeSingle();
+
+        if (existing) {
+          return existing;
+        }
+
+        const newProfile = {
+          name: customName || 'Verified Commuter',
+          role: 'Daily Commuter',
+          rating: 5.00,
+          total_rides: 1,
+          phone: phone,
+          avatar_url: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=200&h=200&q=80',
+          is_verified: true
+        };
+
+        const { data: created, error: createErr } = await client
+          .from('profiles')
+          .insert([newProfile])
+          .select()
+          .maybeSingle();
+
+        if (createErr) {
+          console.warn('Could not insert profile into Supabase:', createErr.message);
+          return newProfile;
+        }
+        return created || newProfile;
+      } catch (e) {
+        console.warn('Error in getOrCreateByPhone:', e);
+        return {
+          id: 'local-' + Date.now(),
+          phone: phone,
+          name: customName || 'Verified Commuter',
+          role: 'Daily Commuter',
+          rating: 5.0,
+          total_rides: 1,
+          is_verified: true
+        };
+      }
+    },
+
+    async upsert(profileData) {
+      const client = getSupabaseClient();
+      if (!client) return null;
+      try {
+        const { data, error } = await client
           .from('profiles')
           .upsert([profileData])
           .select();
@@ -139,7 +326,8 @@ const db = {
   // ==========================================
   bookings: {
     async create(bookingData) {
-      if (!supabase) return { success: false };
+      const client = getSupabaseClient();
+      if (!client) return { success: false };
       try {
         const payload = {
           ride_id: bookingData.rideId,
@@ -152,7 +340,7 @@ const db = {
           booking_pin: bookingData.pin || Math.floor(1000 + Math.random() * 9000).toString()
         };
 
-        const { data, error } = await supabase
+        const { data, error } = await client
           .from('bookings')
           .insert([payload])
           .select();
@@ -171,9 +359,10 @@ const db = {
     },
 
     async fetchAll() {
-      if (!supabase) return null;
+      const client = getSupabaseClient();
+      if (!client) return null;
       try {
-        const { data, error } = await supabase
+        const { data, error } = await client
           .from('bookings')
           .select('*')
           .order('created_at', { ascending: false });
