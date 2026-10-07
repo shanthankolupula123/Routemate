@@ -697,6 +697,7 @@ function openBookingModal(rideId) {
         <label class="block text-xs font-bold text-slate-700 mb-2">Select Payment Method:</label>
         <div class="space-y-2.5 text-xs">
           <!-- Option 1: Razorpay Instant Online Pay (UPI, Cards, Netbanking) -->
+          <!-- Option 1: Razorpay Instant Online Pay (UPI, Cards, Netbanking) -->
           <div id="payCardRazorpay" onclick="selectBookingPayMethod('razorpay')" class="flex items-center justify-between p-3.5 border-2 border-blue-600 bg-blue-50/80 rounded-2xl cursor-pointer transition shadow-xs">
             <div class="flex items-center gap-2.5">
               <input type="radio" id="payRadioRazorpay" name="payMethod" value="razorpay" checked class="text-blue-600 w-4 h-4" />
@@ -713,25 +714,13 @@ function openBookingModal(rideId) {
             </div>
           </div>
 
-          <!-- Option 2: Direct UPI to Driver -->
-          <div id="payCardUpi" onclick="selectBookingPayMethod('upi')" class="flex items-center justify-between p-3.5 border border-slate-200 bg-white hover:bg-slate-50 rounded-2xl cursor-pointer transition">
-            <div class="flex items-center gap-2.5">
-              <input type="radio" id="payRadioUpi" name="payMethod" value="upi" class="text-blue-600 w-4 h-4" />
-              <div>
-                <p class="font-bold text-slate-900">Direct Driver UPI</p>
-                <p class="text-[11px] text-slate-500 mt-0.5">Scan driver's personal QR code upon boarding</p>
-              </div>
-            </div>
-            <span class="text-[10px] font-semibold text-purple-700 bg-purple-50 px-2 py-0.5 rounded flex-shrink-0">P2P Scan</span>
-          </div>
-
-          <!-- Option 3: Cash on Board -->
+          <!-- Option 2: Cash on Board -->
           <div id="payCardCash" onclick="selectBookingPayMethod('cash')" class="flex items-center justify-between p-3.5 border border-slate-200 bg-white hover:bg-slate-50 rounded-2xl cursor-pointer transition">
             <div class="flex items-center gap-2.5">
               <input type="radio" id="payRadioCash" name="payMethod" value="cash" class="text-blue-600 w-4 h-4" />
               <div>
                 <p class="font-bold text-slate-900">Cash on Board</p>
-                <p class="text-[11px] text-slate-500 mt-0.5">Hand physical cash to driver inside vehicle</p>
+                <p class="text-[11px] text-slate-500 mt-0.5">Hand physical cash or direct QR to driver inside vehicle</p>
               </div>
             </div>
             <span class="text-[10px] font-semibold text-slate-600 bg-slate-100 px-2 py-0.5 rounded flex-shrink-0">Hand-to-Hand</span>
@@ -762,7 +751,6 @@ function selectBookingPayMethod(method) {
   if (radio) radio.checked = true;
 
   const cardRazorpay = document.getElementById('payCardRazorpay');
-  const cardUpi = document.getElementById('payCardUpi');
   const cardCash = document.getElementById('payCardCash');
   const btnLabel = document.getElementById('bookingPayBtnLabel');
 
@@ -770,7 +758,6 @@ function selectBookingPayMethod(method) {
   const inactiveClass = 'flex items-center justify-between p-3.5 border border-slate-200 bg-white hover:bg-slate-50 rounded-2xl cursor-pointer transition';
 
   if (cardRazorpay) cardRazorpay.className = (method === 'razorpay' ? activeClass : inactiveClass);
-  if (cardUpi) cardUpi.className = (method === 'upi' ? activeClass : inactiveClass);
   if (cardCash) cardCash.className = (method === 'cash' ? activeClass : inactiveClass);
 
   const fareVal = document.getElementById('bookingTotalFareAmount')?.textContent?.replace('₹', '') || '108';
@@ -780,8 +767,6 @@ function selectBookingPayMethod(method) {
   if (btnLabel) {
     if (method === 'razorpay') {
       btnLabel.textContent = `Pay & Confirm ${seatWord} (₹${fareVal})`;
-    } else if (method === 'upi') {
-      btnLabel.textContent = `Reserve with Driver UPI (₹${fareVal})`;
     } else {
       btnLabel.textContent = `Reserve with Cash on Board (₹${fareVal})`;
     }
@@ -818,8 +803,6 @@ function adjustBookingSeats(delta, maxAvailable, perSeatPrice) {
   if (btnLabel) {
     if (currentMethod === 'razorpay') {
       btnLabel.textContent = `Pay & Confirm ${seatWord} (₹${total})`;
-    } else if (currentMethod === 'upi') {
-      btnLabel.textContent = `Reserve with Driver UPI (₹${total})`;
     } else {
       btnLabel.textContent = `Reserve with Cash on Board (₹${total})`;
     }
@@ -855,11 +838,10 @@ function confirmBooking(rideId) {
     return;
   }
 
-  // 2. Direct UPI or Cash
-  const isUpi = (selectedMethod === 'upi');
+  // 2. Cash on Board
   processSuccessfulBooking(ride, {
-    method: selectedMethod,
-    label: isUpi ? 'Direct UPI upon boarding' : 'Cash inside vehicle',
+    method: 'cash',
+    label: 'Cash on Board (Pay in vehicle)',
     paymentId: null,
     isPaid: false
   }, selectedSeats, totalFare);
@@ -1553,21 +1535,26 @@ function switchTab(tabName) {
   const mainView = document.getElementById('mainAppView');
   const myRidesView = document.getElementById('myRidesView');
   const profileView = document.getElementById('profileView');
+  const settingsView = document.getElementById('settingsView');
 
   // Hide all screens
-  mainView.classList.add('hidden');
-  myRidesView.classList.add('hidden');
-  profileView.classList.add('hidden');
+  if (mainView) mainView.classList.add('hidden');
+  if (myRidesView) myRidesView.classList.add('hidden');
+  if (profileView) profileView.classList.add('hidden');
+  if (settingsView) settingsView.classList.add('hidden');
 
   if (tabName === 'explore') {
-    mainView.classList.remove('hidden');
+    if (mainView) mainView.classList.remove('hidden');
   } else if (tabName === 'myrides') {
     renderMyRides();
-    myRidesView.classList.remove('hidden');
+    if (myRidesView) myRidesView.classList.remove('hidden');
   } else if (tabName === 'profile') {
-    profileView.classList.remove('hidden');
+    if (profileView) profileView.classList.remove('hidden');
+  } else if (tabName === 'settings') {
+    if (settingsView) settingsView.classList.remove('hidden');
   }
 
+  if (window.lucide) lucide.createIcons();
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
