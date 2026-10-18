@@ -409,52 +409,31 @@ const server = http.createServer(async (req, res) => {
 
       if (fast2smsKey) {
         try {
-          // 1. Try dedicated high-priority Transactional OTP route first
-          let f2sRes = await fetch('https://www.fast2sms.com/dev/bulkV2', {
+          const smsPayload = {
+            route: 'q',
+            message: `ROUTEMATE: Your verification OTP is: ${otpCode}. Valid for 10 minutes. Do not share with anyone.`,
+            language: 'english',
+            flash: 0,
+            numbers: cleanPhone
+          };
+
+          const f2sRes = await fetch('https://www.fast2sms.com/dev/bulkV2', {
             method: 'POST',
             headers: {
               'authorization': fast2smsKey,
               'Content-Type': 'application/json'
             },
-            body: JSON.stringify({
-              route: 'otp',
-              variables_values: otpCode,
-              numbers: cleanPhone
-            })
+            body: JSON.stringify(smsPayload)
           });
-          let f2sData = await f2sRes.json().catch(() => ({}));
+          const f2sData = await f2sRes.json().catch(() => ({}));
 
           if (f2sData.return === true) {
             smsSent = true;
-            usedRoute = 'otp';
-            console.log(`[Fast2SMS] High-priority OTP route dispatched to ${cleanPhone}`);
+            usedRoute = 'q';
+            console.log(`[Fast2SMS] SMS sent directly to ${cleanPhone} (req: ${f2sData.request_id})`);
           } else {
-            console.warn(`[Fast2SMS] OTP route notice (${f2sData.message || f2sData.status_code}), falling back to Quick route...`);
-            // 2. Fallback to Quick SMS route 'q'
-            f2sRes = await fetch('https://www.fast2sms.com/dev/bulkV2', {
-              method: 'POST',
-              headers: {
-                'authorization': fast2smsKey,
-                'Content-Type': 'application/json'
-              },
-              body: JSON.stringify({
-                route: 'q',
-                message: `Your Routemate verification code is: ${otpCode}. Valid for 10 minutes.`,
-                language: 'english',
-                flash: 0,
-                numbers: cleanPhone
-              })
-            });
-            f2sData = await f2sRes.json().catch(() => ({}));
-
-            if (f2sData.return === true) {
-              smsSent = true;
-              usedRoute = 'q';
-              console.log(`[Fast2SMS] Quick route dispatched to ${cleanPhone}`);
-            } else {
-              console.warn(`[Fast2SMS] Quick route response:`, f2sData);
-              smsNotice = f2sData.message || 'Fast2SMS dispatch notice';
-            }
+            console.warn(`[Fast2SMS] Dispatch warning:`, f2sData);
+            smsNotice = f2sData.message || 'Fast2SMS dispatch notice';
           }
         } catch (f2sErr) {
           console.error('[Fast2SMS] Network exception:', f2sErr);
