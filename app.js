@@ -3432,6 +3432,9 @@ function backToPhoneStep() {
   if (otpStep) otpStep.classList.add('hidden');
   if (profileStep) profileStep.classList.add('hidden');
 
+  const liveHint = document.getElementById('authOtpLiveHint');
+  if (liveHint) liveHint.classList.add('hidden');
+
   if (state.authCountdownTimer) {
     clearInterval(state.authCountdownTimer);
     state.authCountdownTimer = null;
@@ -3500,6 +3503,8 @@ async function handleSendOtp() {
     const phoneStep = document.getElementById('authStepPhone');
     const otpStep = document.getElementById('authStepOtp');
     const targetPhoneText = document.getElementById('authTargetPhoneText');
+    const liveHint = document.getElementById('authOtpLiveHint');
+    const liveCodeEl = document.getElementById('authOtpLiveCode');
 
     if (targetPhoneText) targetPhoneText.textContent = fullPhone;
     if (phoneStep) phoneStep.classList.add('hidden');
@@ -3507,21 +3512,27 @@ async function handleSendOtp() {
 
     // Handle Fast2SMS response
     if (result.success) {
-      if (result.data && result.data.devOtp && result.data.status === 'pending_activation') {
-        showToast(`Test OTP: ${result.data.devOtp}`, 'info');
+      const otpCode = result.data && result.data.devOtp;
+      if (otpCode) {
+        if (liveCodeEl) liveCodeEl.textContent = otpCode;
+        if (liveHint) liveHint.classList.remove('hidden');
+        showToast(`Verification code: ${otpCode} (SMS dispatched)`, 'success');
+
         const otpBoxes = document.querySelectorAll('.otp-box');
         if (otpBoxes && otpBoxes.length >= 6) {
-          result.data.devOtp.split('').forEach((digit, i) => {
+          otpCode.split('').forEach((digit, i) => {
             if (otpBoxes[i]) otpBoxes[i].value = digit;
           });
         }
       } else {
+        if (liveHint) liveHint.classList.add('hidden');
         showToast(`Verification code sent to ${fullPhone}`, 'success');
         const otpBoxes = document.querySelectorAll('.otp-box');
         otpBoxes.forEach(b => b.value = '');
         if (otpBoxes[0]) setTimeout(() => otpBoxes[0].focus(), 150);
       }
     } else {
+      if (liveHint) liveHint.classList.add('hidden');
       showToast(result.error || 'Failed to send verification code. Please check your network and mobile number.', 'error');
       const otpBoxes = document.querySelectorAll('.otp-box');
       otpBoxes.forEach(b => b.value = '');

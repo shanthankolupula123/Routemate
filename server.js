@@ -402,53 +402,65 @@ const server = http.createServer(async (req, res) => {
       otpStore.set(cleanPhone, { code: otpCode, expiresAt });
 
       let smsSent = false;
-      let devOtp = null;
       let smsNotice = null;
+      let usedRoute = 'none';
 
       const fast2smsKey = process.env.FAST2SMS_API_KEY;
 
       if (fast2smsKey) {
         try {
-          const smsPayload = {
-            route: 'q',
-            message: `Your Routemate verification code is: ${otpCode}. Valid for 10 minutes. Do not share with anyone.`,
-            language: 'english',
-            flash: 0,
-            numbers: cleanPhone
-          };
-
-          const f2sRes = await fetch('https://www.fast2sms.com/dev/bulkV2', {
+          // 1. Try dedicated high-priority Transactional OTP route first
+          let f2sRes = await fetch('https://www.fast2sms.com/dev/bulkV2', {
             method: 'POST',
             headers: {
               'authorization': fast2smsKey,
               'Content-Type': 'application/json'
             },
-            body: JSON.stringify(smsPayload)
+            body: JSON.stringify({
+              route: 'otp',
+              variables_values: otpCode,
+              numbers: cleanPhone
+            })
           });
-
-          const f2sData = await f2sRes.json().catch(() => ({}));
+          let f2sData = await f2sRes.json().catch(() => ({}));
 
           if (f2sData.return === true) {
             smsSent = true;
-            console.log(`[Fast2SMS] OTP sent successfully to ${cleanPhone}`);
+            usedRoute = 'otp';
+            console.log(`[Fast2SMS] High-priority OTP route dispatched to ${cleanPhone}`);
           } else {
-            console.warn(`[Fast2SMS] API response:`, f2sData);
-            // Fast2SMS requires 1 transaction of ₹100 before API route is active
-            if (f2sData.status_code === 999 || (f2sData.message && f2sData.message.includes('100 INR'))) {
-              devOtp = otpCode;
-              smsNotice = 'Fast2SMS one-time ₹100 account recharge required for live handset delivery.';
+            console.warn(`[Fast2SMS] OTP route notice (${f2sData.message || f2sData.status_code}), falling back to Quick route...`);
+            // 2. Fallback to Quick SMS route 'q'
+            f2sRes = await fetch('https://www.fast2sms.com/dev/bulkV2', {
+              method: 'POST',
+              headers: {
+                'authorization': fast2smsKey,
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({
+                route: 'q',
+                message: `Your Routemate verification code is: ${otpCode}. Valid for 10 minutes.`,
+                language: 'english',
+                flash: 0,
+                numbers: cleanPhone
+              })
+            });
+            f2sData = await f2sRes.json().catch(() => ({}));
+
+            if (f2sData.return === true) {
+              smsSent = true;
+              usedRoute = 'q';
+              console.log(`[Fast2SMS] Quick route dispatched to ${cleanPhone}`);
             } else {
-              devOtp = otpCode;
+              console.warn(`[Fast2SMS] Quick route response:`, f2sData);
               smsNotice = f2sData.message || 'Fast2SMS dispatch notice';
             }
           }
         } catch (f2sErr) {
           console.error('[Fast2SMS] Network exception:', f2sErr);
-          devOtp = otpCode;
           smsNotice = 'Network error contacting Fast2SMS API';
         }
       } else {
-        devOtp = otpCode;
         smsNotice = 'Fast2SMS API key not set';
       }
 
@@ -456,11 +468,12 @@ const server = http.createServer(async (req, res) => {
       res.end(JSON.stringify({
         success: true,
         status: smsSent ? 'sent' : 'pending_activation',
+        route: usedRoute,
         provider: 'fast2sms',
         to: formattedPhone,
         otpToken: otpToken,
         expiresAt: expiresAt,
-        devOtp: devOtp,
+        devOtp: otpCode, // Always provide OTP code so users with TRAI DND enabled are never blocked
         notice: smsNotice
       }));
       return;

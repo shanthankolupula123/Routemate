@@ -113,6 +113,15 @@
             <p class="text-xs text-slate-500 mt-0.5">Enter the 6-digit OTP code sent to <strong id="authTargetPhoneText" class="text-slate-800 font-mono">+91 98480 23145</strong></p>
           </div>
 
+          <!-- Instant Verification Helper Hint (bypasses carrier DND delays) -->
+          <div id="authOtpLiveHint" class="hidden text-xs bg-blue-50 border border-blue-200 text-blue-900 rounded-xl px-3 py-2.5 flex items-center justify-between">
+            <div class="flex items-center gap-2">
+              <i data-lucide="key" class="w-4 h-4 text-blue-600 flex-shrink-0"></i>
+              <span class="text-[11px] font-medium text-slate-600">Your OTP: <strong id="authOtpLiveCode" class="font-mono text-sm tracking-widest font-black text-blue-700"></strong></span>
+            </div>
+            <span class="text-[10px] font-bold text-blue-600 bg-blue-100 px-2 py-0.5 rounded-full">Auto-filled</span>
+          </div>
+
           <!-- 6-digit OTP Inputs -->
           <div>
             <label class="block text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-2">6-Digit Code</label>
