@@ -28,7 +28,7 @@ module.exports = async (req, res) => {
       });
     }
 
-    const keySecret = process.env.RAZORPAY_KEY_SECRET || 'C49SXYJ8u0SuudkO7aglD2vd';
+    const keySecret = process.env.RAZORPAY_KEY_SECRET || 'yfYWZQq3DH6bmP250AFcVoY5';
     const expectedSignature = crypto
       .createHmac('sha256', keySecret)
       .update(`${order_id}|${payment_id}`)

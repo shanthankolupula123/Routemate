@@ -362,7 +362,7 @@ const server = http.createServer(async (req, res) => {
 
   // Public Configuration Endpoint (exposes KEY_ID only, never KEY_SECRET)
   if (urlPath === '/api/razorpay/config' && req.method === 'GET') {
-    const keyId = process.env.RAZORPAY_KEY_ID || process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || 'rzp_test_TpKUL3fUrtbbP4';
+    const keyId = process.env.RAZORPAY_KEY_ID || process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || 'rzp_live_TpL2XODEcrhI1P';
     res.writeHead(200, { ...corsHeaders, 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ key_id: keyId }));
     return;
@@ -392,8 +392,8 @@ const server = http.createServer(async (req, res) => {
         return;
       }
 
-      const keyId = process.env.RAZORPAY_KEY_ID || 'rzp_test_TpKUL3fUrtbbP4';
-      const keySecret = process.env.RAZORPAY_KEY_SECRET || 'C49SXYJ8u0SuudkO7aglD2vd';
+      const keyId = process.env.RAZORPAY_KEY_ID || 'rzp_live_TpL2XODEcrhI1P';
+      const keySecret = process.env.RAZORPAY_KEY_SECRET || 'yfYWZQq3DH6bmP250AFcVoY5';
 
       if (!keyId || !keySecret) {
         res.writeHead(401, { ...corsHeaders, 'Content-Type': 'application/json' });
@@ -477,7 +477,7 @@ const server = http.createServer(async (req, res) => {
         return;
       }
 
-      const keySecret = process.env.RAZORPAY_KEY_SECRET || 'C49SXYJ8u0SuudkO7aglD2vd';
+      const keySecret = process.env.RAZORPAY_KEY_SECRET || 'yfYWZQq3DH6bmP250AFcVoY5';
       const expectedSignature = crypto
         .createHmac('sha256', keySecret)
         .update(`${order_id}|${payment_id}`)

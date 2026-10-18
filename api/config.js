@@ -10,6 +10,6 @@ module.exports = async (req, res) => {
 
   // Return public key only
   return res.status(200).json({
-    key_id: process.env.RAZORPAY_KEY_ID || process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || 'rzp_test_TpKUL3fUrtbbP4'
+    key_id: process.env.RAZORPAY_KEY_ID || process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || 'rzp_live_TpL2XODEcrhI1P'
   });
 };

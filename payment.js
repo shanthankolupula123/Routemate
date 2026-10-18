@@ -3,7 +3,7 @@
 
 const RAZORPAY_CONFIG = {
   // Public Key ID only (Key Secret NEVER reaches client code)
-  keyId: (typeof window !== 'undefined' && window.NEXT_PUBLIC_RAZORPAY_KEY_ID) || 'rzp_test_TpKUL3fUrtbbP4',
+  keyId: (typeof window !== 'undefined' && window.NEXT_PUBLIC_RAZORPAY_KEY_ID) || 'rzp_live_TpL2XODEcrhI1P',
   currency: 'INR',
   brandName: 'Routemate P2P Ride-Sharing',
   brandColor: '#2563EB',

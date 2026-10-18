@@ -35,8 +35,8 @@ module.exports = async (req, res) => {
       });
     }
 
-    const keyId = process.env.RAZORPAY_KEY_ID || 'rzp_test_TpKUL3fUrtbbP4';
-    const keySecret = process.env.RAZORPAY_KEY_SECRET || 'C49SXYJ8u0SuudkO7aglD2vd';
+    const keyId = process.env.RAZORPAY_KEY_ID || 'rzp_live_TpL2XODEcrhI1P';
+    const keySecret = process.env.RAZORPAY_KEY_SECRET || 'yfYWZQq3DH6bmP250AFcVoY5';
 
     if (!keyId || !keySecret) {
       return res.status(401).json({

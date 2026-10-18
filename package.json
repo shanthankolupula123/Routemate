@@ -4,7 +4,7 @@
   "description": "> **\"Share the Ride, Split the Cost\"**",
   "main": "app.js",
   "scripts": {
-    "dev": "node server.js",
+    "dev": "node --use-system-ca server.js",
     "start": "node server.js",
     "build": "node prepare-www.js",
     "cap:add": "npx cap add android",
