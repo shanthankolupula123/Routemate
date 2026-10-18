@@ -15,6 +15,7 @@ create table if not exists public.profiles (
   rating numeric(3,2) default 4.90,
   total_rides integer default 0,
   phone text,
+  email text,
   avatar_url text,
   is_verified boolean default true,
   is_kyc_verified boolean default false,
@@ -36,6 +37,9 @@ create table if not exists public.profiles (
 );
 
 -- Idempotent Migration for Existing Databases:
+alter table public.profiles add column if not exists email text;
+create index if not exists idx_profiles_email on public.profiles(email);
+create index if not exists idx_profiles_phone on public.profiles(phone);
 alter table public.profiles add column if not exists is_kyc_verified boolean default false;
 alter table public.profiles add column if not exists aadhaar_number text;
 alter table public.profiles add column if not exists dl_number text;

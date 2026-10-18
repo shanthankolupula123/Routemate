@@ -334,24 +334,50 @@ const db = {
         };
       }
       try {
-        const queryField = isEmail ? 'email' : 'phone';
-        const { data: existing, error } = await client
-          .from('profiles')
-          .select('*')
-          .eq(queryField, cleanTarget)
-          .maybeSingle();
+        let existing = null;
+        if (isEmail) {
+          // 1. Try querying by email column first
+          try {
+            const { data: byEmail, error: emailErr } = await client
+              .from('profiles')
+              .select('*')
+              .eq('email', cleanTarget)
+              .maybeSingle();
+            if (!emailErr && byEmail) existing = byEmail;
+          } catch (e) {}
+
+          // 2. If not found or if email column doesn't exist, check phone column
+          if (!existing) {
+            try {
+              const { data: byPhone, error: phoneErr } = await client
+                .from('profiles')
+                .select('*')
+                .eq('phone', cleanTarget)
+                .maybeSingle();
+              if (!phoneErr && byPhone) existing = byPhone;
+            } catch (e) {}
+          }
+        } else {
+          try {
+            const { data: byPhone, error: phoneErr } = await client
+              .from('profiles')
+              .select('*')
+              .eq('phone', cleanTarget)
+              .maybeSingle();
+            if (!phoneErr && byPhone) existing = byPhone;
+          } catch (e) {}
+        }
 
         if (existing) {
           return existing;
         }
 
-        const newProfile = {
+        const baseProfile = {
           name: customName || 'Verified Commuter',
           role: 'Daily Commuter',
           rating: 5.00,
           total_rides: 1,
-          phone: !isEmail ? cleanTarget : null,
-          email: isEmail ? cleanTarget : null,
+          phone: cleanTarget, // Always preserve target in phone column
           avatar_url: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=200&h=200&q=80',
           is_verified: true,
           is_kyc_verified: false,
@@ -359,17 +385,38 @@ const db = {
           dl_number: null
         };
 
-        const { data: created, error: createErr } = await client
-          .from('profiles')
-          .insert([newProfile])
-          .select()
-          .maybeSingle();
+        let created = null;
 
-        if (createErr) {
-          console.warn('Could not insert profile into Supabase:', createErr.message);
-          return newProfile;
+        // Try inserting with email column if this is an email identifier
+        if (isEmail) {
+          try {
+            const { data: withEmail, error: emailInsertErr } = await client
+              .from('profiles')
+              .insert([{ ...baseProfile, email: cleanTarget }])
+              .select()
+              .maybeSingle();
+            if (!emailInsertErr && withEmail) {
+              created = withEmail;
+            }
+          } catch (e) {}
         }
-        return created || newProfile;
+
+        // Fallback: insert base profile without email column so it never fails on legacy schemas
+        if (!created) {
+          const { data: baseCreated, error: baseInsertErr } = await client
+            .from('profiles')
+            .insert([baseProfile])
+            .select()
+            .maybeSingle();
+
+          if (baseInsertErr) {
+            console.warn('Could not insert profile into Supabase:', baseInsertErr.message);
+            return baseProfile;
+          }
+          created = baseCreated;
+        }
+
+        return created || baseProfile;
       } catch (e) {
         console.warn('Error in getOrCreateByPhone:', e);
         return {
@@ -586,14 +633,32 @@ const db = {
       const client = getSupabaseClient();
       if (!client) return { success: true, localOnly: true };
       try {
+        const isEmailTarget = typeof profileIdOrPhone === 'string' && profileIdOrPhone.includes('@');
         let query = client.from('profiles').update(details);
-        if (typeof profileIdOrPhone === 'string' && (profileIdOrPhone.startsWith('+') || /^\d{10,}$/.test(profileIdOrPhone.replace(/[\s+-]/g, '')))) {
+        if (isEmailTarget) {
+          query = query.eq('phone', profileIdOrPhone);
+        } else if (typeof profileIdOrPhone === 'string' && (profileIdOrPhone.startsWith('+') || /^\d{10,}$/.test(profileIdOrPhone.replace(/[\s+-]/g, '')))) {
           query = query.eq('phone', profileIdOrPhone);
         } else {
           query = query.eq('id', profileIdOrPhone);
         }
         const { data, error } = await query.select();
-        if (error) console.warn('Supabase profile details update warning:', error.message);
+        if (error) {
+          // If error is about email column missing in Supabase, strip email and update
+          if (error.code === 'PGRST204' && details && details.email) {
+            const safeDetails = { ...details };
+            delete safeDetails.email;
+            let fallbackQuery = client.from('profiles').update(safeDetails);
+            if (isEmailTarget) {
+              fallbackQuery = fallbackQuery.eq('phone', profileIdOrPhone);
+            } else {
+              fallbackQuery = fallbackQuery.eq('id', profileIdOrPhone);
+            }
+            const { data: fallbackData } = await fallbackQuery.select();
+            return { success: true, data: fallbackData };
+          }
+          console.warn('Supabase profile details update warning:', error.message);
+        }
         return { success: !error, data };
       } catch (e) {
         console.warn('Exception updating profile details:', e);
