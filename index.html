@@ -1176,6 +1176,26 @@
               </label>
             </div>
 
+            <!-- Test Razorpay Payment Option -->
+            <button type="button" onclick="testRazorpayPayment()" class="w-full py-3 flex items-center justify-between text-left hover:bg-blue-50/60 px-1 rounded-xl transition cursor-pointer group">
+              <div class="flex items-center gap-3">
+                <div class="w-8 h-8 rounded-xl bg-blue-100 text-blue-700 flex items-center justify-center flex-shrink-0 group-hover:scale-105 transition">
+                  <i data-lucide="credit-card" class="w-4 h-4"></i>
+                </div>
+                <div>
+                  <div class="flex items-center gap-1.5">
+                    <p class="text-xs font-bold text-slate-900">Test Razorpay Checkout</p>
+                    <span class="text-[9px] font-bold bg-blue-100 text-blue-800 px-1.5 py-0.2 rounded-full border border-blue-200">Standard Web</span>
+                  </div>
+                  <p class="text-[10px] text-slate-500">Launch standard checkout modal & backend HMAC verification</p>
+                </div>
+              </div>
+              <div class="flex items-center gap-1.5 text-slate-400">
+                <span class="text-[10px] font-mono font-bold bg-blue-50 text-blue-700 px-2 py-0.5 rounded-full border border-blue-200">₹1.00</span>
+                <i data-lucide="chevron-right" class="w-4 h-4 text-slate-400 group-hover:translate-x-0.5 transition"></i>
+              </div>
+            </button>
+
             <!-- Whitelisted Admin Portal Option (Visible ONLY to 9494285249 or 7989031924) -->
             <button id="adminPortalOptionItem" type="button" onclick="openAdminPortal()" class="w-full py-3 flex items-center justify-between text-left hover:bg-purple-50/60 px-1 rounded-xl transition cursor-pointer group hidden">
               <div class="flex items-center gap-3">

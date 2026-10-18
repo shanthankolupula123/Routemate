@@ -7523,5 +7523,36 @@ window.clearAdminFeedbackSearch = clearAdminFeedbackSearch;
 window.renderAdminFeedbacks = renderAdminFeedbacks;
 window.openAdminBlockFromFeedback = openAdminBlockFromFeedback;
 
+// Standalone test checkout helper for Razorpay Standard Web Checkout
+function testRazorpayPayment() {
+  if (!window.routematePayment) {
+    showToast('Razorpay payment module not initialized', 'error');
+    return;
+  }
+  const testRide = {
+    id: 'TEST-' + Date.now(),
+    perSeatPrice: 1, // 1 INR = 100 paise (Razorpay minimum amount)
+    pickup: 'Uppal Metro Gate 2',
+    drop: 'Jangaon Bus Stand',
+    driverName: 'Ramesh Kumar'
+  };
+  showToast('Creating Razorpay order...', 'info');
+  window.routematePayment.initiatePayment(
+    testRide,
+    function onSuccess(data) {
+      showToast(`Payment Verified! ID: ${data.paymentId}`, 'success');
+      alert(`✅ Razorpay Standard Web Checkout Succeeded!\n\n` +
+        `• Payment ID: ${data.paymentId}\n` +
+        `• Order ID: ${data.orderId}\n` +
+        `• Amount: ₹${data.amount}\n` +
+        `• Signature: Verified with HMAC-SHA256 by Backend!`);
+    },
+    function onFailure(err) {
+      showToast(`Payment cancelled or failed: ${err.message}`, 'info');
+    }
+  );
+}
+window.testRazorpayPayment = testRazorpayPayment;
+
 
 

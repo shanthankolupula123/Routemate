@@ -1,6 +1,32 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
+let Razorpay;
+try {
+  Razorpay = require('razorpay');
+} catch (e) {
+  console.warn('⚠️ Razorpay package not loaded in server.js:', e.message);
+}
+
+// Load environment variables from .env
+const envPath = path.join(__dirname, '.env');
+if (fs.existsSync(envPath)) {
+  const envContent = fs.readFileSync(envPath, 'utf8');
+  envContent.split(/\r?\n/).forEach(line => {
+    const trimmed = line.trim();
+    if (trimmed && !trimmed.startsWith('#')) {
+      const idx = trimmed.indexOf('=');
+      if (idx !== -1) {
+        const key = trimmed.substring(0, idx).trim();
+        const value = trimmed.substring(idx + 1).trim();
+        if (!process.env[key]) {
+          process.env[key] = value;
+        }
+      }
+    }
+  });
+}
 
 const PORT = 3000;
 const MIME_TYPES = {
@@ -328,6 +354,163 @@ const server = http.createServer(async (req, res) => {
     res.writeHead(200, { ...corsHeaders, 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ success: true, feedback }));
     return;
+  }
+
+  // ==========================================
+  // RAZORPAY STANDARD PAYMENT GATEWAY ENDPOINTS
+  // ==========================================
+
+  // Public Configuration Endpoint (exposes KEY_ID only, never KEY_SECRET)
+  if (urlPath === '/api/razorpay/config' && req.method === 'GET') {
+    const keyId = process.env.RAZORPAY_KEY_ID || process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || 'rzp_test_TpKUL3fUrtbbP4';
+    res.writeHead(200, { ...corsHeaders, 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ key_id: keyId }));
+    return;
+  }
+
+  // STEP 1: Backend - Create Order
+  // Endpoint: POST /api/create-order
+  // Call Razorpay API: POST https://api.razorpay.com/v1/orders
+  // Request: { amount (paise), currency, receipt }
+  // Return: { order_id, amount, currency }
+  // Minimum amount: 100 paise
+  if (urlPath === '/api/create-order' && req.method === 'POST') {
+    try {
+      const data = await parseJsonBody(req);
+      const amount = parseInt(data.amount, 10);
+      const currency = data.currency || 'INR';
+      const receipt = data.receipt || `rcpt_${Date.now()}`;
+      const notes = data.notes || {};
+
+      // Validate amount >= 100 paise
+      if (isNaN(amount) || amount < 100) {
+        res.writeHead(400, { ...corsHeaders, 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          success: false,
+          error: 'Amount must be at least 100 paise (₹1.00)'
+        }));
+        return;
+      }
+
+      const keyId = process.env.RAZORPAY_KEY_ID || 'rzp_test_TpKUL3fUrtbbP4';
+      const keySecret = process.env.RAZORPAY_KEY_SECRET || 'C49SXYJ8u0SuudkO7aglD2vd';
+
+      if (!keyId || !keySecret) {
+        res.writeHead(401, { ...corsHeaders, 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          success: false,
+          error: 'Razorpay API credentials not configured'
+        }));
+        return;
+      }
+
+      let orderId = null;
+      let orderAmount = amount;
+      let orderCurrency = currency;
+
+      try {
+        if (!Razorpay) Razorpay = require('razorpay');
+        const instance = new Razorpay({ key_id: keyId, key_secret: keySecret });
+        const order = await instance.orders.create({ amount, currency, receipt, notes });
+        orderId = order.id;
+        orderAmount = order.amount;
+        orderCurrency = order.currency;
+      } catch (sdkErr) {
+        // Fallback to direct Razorpay API: POST https://api.razorpay.com/v1/orders
+        const auth = Buffer.from(`${keyId}:${keySecret}`).toString('base64');
+        const apiRes = await fetch('https://api.razorpay.com/v1/orders', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Basic ${auth}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ amount, currency, receipt, notes })
+        });
+        const apiData = await apiRes.json();
+        if (!apiRes.ok || !apiData.id) {
+          throw new Error((apiData.error && apiData.error.description) || 'Razorpay order creation failed');
+        }
+        orderId = apiData.id;
+        orderAmount = apiData.amount;
+        orderCurrency = apiData.currency;
+      }
+
+      res.writeHead(200, { ...corsHeaders, 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        success: true,
+        order_id: orderId,
+        amount: orderAmount,
+        currency: orderCurrency
+      }));
+      return;
+    } catch (err) {
+      console.error('Error in /api/create-order:', err);
+      const statusCode = (err && (err.statusCode || err.status)) || 500;
+      res.writeHead(statusCode, { ...corsHeaders, 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        success: false,
+        error: (err.error && err.error.description) || err.message || 'Razorpay order creation failed'
+      }));
+      return;
+    }
+  }
+
+  // STEP 3: Backend - Verify Signature
+  // Endpoint: POST /api/verify-payment
+  // Algorithm: HMAC-SHA256(order_id + "|" + payment_id, KEY_SECRET)
+  // Compare generated signature with razorpay_signature
+  // Return success only if signatures match
+  if (urlPath === '/api/verify-payment' && req.method === 'POST') {
+    try {
+      const data = await parseJsonBody(req);
+      const order_id = data.razorpay_order_id || data.order_id;
+      const payment_id = data.razorpay_payment_id || data.payment_id;
+      const razorpay_signature = data.razorpay_signature || data.signature;
+
+      // Missing fields: return 400
+      if (!order_id || !payment_id || !razorpay_signature) {
+        res.writeHead(400, { ...corsHeaders, 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          success: false,
+          error: 'Missing required fields: order_id, payment_id, and signature are required'
+        }));
+        return;
+      }
+
+      const keySecret = process.env.RAZORPAY_KEY_SECRET || 'C49SXYJ8u0SuudkO7aglD2vd';
+      const expectedSignature = crypto
+        .createHmac('sha256', keySecret)
+        .update(`${order_id}|${payment_id}`)
+        .digest('hex');
+
+      // Signature mismatch: return 400, do NOT mark as paid
+      if (expectedSignature !== razorpay_signature) {
+        res.writeHead(400, { ...corsHeaders, 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          success: false,
+          error: 'Invalid payment signature. Verification failed.'
+        }));
+        return;
+      }
+
+      // Signatures match: return success
+      res.writeHead(200, { ...corsHeaders, 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        success: true,
+        message: 'Payment verified successfully',
+        order_id,
+        payment_id
+      }));
+      return;
+    } catch (err) {
+      console.error('Error in /api/verify-payment:', err);
+      res.writeHead(500, { ...corsHeaders, 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        success: false,
+        error: err.message || 'Payment signature verification error'
+      }));
+      return;
+    }
   }
 
   // ==========================================
