@@ -45,6 +45,7 @@ module.exports = async (req, res) => {
       try {
         const smsPayload = {
           route: 'q',
+          sender_id: 'TXTIND',
           message: `ROUTEMATE: Your verification OTP is: ${otpCode}. Valid for 10 minutes. Do not share with anyone.`,
           language: 'english',
           flash: 0,
