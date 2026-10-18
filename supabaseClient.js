@@ -64,10 +64,10 @@ const db = {
       }
     },
 
-    // Send OTP to Phone (Twilio Verify Service with fallback)
+    // Send OTP to Phone (Fast2SMS API with Supabase fallback)
     async signInWithOtp(phone) {
       try {
-        console.log(`📱 Sending OTP via Twilio Verify to: ${phone}`);
+        console.log(`📱 Sending OTP via Fast2SMS to: ${phone}`);
         const res = await fetch('/api/send-otp', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -76,14 +76,20 @@ const db = {
         const data = await res.json();
 
         if (res.ok && data.success) {
-          console.log('✅ Twilio OTP sent successfully:', data);
-          return { success: true, method: 'twilio', data };
+          console.log('✅ OTP sent successfully:', data);
+          if (data.otpToken && data.expiresAt) {
+            try {
+              sessionStorage.setItem('routemate_otp_token', data.otpToken);
+              sessionStorage.setItem('routemate_otp_expires', String(data.expiresAt));
+            } catch (e) {}
+          }
+          return { success: true, method: 'fast2sms', data };
         } else if (data && data.error) {
-          console.error('❌ Twilio send error:', data.error);
+          console.error('❌ Fast2SMS send error:', data.error);
           return { success: false, error: data.error };
         }
-      } catch (twilioErr) {
-        console.warn('Twilio endpoint error, falling back to Supabase auth:', twilioErr);
+      } catch (smsErr) {
+        console.warn('Fast2SMS endpoint error, falling back to Supabase auth:', smsErr);
       }
 
       // Supabase Native SMS Fallback
@@ -109,22 +115,34 @@ const db = {
       }
     },
 
-    // Verify 6-digit OTP Token (Twilio Verify Service with fallback)
+    // Verify 6-digit OTP Token (Fast2SMS with Supabase fallback)
     async verifyOtp(phone, token) {
       try {
-        console.log(`🔑 Verifying OTP token via Twilio for ${phone}...`);
+        console.log(`🔑 Verifying OTP token for ${phone}...`);
+        let otpToken = null;
+        let expiresAt = null;
+        try {
+          otpToken = sessionStorage.getItem('routemate_otp_token');
+          expiresAt = sessionStorage.getItem('routemate_otp_expires');
+        } catch (e) {}
+
         const res = await fetch('/api/verify-otp', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ phone, code: token })
+          body: JSON.stringify({ phone, code: token, otpToken, expiresAt })
         });
         const data = await res.json();
 
         if (res.ok && data.success && data.status === 'approved') {
-          console.log('✅ Twilio OTP verified successfully!');
+          console.log('✅ OTP verified successfully via Fast2SMS gateway!');
+          try {
+            sessionStorage.removeItem('routemate_otp_token');
+            sessionStorage.removeItem('routemate_otp_expires');
+          } catch (e) {}
+
           return {
             success: true,
-            method: 'twilio',
+            method: 'fast2sms',
             data: {
               user: {
                 id: 'usr_' + phone.replace(/[^0-9]/g, ''),
@@ -136,8 +154,8 @@ const db = {
         } else if (res.status === 400 && data.error) {
           return { success: false, error: data.error };
         }
-      } catch (twilioErr) {
-        console.warn('Twilio verify endpoint error, falling back to Supabase:', twilioErr);
+      } catch (err) {
+        console.warn('Fast2SMS verify endpoint error, falling back to Supabase:', err);
       }
 
       // Supabase Native Verify Fallback

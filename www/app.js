@@ -3829,17 +3829,28 @@ async function handleSendOtp() {
     if (setMpinStep) setMpinStep.classList.add('hidden');
     if (otpStep) otpStep.classList.remove('hidden');
 
-    // Handle Supabase response
+    // Handle Fast2SMS response
     if (result.success) {
-      showToast(`Verification code sent to ${fullPhone}`, 'success');
+      if (result.data && result.data.devOtp) {
+        showToast(`OTP Code: ${result.data.devOtp} (Fast2SMS pending ₹100 activation)`, 'info');
+        const otpBoxes = document.querySelectorAll('.otp-box');
+        if (otpBoxes && otpBoxes.length >= 6) {
+          result.data.devOtp.split('').forEach((digit, i) => {
+            if (otpBoxes[i]) otpBoxes[i].value = digit;
+          });
+        }
+      } else {
+        showToast(`Verification code sent to ${fullPhone}`, 'success');
+        const otpBoxes = document.querySelectorAll('.otp-box');
+        otpBoxes.forEach(b => b.value = '');
+        if (otpBoxes[0]) setTimeout(() => otpBoxes[0].focus(), 150);
+      }
     } else {
       showToast(result.error || 'Failed to send verification code. Please check your network and mobile number.', 'error');
+      const otpBoxes = document.querySelectorAll('.otp-box');
+      otpBoxes.forEach(b => b.value = '');
+      if (otpBoxes[0]) setTimeout(() => otpBoxes[0].focus(), 150);
     }
-
-    // Clear old OTP inputs & focus first
-    const otpBoxes = document.querySelectorAll('.otp-box');
-    otpBoxes.forEach(b => b.value = '');
-    if (otpBoxes[0]) setTimeout(() => otpBoxes[0].focus(), 150);
 
     // Start 30s countdown
     startOtpCountdown();

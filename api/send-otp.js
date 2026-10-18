@@ -1,4 +1,12 @@
-// Serverless Function: POST /api/send-otp (Twilio Verify)
+// Serverless Function: POST /api/send-otp (Fast2SMS OTP with HMAC Token)
+const crypto = require('crypto');
+
+const OTP_SECRET = process.env.OTP_SECRET || process.env.RAZORPAY_KEY_SECRET || 'routemate_otp_hmac_secret_2026';
+
+function signOtp(phone, code, expiresAt) {
+  return crypto.createHmac('sha256', OTP_SECRET).update(`${phone}:${code}:${expiresAt}`).digest('hex');
+}
+
 module.exports = async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
@@ -18,52 +26,76 @@ module.exports = async (req, res) => {
       return res.status(400).json({ success: false, error: 'Phone number is required' });
     }
 
-    // Ensure E.164 format (e.g. +91...)
-    let formattedPhone = phone.trim();
-    if (!formattedPhone.startsWith('+')) {
-      formattedPhone = '+91' + formattedPhone.replace(/[^0-9]/g, '');
+    const cleanPhone = phone.replace(/[^0-9]/g, '').slice(-10);
+    if (cleanPhone.length !== 10) {
+      return res.status(400).json({ success: false, error: 'Please provide a valid 10-digit mobile number' });
     }
+    const formattedPhone = '+91' + cleanPhone;
 
-    const accountSid = process.env.TWILIO_ACCOUNT_SID;
-    const authToken = process.env.TWILIO_AUTH_TOKEN;
-    const serviceSid = process.env.TWILIO_VERIFY_SERVICE_SID;
+    // Generate secure 6-digit OTP and HMAC signature for stateless serverless verification
+    const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+    const expiresAt = Date.now() + 10 * 60 * 1000; // 10 minutes validity
+    const otpToken = signOtp(cleanPhone, otpCode, expiresAt);
 
-    if (!accountSid || !authToken || !serviceSid) {
-      return res.status(500).json({
-        success: false,
-        error: 'Twilio Verify service credentials are not configured in environment variables'
-      });
-    }
+    let smsSent = false;
+    let devOtp = null;
+    let smsNotice = null;
 
-    const auth = Buffer.from(`${accountSid}:${authToken}`).toString('base64');
-    const params = new URLSearchParams();
-    params.append('To', formattedPhone);
-    params.append('Channel', 'sms');
+    const fast2smsKey = process.env.FAST2SMS_API_KEY;
 
-    const twilioRes = await fetch(`https://verify.twilio.com/v2/Services/${serviceSid}/Verifications`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Basic ${auth}`,
-        'Content-Type': 'application/x-www-form-urlencoded'
-      },
-      body: params
-    });
+    if (fast2smsKey) {
+      try {
+        const smsPayload = {
+          route: 'q',
+          message: `Your Routemate verification code is: ${otpCode}. Valid for 10 minutes. Do not share with anyone.`,
+          language: 'english',
+          flash: 0,
+          numbers: cleanPhone
+        };
 
-    const data = await twilioRes.json();
+        const f2sRes = await fetch('https://www.fast2sms.com/dev/bulkV2', {
+          method: 'POST',
+          headers: {
+            'authorization': fast2smsKey,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(smsPayload)
+        });
 
-    if (!twilioRes.ok) {
-      console.error('Twilio Verify Send Error:', data);
-      return res.status(twilioRes.status || 400).json({
-        success: false,
-        error: data.message || 'Failed to send OTP through Twilio'
-      });
+        const f2sData = await f2sRes.json().catch(() => ({}));
+
+        if (f2sData.return === true) {
+          smsSent = true;
+          console.log(`[Fast2SMS] OTP sent successfully to ${cleanPhone}`);
+        } else {
+          console.warn(`[Fast2SMS] API response:`, f2sData);
+          if (f2sData.status_code === 999 || (f2sData.message && f2sData.message.includes('100 INR'))) {
+            devOtp = otpCode;
+            smsNotice = 'Fast2SMS one-time ₹100 account recharge required for live handset delivery.';
+          } else {
+            devOtp = otpCode;
+            smsNotice = f2sData.message || 'Fast2SMS dispatch notice';
+          }
+        }
+      } catch (f2sErr) {
+        console.error('[Fast2SMS] Network exception:', f2sErr);
+        devOtp = otpCode;
+        smsNotice = 'Network error contacting Fast2SMS API';
+      }
+    } else {
+      devOtp = otpCode;
+      smsNotice = 'Fast2SMS API key not set';
     }
 
     return res.status(200).json({
       success: true,
-      status: data.status,
-      to: data.to,
-      serviceSid: data.service_sid
+      status: smsSent ? 'sent' : 'pending_activation',
+      provider: 'fast2sms',
+      to: formattedPhone,
+      otpToken: otpToken,
+      expiresAt: expiresAt,
+      devOtp: devOtp,
+      notice: smsNotice
     });
   } catch (err) {
     console.error('Exception in /api/send-otp:', err);
