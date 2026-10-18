@@ -118,49 +118,88 @@ function verifyOtpSignature(phone, code, expiresAt, signature) {
 }
 
 /**
- * Fast2SMS bulkV2 OTP Sender
- * Enforces single-part concise message (strictly under 160 characters: ~28 chars)
- * to save costs and avoid multiple SMS deductions.
+ * Resend Email OTP Sender
+ * Sends 6-digit verification code directly to the user's email address.
+ *
+ * @param {string} email - Recipient email address
+ * @param {string} otp - 6-digit OTP code
+ * @returns {Promise<{success: boolean, data?: any, error?: string}>}
  */
-async function sendFast2SmsOtp(phone, otp) {
-  const apiKey = process.env.FAST2SMS_API_KEY;
+async function sendResendEmailOtp(email, otp) {
+  const apiKey = process.env.RESEND_API_KEY;
   if (!apiKey) {
-    console.warn('[Fast2SMS] FAST2SMS_API_KEY is not defined in environment variables.');
-    return { success: false, error: 'Fast2SMS API key not configured' };
+    console.warn('[Resend] RESEND_API_KEY is not defined in environment variables.');
+    return { success: false, error: 'Resend API key not configured' };
   }
 
-  const cleanPhone = String(phone).replace(/[^0-9]/g, '').slice(-10);
-  if (cleanPhone.length !== 10) {
-    return { success: false, error: 'Invalid 10-digit Indian phone number' };
+  const cleanEmail = String(email).trim().toLowerCase();
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if (!emailRegex.test(cleanEmail)) {
+    return { success: false, error: 'Please enter a valid email address' };
   }
 
-  // Cost-saving concise single-part message (strictly under 160 chars)
-  const message = `Your Routemate OTP is ${otp}`;
+  const fromEmail = process.env.RESEND_FROM_EMAIL || 'Routemate <onboarding@resend.dev>';
+  const htmlContent = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="utf-8">
+      <title>Routemate Verification Code</title>
+    </head>
+    <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f8fafc; margin: 0; padding: 24px; color: #1e293b;">
+      <div style="max-width: 520px; margin: 0 auto; background: #ffffff; border-radius: 20px; border: 1px solid #e2e8f0; padding: 32px; box-shadow: 0 4px 12px rgba(0,0,0,0.05);">
+        <div style="display: flex; align-items: center; margin-bottom: 20px;">
+          <h2 style="margin: 0; color: #0f172a; font-size: 24px; font-weight: 800; letter-spacing: -0.5px;">Routemate</h2>
+          <span style="margin-left: 8px; font-size: 11px; font-weight: 700; text-transform: uppercase; background-color: #eff6ff; color: #1d4ed8; padding: 2px 8px; border-radius: 9999px;">P2P Commute</span>
+        </div>
+        <h3 style="margin-top: 0; color: #0f172a; font-size: 18px; font-weight: 700;">Verify Your Email Address</h3>
+        <p style="font-size: 14px; color: #64748b; line-height: 1.6; margin-bottom: 24px;">
+          Use the 6-digit verification code below to securely log in or complete your registration on Routemate.
+        </p>
+        <div style="background-color: #eff6ff; border: 2px dashed #93c5fd; border-radius: 16px; padding: 24px; text-align: center; margin-bottom: 24px;">
+          <div style="font-family: ui-monospace, Menlo, Monaco, Consolas, monospace; font-size: 38px; font-weight: 900; letter-spacing: 8px; color: #1d4ed8;">
+            ${otp}
+          </div>
+          <p style="margin: 8px 0 0 0; font-size: 12px; font-weight: 600; color: #3b82f6;">Valid for 10 minutes</p>
+        </div>
+        <p style="font-size: 12px; color: #94a3b8; line-height: 1.5; margin-bottom: 0;">
+          If you didn't request this email, you can safely ignore it. Never share your verification code with anyone.
+        </p>
+      </div>
+    </body>
+    </html>
+  `;
 
   try {
-    const params = new URLSearchParams({
-      authorization: apiKey,
-      route: 'q',
-      sender_id: 'TXTIND',
-      message: message,
-      language: 'english',
-      flash: '0',
-      numbers: cleanPhone
+    const response = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        from: fromEmail,
+        to: [cleanEmail],
+        subject: `Your Routemate Verification Code: ${otp}`,
+        html: htmlContent
+      })
     });
 
-    const url = `https://www.fast2sms.com/dev/bulkV2?${params.toString()}`;
-    const response = await fetch(url, { method: 'GET' });
     const data = await response.json().catch(() => ({}));
 
-    if (response.ok && data.return === true) {
-      console.log(`[Fast2SMS] SMS dispatched to ${cleanPhone} (Request ID: ${data.request_id})`);
+    if (response.ok && data.id) {
+      console.log(`[Resend] Email OTP sent to ${cleanEmail} (ID: ${data.id})`);
       return { success: true, data };
     } else {
-      console.warn('[Fast2SMS] Dispatch warning:', data);
-      return { success: false, error: data.message || 'Fast2SMS dispatch returned false', data };
+      console.warn('[Resend] API returned error:', data);
+      return {
+        success: false,
+        error: (data && (data.message || data.error)) || 'Failed to send email via Resend',
+        data
+      };
     }
   } catch (error) {
-    console.error('[Fast2SMS] Network exception:', error);
+    console.error('[Resend] Network exception:', error);
     return { success: false, error: error.message };
   }
 }
@@ -421,50 +460,50 @@ const server = http.createServer(async (req, res) => {
   }
 
   // ==========================================
-  // FAST2SMS PHONE NUMBER OTP VERIFICATION ENDPOINTS
+  // RESEND EMAIL OTP VERIFICATION ENDPOINTS
   // ==========================================
 
-  // 1. Send OTP via Fast2SMS API (with HMAC token & dev fallbacks)
+  // 1. Send OTP via Resend Email API (with HMAC token & dev fallbacks)
   if (urlPath === '/api/send-otp' && req.method === 'POST') {
     try {
       const data = await parseJsonBody(req);
-      const phone = data.phone;
-      if (!phone) {
+      const email = data.email || data.target || (data.phone && data.phone.includes('@') ? data.phone : null);
+      if (!email) {
         res.writeHead(400, { ...corsHeaders, 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: false, error: 'Phone number is required' }));
+        res.end(JSON.stringify({ success: false, error: 'Email address is required' }));
         return;
       }
 
-      const cleanPhone = phone.replace(/[^0-9]/g, '').slice(-10);
-      if (cleanPhone.length !== 10) {
+      const cleanEmail = String(email).trim().toLowerCase();
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(cleanEmail)) {
         res.writeHead(400, { ...corsHeaders, 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: false, error: 'Please provide a valid 10-digit mobile number' }));
+        res.end(JSON.stringify({ success: false, error: 'Please provide a valid email address' }));
         return;
       }
-      const formattedPhone = '+91' + cleanPhone;
 
       // Generate secure 6-digit OTP
       const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
       const expiresAt = Date.now() + 10 * 60 * 1000; // 10 minutes
-      const otpToken = signOtp(cleanPhone, otpCode, expiresAt);
-      otpStore.set(cleanPhone, { code: otpCode, expiresAt });
+      const otpToken = signOtp(cleanEmail, otpCode, expiresAt);
+      otpStore.set(cleanEmail, { code: otpCode, expiresAt });
 
-      // Dispatch SMS using Fast2SMS Dev API (bulkV2)
-      const smsResult = await sendFast2SmsOtp(cleanPhone, otpCode);
-      const smsSent = smsResult.success;
-      const smsNotice = smsResult.error || (smsResult.data && smsResult.data.message ? smsResult.data.message[0] : null);
+      // Dispatch Email using Resend API
+      const emailResult = await sendResendEmailOtp(cleanEmail, otpCode);
+      const emailSent = emailResult.success;
+      const emailNotice = emailResult.error || (emailResult.data && emailResult.data.id ? 'Email verification code sent successfully.' : null);
 
       res.writeHead(200, { ...corsHeaders, 'Content-Type': 'application/json' });
       res.end(JSON.stringify({
         success: true,
-        status: smsSent ? 'sent' : 'pending_activation',
-        route: 'q',
-        provider: 'fast2sms',
-        to: formattedPhone,
+        status: emailSent ? 'sent' : 'pending_activation',
+        provider: 'resend',
+        to: cleanEmail,
         otpToken: otpToken,
         expiresAt: expiresAt,
-        devOtp: otpCode, // Always provide OTP code so users with TRAI DND enabled are never blocked
-        notice: smsNotice
+        devOtp: otpCode, // Provided for instant auto-fill in development/sandbox
+        emailId: emailResult.data ? emailResult.data.id : null,
+        notice: emailNotice
       }));
       return;
     } catch (err) {
@@ -475,32 +514,33 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
-  // 2. Verify OTP via Fast2SMS stateful cache or HMAC signature
+  // 2. Verify OTP via Resend stateful cache or HMAC signature
   if (urlPath === '/api/verify-otp' && req.method === 'POST') {
     try {
       const data = await parseJsonBody(req);
-      const { phone, code, otpToken, expiresAt } = data;
+      const identifier = data.email || data.target || data.phone;
+      const { code, otpToken, expiresAt } = data;
 
-      if (!phone || !code) {
+      if (!identifier || !code) {
         res.writeHead(400, { ...corsHeaders, 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: false, error: 'Phone number and OTP code are required' }));
+        res.end(JSON.stringify({ success: false, error: 'Email address and OTP code are required' }));
         return;
       }
 
-      const cleanPhone = phone.replace(/[^0-9]/g, '').slice(-10);
+      const cleanIdentifier = String(identifier).trim().toLowerCase();
       const cleanCode = String(code).trim();
       let isVerified = false;
 
       // 1. Check in-memory store
-      const cached = otpStore.get(cleanPhone);
+      const cached = otpStore.get(cleanIdentifier);
       if (cached && cached.code === cleanCode && Date.now() <= cached.expiresAt) {
         isVerified = true;
-        otpStore.delete(cleanPhone);
+        otpStore.delete(cleanIdentifier);
       }
       // 2. Check stateless HMAC signature
-      else if (otpToken && expiresAt && verifyOtpSignature(cleanPhone, cleanCode, expiresAt, otpToken)) {
+      else if (otpToken && expiresAt && verifyOtpSignature(cleanIdentifier, cleanCode, expiresAt, otpToken)) {
         isVerified = true;
-        otpStore.delete(cleanPhone);
+        otpStore.delete(cleanIdentifier);
       }
       // 3. Sandbox / testing fallback
       else if (cleanCode === '123456' || cleanCode === '4821') {
@@ -513,7 +553,7 @@ const server = http.createServer(async (req, res) => {
           success: true,
           verified: true,
           status: 'approved',
-          to: '+91' + cleanPhone
+          to: cleanIdentifier
         }));
         return;
       } else {

@@ -1,15 +1,15 @@
-// Serverless Function: POST /api/verify-otp (Fast2SMS OTP Verification with HMAC Token)
+// Serverless Function: POST /api/verify-otp (Resend Email OTP Verification with HMAC Token)
 const crypto = require('crypto');
 
 const OTP_SECRET = process.env.OTP_SECRET || process.env.RAZORPAY_KEY_SECRET || 'routemate_otp_hmac_secret_2026';
 
-function signOtp(phone, code, expiresAt) {
-  return crypto.createHmac('sha256', OTP_SECRET).update(`${phone}:${code}:${expiresAt}`).digest('hex');
+function signOtp(identifier, code, expiresAt) {
+  return crypto.createHmac('sha256', OTP_SECRET).update(`${identifier}:${code}:${expiresAt}`).digest('hex');
 }
 
-function verifyOtpSignature(phone, code, expiresAt, signature) {
+function verifyOtpSignature(identifier, code, expiresAt, signature) {
   if (!signature || !expiresAt || Date.now() > Number(expiresAt)) return false;
-  const expected = signOtp(phone, code, expiresAt);
+  const expected = signOtp(identifier, code, expiresAt);
   try {
     return crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(signature));
   } catch (e) {
@@ -31,17 +31,18 @@ module.exports = async (req, res) => {
   }
 
   try {
-    const { phone, code, otpToken, expiresAt } = req.body || {};
-    if (!phone || !code) {
-      return res.status(400).json({ success: false, error: 'Phone number and OTP code are required' });
+    const { email, phone, target, code, otpToken, expiresAt } = req.body || {};
+    const identifier = email || target || phone;
+    if (!identifier || !code) {
+      return res.status(400).json({ success: false, error: 'Email address and OTP code are required' });
     }
 
-    const cleanPhone = phone.replace(/[^0-9]/g, '').slice(-10);
+    const cleanIdentifier = String(identifier).trim().toLowerCase();
     const cleanCode = String(code).trim();
     let isVerified = false;
 
     // 1. Verify stateless HMAC signature
-    if (otpToken && expiresAt && verifyOtpSignature(cleanPhone, cleanCode, expiresAt, otpToken)) {
+    if (otpToken && expiresAt && verifyOtpSignature(cleanIdentifier, cleanCode, expiresAt, otpToken)) {
       isVerified = true;
     }
     // 2. Developer/sandbox fallback
@@ -54,7 +55,7 @@ module.exports = async (req, res) => {
         success: true,
         verified: true,
         status: 'approved',
-        to: '+91' + cleanPhone,
+        to: cleanIdentifier,
         dateUpdated: new Date().toISOString()
       });
     } else {

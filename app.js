@@ -24,6 +24,7 @@ const ROUTE_DISTANCES = {
 // Application State
 const state = {
   currentUser: null,
+  authEmail: '',
   authPhone: '',
   authCountdown: 30,
   authCountdownTimer: null,
@@ -3213,8 +3214,8 @@ function showAuthView() {
   if (appBottomNav) appBottomNav.classList.add('hidden');
 
   backToPhoneStep();
-  const phoneInput = document.getElementById('authPhoneInput');
-  if (phoneInput) setTimeout(() => phoneInput.focus(), 200);
+  const emailInput = document.getElementById('authEmailInput') || document.getElementById('authPhoneInput');
+  if (emailInput) setTimeout(() => emailInput.focus(), 200);
   if (window.lucide) lucide.createIcons();
 }
 
@@ -3445,58 +3446,63 @@ function backToPhoneStep() {
 }
 
 // ----------------------------------------------------
-// 1. PHONE NUMBER SUBMIT: Direct OTP Verification Flow
+// 1. EMAIL SUBMIT: Resend OTP Verification Flow
 // ----------------------------------------------------
-async function handlePhoneSubmit() {
-  const phoneInput = document.getElementById('authPhoneInput');
+async function handleAuthSubmit() {
+  const emailInput = document.getElementById('authEmailInput') || document.getElementById('authPhoneInput');
   const errorEl = document.getElementById('authPhoneError');
   const errorText = document.getElementById('authPhoneErrorText');
 
-  if (!phoneInput) return;
-  const rawDigits = phoneInput.value.replace(/[^0-9]/g, '');
+  if (!emailInput) return;
+  const rawEmail = emailInput.value.trim().toLowerCase();
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-  if (rawDigits.length !== 10) {
-    if (errorText) errorText.textContent = 'Please enter a valid 10-digit mobile number';
+  if (!rawEmail || !emailRegex.test(rawEmail)) {
+    if (errorText) errorText.textContent = 'Please enter a valid email address';
     if (errorEl) errorEl.classList.remove('hidden');
-    phoneInput.focus();
+    emailInput.focus();
     return;
   }
 
   clearPhoneError();
-  const fullPhone = '+91' + rawDigits;
-  state.authPhone = fullPhone;
+  state.authEmail = rawEmail;
+  state.authPhone = rawEmail;
   await handleSendOtp();
 }
 
+async function handlePhoneSubmit() {
+  return handleAuthSubmit();
+}
+
 async function handleSendOtp() {
-  const phoneInput = document.getElementById('authPhoneInput');
+  const emailInput = document.getElementById('authEmailInput') || document.getElementById('authPhoneInput');
   const errorEl = document.getElementById('authPhoneError');
   const errorText = document.getElementById('authPhoneErrorText');
   const sendBtn = document.getElementById('btnSendOtp');
   const sendBtnText = document.getElementById('btnSendOtpText');
 
-  if (!phoneInput) return;
-  const rawDigits = phoneInput.value.replace(/[^0-9]/g, '');
+  const email = state.authEmail || (emailInput ? emailInput.value.trim().toLowerCase() : '');
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-  if (rawDigits.length !== 10) {
-    if (errorText) errorText.textContent = 'Please enter a valid 10-digit mobile number';
+  if (!email || !emailRegex.test(email)) {
+    if (errorText) errorText.textContent = 'Please enter a valid email address';
     if (errorEl) errorEl.classList.remove('hidden');
-    phoneInput.focus();
+    if (emailInput) emailInput.focus();
     return;
   }
 
   clearPhoneError();
-  const fullPhone = '+91' + rawDigits;
-  state.authPhone = fullPhone;
+  state.authEmail = email;
+  state.authPhone = email;
 
   // Set button loading
   if (sendBtn) sendBtn.disabled = true;
-  if (sendBtnText) sendBtnText.textContent = 'Sending OTP...';
+  if (sendBtnText) sendBtnText.textContent = 'Sending Code...';
 
   try {
     let result = { success: false };
     if (window.db && window.db.auth) {
-      result = await window.db.auth.signInWithOtp(fullPhone);
+      result = await window.db.auth.signInWithOtp(email);
     }
 
     // Switch to OTP step
@@ -3506,17 +3512,17 @@ async function handleSendOtp() {
     const liveHint = document.getElementById('authOtpLiveHint');
     const liveCodeEl = document.getElementById('authOtpLiveCode');
 
-    if (targetPhoneText) targetPhoneText.textContent = fullPhone;
+    if (targetPhoneText) targetPhoneText.textContent = email;
     if (phoneStep) phoneStep.classList.add('hidden');
     if (otpStep) otpStep.classList.remove('hidden');
 
-    // Handle Fast2SMS response
+    // Handle Resend response
     if (result.success) {
       const otpCode = result.data && result.data.devOtp;
       if (otpCode) {
         if (liveCodeEl) liveCodeEl.textContent = otpCode;
         if (liveHint) liveHint.classList.remove('hidden');
-        showToast(`Verification code: ${otpCode} (SMS dispatched)`, 'success');
+        showToast(`Verification code: ${otpCode} (Email dispatched)`, 'success');
 
         const otpBoxes = document.querySelectorAll('.otp-box');
         if (otpBoxes && otpBoxes.length >= 6) {
@@ -3526,14 +3532,14 @@ async function handleSendOtp() {
         }
       } else {
         if (liveHint) liveHint.classList.add('hidden');
-        showToast(`Verification code sent to ${fullPhone}`, 'success');
+        showToast(`Verification code sent to ${email}`, 'success');
         const otpBoxes = document.querySelectorAll('.otp-box');
         otpBoxes.forEach(b => b.value = '');
         if (otpBoxes[0]) setTimeout(() => otpBoxes[0].focus(), 150);
       }
     } else {
       if (liveHint) liveHint.classList.add('hidden');
-      showToast(result.error || 'Failed to send verification code. Please check your network and mobile number.', 'error');
+      showToast(result.error || 'Failed to send verification code. Please check your email.', 'error');
       const otpBoxes = document.querySelectorAll('.otp-box');
       otpBoxes.forEach(b => b.value = '');
       if (otpBoxes[0]) setTimeout(() => otpBoxes[0].focus(), 150);
@@ -3547,7 +3553,7 @@ async function handleSendOtp() {
     showToast('Failed to send OTP. Please try again.', 'error');
   } finally {
     if (sendBtn) sendBtn.disabled = false;
-    if (sendBtnText) sendBtnText.textContent = 'Continue';
+    if (sendBtnText) sendBtnText.textContent = 'Send Verification Code';
     if (window.lucide) lucide.createIcons();
   }
 }
@@ -3603,23 +3609,22 @@ async function handleVerifyOtp() {
     let verified = false;
     let authUser = null;
 
-    // 1. Try real Supabase OTP verification
+    // 1. Try Resend email OTP verification
+    const authIdentifier = state.authEmail || state.authPhone;
     if (window.db && window.db.auth) {
-      const res = await window.db.auth.verifyOtp(state.authPhone, code);
+      const res = await window.db.auth.verifyOtp(authIdentifier, code);
       if (res.success && res.data) {
         verified = true;
         authUser = res.data.user;
       }
     }
 
-    // Real Supabase OTP verification only
-
     if (verified) {
       // Sync or fetch profile from Supabase Database
       let profile = null;
       if (window.db && window.db.profiles) {
         try {
-          profile = await window.db.profiles.getOrCreateByPhone(state.authPhone);
+          profile = await window.db.profiles.getOrCreateByPhone(authIdentifier);
         } catch (e) {
           console.warn('Profile sync:', e);
         }
@@ -3638,7 +3643,8 @@ async function handleVerifyOtp() {
 
       const sessionUser = {
         id: (authUser && authUser.id) || (profile && profile.id) || ('usr_' + Date.now()),
-        phone: state.authPhone,
+        email: state.authEmail || (authUser && authUser.email) || (profile && profile.email) || '',
+        phone: (profile && profile.phone) || (authUser && authUser.phone) || (state.authPhone && !state.authPhone.includes('@') ? state.authPhone : '') || '+91 98480 23145',
         name: (profile && profile.name && profile.name !== 'Verified Commuter') ? profile.name : '',
         gender: (profile && profile.gender) || '',
         avatar: (profile && profile.avatar_url && !profile.avatar_url.includes('photo-1535713875002-d1d0cf377fde')) ? profile.avatar_url : null,
@@ -3647,7 +3653,6 @@ async function handleVerifyOtp() {
         kyc_status: (profile && profile.kyc_status) || (profile && profile.is_kyc_verified ? 'verified_success' : 'unverified'),
         aadhaar_number: (profile && profile.aadhaar_number) || '',
         dl_number: (profile && profile.dl_number) || '',
-        email: (profile && profile.email) || '',
         dob: (profile && profile.dob) || '',
         memberSince: (profile && profile.member_since) || 'October 2024',
         profile_completed: hasCompletedProfile,
@@ -3657,11 +3662,10 @@ async function handleVerifyOtp() {
       state.currentUser = sessionUser;
       localStorage.setItem('routemate_auth_user', JSON.stringify(sessionUser));
 
-
       if (!hasCompletedProfile) {
         // First-time login / signup -> MANDATORY PROFILE SETUP SCREEN
         console.log('📝 First-time user detected. Launching mandatory profile onboarding...');
-        showOnboardingStep(state.authPhone, profile);
+        showOnboardingStep(authIdentifier, profile);
         showToast('Please enter your mandatory name and gender to continue', 'info');
         return;
       }
@@ -3671,10 +3675,10 @@ async function handleVerifyOtp() {
 
       // Reset auth forms
       backToPhoneStep();
-      const phoneInput = document.getElementById('authPhoneInput');
-      if (phoneInput) phoneInput.value = '';
+      const emailInput = document.getElementById('authEmailInput') || document.getElementById('authPhoneInput');
+      if (emailInput) emailInput.value = '';
     } else {
-      if (errorText) errorText.textContent = 'Invalid verification code. Please enter the valid OTP sent to your phone.';
+      if (errorText) errorText.textContent = 'Invalid verification code. Please enter the valid OTP sent to your email.';
       if (errorEl) errorEl.classList.remove('hidden');
       if (otpBoxes[0]) otpBoxes[0].focus();
     }
@@ -3726,7 +3730,7 @@ function showOnboardingStep(phone = null, profile = null) {
 
   const emailInput = document.getElementById('onboardingEmailInput');
   if (emailInput) {
-    emailInput.value = (user && user.email) ? user.email : '';
+    emailInput.value = state.authEmail || (user && user.email) || '';
   }
 
   const dobInput = document.getElementById('onboardingDobInput');
@@ -7083,6 +7087,7 @@ async function handleConfirmDeleteAccount() {
 }
 
 // Window bindings
+window.handleAuthSubmit = handleAuthSubmit;
 window.handlePhoneSubmit = handlePhoneSubmit;
 window.handleManualDocSelected = handleManualDocSelected;
 window.handleSendOtp = handleSendOtp;

@@ -64,42 +64,46 @@ const db = {
       }
     },
 
-    // Send OTP to Phone (Fast2SMS API with Supabase fallback)
-    async signInWithOtp(phone) {
+    // Send OTP to Email (Resend API with Supabase fallback)
+    async signInWithOtp(emailOrPhone) {
+      const target = String(emailOrPhone || '').trim().toLowerCase();
       try {
-        console.log(`📱 Sending OTP via Fast2SMS to: ${phone}`);
+        console.log(`📧 Sending OTP via Resend to: ${target}`);
         const res = await fetch('/api/send-otp', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ phone })
+          body: JSON.stringify({ email: target })
         });
         const data = await res.json();
 
         if (res.ok && data.success) {
-          console.log('✅ OTP sent successfully:', data);
+          console.log('✅ Resend Email OTP sent successfully:', data);
           if (data.otpToken && data.expiresAt) {
             try {
               sessionStorage.setItem('routemate_otp_token', data.otpToken);
               sessionStorage.setItem('routemate_otp_expires', String(data.expiresAt));
+              sessionStorage.setItem('routemate_auth_target', target);
             } catch (e) {}
           }
-          return { success: true, method: 'fast2sms', data };
+          return { success: true, method: 'resend', data };
         } else if (data && data.error) {
-          console.error('❌ Fast2SMS send error:', data.error);
+          console.error('❌ Resend send error:', data.error);
           return { success: false, error: data.error };
         }
-      } catch (smsErr) {
-        console.warn('Fast2SMS endpoint error, falling back to Supabase auth:', smsErr);
+      } catch (err) {
+        console.warn('Resend endpoint error, checking Supabase auth fallback:', err);
       }
 
-      // Supabase Native SMS Fallback
+      // Supabase Native Email/SMS Fallback
       const client = getSupabaseClient();
       if (!client) {
         return { success: false, error: 'Authentication service not available.' };
       }
       try {
-        console.log(`📱 Sending OTP via Supabase to: ${phone}`);
-        const { data, error } = await client.auth.signInWithOtp({ phone });
+        console.log(`📧 Sending OTP via Supabase to: ${target}`);
+        const isEmail = target.includes('@');
+        const authPayload = isEmail ? { email: target } : { phone: target };
+        const { data, error } = await client.auth.signInWithOtp(authPayload);
         if (error) {
           console.warn('Supabase signInWithOtp error response:', error);
           return {
@@ -115,10 +119,11 @@ const db = {
       }
     },
 
-    // Verify 6-digit OTP Token (Fast2SMS with Supabase fallback)
-    async verifyOtp(phone, token) {
+    // Verify 6-digit OTP Token (Resend with Supabase fallback)
+    async verifyOtp(emailOrPhone, token) {
+      const identifier = String(emailOrPhone || '').trim().toLowerCase();
       try {
-        console.log(`🔑 Verifying OTP token for ${phone}...`);
+        console.log(`🔑 Verifying OTP token for ${identifier}...`);
         let otpToken = null;
         let expiresAt = null;
         try {
@@ -129,24 +134,29 @@ const db = {
         const res = await fetch('/api/verify-otp', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ phone, code: token, otpToken, expiresAt })
+          body: JSON.stringify({ email: identifier, code: token, otpToken, expiresAt })
         });
         const data = await res.json();
 
         if (res.ok && data.success && data.status === 'approved') {
-          console.log('✅ OTP verified successfully via Fast2SMS gateway!');
+          console.log('✅ OTP verified successfully via Resend verification service!');
           try {
             sessionStorage.removeItem('routemate_otp_token');
             sessionStorage.removeItem('routemate_otp_expires');
           } catch (e) {}
 
+          const cleanId = identifier.includes('@')
+            ? 'usr_' + identifier.replace(/[^a-zA-Z0-9]/g, '_')
+            : 'usr_' + identifier.replace(/[^0-9]/g, '');
+
           return {
             success: true,
-            method: 'fast2sms',
+            method: 'resend',
             data: {
               user: {
-                id: 'usr_' + phone.replace(/[^0-9]/g, ''),
-                phone: phone,
+                id: cleanId,
+                email: identifier.includes('@') ? identifier : '',
+                phone: !identifier.includes('@') ? identifier : '',
                 verified_at: new Date().toISOString()
               }
             }
@@ -155,7 +165,7 @@ const db = {
           return { success: false, error: data.error };
         }
       } catch (err) {
-        console.warn('Fast2SMS verify endpoint error, falling back to Supabase:', err);
+        console.warn('Resend verify endpoint error, falling back to Supabase:', err);
       }
 
       // Supabase Native Verify Fallback
@@ -164,12 +174,12 @@ const db = {
         return { success: false, error: 'Authentication service not loaded.' };
       }
       try {
-        console.log(`🔑 Verifying OTP token via Supabase for ${phone}...`);
-        const { data, error } = await client.auth.verifyOtp({
-          phone: phone,
-          token: token,
-          type: 'sms'
-        });
+        console.log(`🔑 Verifying OTP token via Supabase for ${identifier}...`);
+        const isEmail = identifier.includes('@');
+        const verifyPayload = isEmail
+          ? { email: identifier, token: token, type: 'email' }
+          : { phone: identifier, token: token, type: 'sms' };
+        const { data, error } = await client.auth.verifyOtp(verifyPayload);
         if (error) {
           console.warn('Supabase verifyOtp error response:', error);
           return {
@@ -304,12 +314,15 @@ const db = {
       }
     },
 
-    async getOrCreateByPhone(phone, customName = null) {
+    async getOrCreateByPhone(identifier, customName = null) {
+      const isEmail = String(identifier || '').includes('@');
+      const cleanTarget = String(identifier || '').trim();
       const client = getSupabaseClient();
       if (!client) {
         return {
           id: 'local-' + Date.now(),
-          phone: phone,
+          phone: !isEmail ? cleanTarget : '+91 98480 23145',
+          email: isEmail ? cleanTarget : '',
           name: customName || 'Verified Commuter',
           role: 'Daily Commuter',
           rating: 5.0,
@@ -321,10 +334,11 @@ const db = {
         };
       }
       try {
+        const queryField = isEmail ? 'email' : 'phone';
         const { data: existing, error } = await client
           .from('profiles')
           .select('*')
-          .eq('phone', phone)
+          .eq(queryField, cleanTarget)
           .maybeSingle();
 
         if (existing) {
@@ -336,7 +350,8 @@ const db = {
           role: 'Daily Commuter',
           rating: 5.00,
           total_rides: 1,
-          phone: phone,
+          phone: !isEmail ? cleanTarget : null,
+          email: isEmail ? cleanTarget : null,
           avatar_url: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=200&h=200&q=80',
           is_verified: true,
           is_kyc_verified: false,
@@ -359,7 +374,8 @@ const db = {
         console.warn('Error in getOrCreateByPhone:', e);
         return {
           id: 'local-' + Date.now(),
-          phone: phone,
+          phone: !isEmail ? cleanTarget : '+91 98480 23145',
+          email: isEmail ? cleanTarget : '',
           name: customName || 'Verified Commuter',
           role: 'Daily Commuter',
           rating: 5.0,

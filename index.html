@@ -69,55 +69,53 @@
       <!-- Auth Form Container -->
       <div class="w-full max-w-sm mx-auto my-auto py-2">
         
-        <!-- STEP 1: Enter Mobile Number -->
+        <!-- STEP 1: Enter Email Address -->
         <div id="authStepPhone" class="bg-white rounded-3xl p-6 border border-slate-200/90 shadow-sm space-y-4">
           <div>
-            <h2 class="text-base font-extrabold text-slate-900">Mobile Authentication</h2>
-            <p class="text-xs text-slate-500 mt-0.5">Enter your 10-digit mobile number to receive an OTP</p>
+            <h2 class="text-base font-extrabold text-slate-900">Email Authentication</h2>
+            <p class="text-xs text-slate-500 mt-0.5">Enter your email address to receive a 6-digit verification code</p>
           </div>
 
-          <!-- Mobile Input Box -->
+          <!-- Email Input Box -->
           <div>
-            <label class="block text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">Mobile Number</label>
+            <label class="block text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">Email Address</label>
             <div class="flex items-center bg-slate-50 border-2 border-slate-200 rounded-2xl overflow-hidden focus-within:border-blue-600 focus-within:bg-white transition-all shadow-inner">
-              <div class="flex items-center gap-1.5 px-3 py-3 border-r border-slate-200 bg-slate-100/70 text-xs font-bold text-slate-700 select-none">
-                <span>🇮🇳</span>
-                <span>+91</span>
+              <div class="flex items-center gap-1.5 px-3.5 py-3 border-r border-slate-200 bg-slate-100/70 text-xs font-bold text-slate-700 select-none">
+                <i data-lucide="mail" class="w-4 h-4 text-blue-600"></i>
               </div>
-              <input id="authPhoneInput" type="tel" maxlength="10" placeholder="98480 23145" class="w-full bg-transparent px-3.5 py-3 text-base font-bold font-mono tracking-wider text-slate-900 focus:outline-none placeholder-slate-400" />
+              <input id="authEmailInput" type="email" placeholder="you@example.com" class="w-full bg-transparent px-3.5 py-3 text-sm font-semibold text-slate-900 focus:outline-none placeholder-slate-400" />
             </div>
             <p id="authPhoneError" class="text-[11px] text-red-500 font-semibold mt-1.5 hidden flex items-center gap-1">
               <i data-lucide="alert-circle" class="w-3.5 h-3.5"></i>
-              <span id="authPhoneErrorText">Please enter a valid 10-digit mobile number</span>
+              <span id="authPhoneErrorText">Please enter a valid email address</span>
             </p>
           </div>
 
-
           <!-- Submit / Continue Button -->
-          <button id="btnSendOtp" type="button" onclick="handlePhoneSubmit()" class="w-full py-3.5 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl text-sm font-bold transition shadow-lg shadow-blue-500/25 active:scale-[0.98] flex items-center justify-center gap-2 cursor-pointer">
-            <span id="btnSendOtpText">Continue</span>
+          <button id="btnSendOtp" type="button" onclick="handleAuthSubmit()" class="w-full py-3.5 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl text-sm font-bold transition shadow-lg shadow-blue-500/25 active:scale-[0.98] flex items-center justify-center gap-2 cursor-pointer">
+            <span id="btnSendOtpText">Send Verification Code</span>
             <i data-lucide="arrow-right" class="w-4 h-4"></i>
           </button>
         </div>
 
-        <!-- STEP 2: Verify 6-Digit SMS OTP -->
+        <!-- STEP 2: Verify 6-Digit Email OTP -->
         <div id="authStepOtp" class="hidden bg-white rounded-3xl p-6 border border-slate-200/90 shadow-sm space-y-4">
           <!-- Back button -->
           <button type="button" onclick="backToPhoneStep()" class="text-xs text-blue-600 hover:text-blue-700 font-bold flex items-center gap-1">
             <i data-lucide="arrow-left" class="w-3.5 h-3.5"></i>
-            <span>Change Mobile Number</span>
+            <span>Change Email Address</span>
           </button>
 
           <div>
             <h2 class="text-base font-extrabold text-slate-900">Enter Verification Code</h2>
-            <p class="text-xs text-slate-500 mt-0.5">Enter the 6-digit OTP code sent to <strong id="authTargetPhoneText" class="text-slate-800 font-mono">+91 98480 23145</strong></p>
+            <p class="text-xs text-slate-500 mt-0.5">Enter the 6-digit OTP code sent to <strong id="authTargetPhoneText" class="text-slate-800 font-semibold break-all">you@example.com</strong></p>
           </div>
 
-          <!-- Instant Verification Helper Hint (bypasses carrier DND delays) -->
+          <!-- Instant Verification Helper Hint -->
           <div id="authOtpLiveHint" class="hidden text-xs bg-blue-50 border border-blue-200 text-blue-900 rounded-xl px-3 py-2.5 flex items-center justify-between">
             <div class="flex items-center gap-2">
               <i data-lucide="key" class="w-4 h-4 text-blue-600 flex-shrink-0"></i>
-              <span class="text-[11px] font-medium text-slate-600">Your OTP: <strong id="authOtpLiveCode" class="font-mono text-sm tracking-widest font-black text-blue-700"></strong></span>
+              <span class="text-[11px] font-medium text-slate-600">Your Code: <strong id="authOtpLiveCode" class="font-mono text-sm tracking-widest font-black text-blue-700"></strong></span>
             </div>
             <span class="text-[10px] font-bold text-blue-600 bg-blue-100 px-2 py-0.5 rounded-full">Auto-filled</span>
           </div>
@@ -145,7 +143,7 @@
               Resend in <strong id="authCountdown" class="text-slate-700 font-mono">30</strong>s
             </span>
             <button id="btnResendOtp" type="button" onclick="handleResendOtp()" disabled class="text-blue-600 font-bold disabled:text-slate-300 disabled:cursor-not-allowed hover:underline">
-              Resend OTP
+              Resend Code
             </button>
           </div>
 
@@ -158,10 +156,10 @@
 
         <!-- STEP 3: Mandatory First-Time Profile Onboarding (Driver or Customer) -->
         <div id="authStepProfile" class="hidden bg-white rounded-3xl p-6 border border-slate-200/90 shadow-sm space-y-4">
-          <!-- Back button to change mobile number -->
+          <!-- Back button to change email -->
           <button type="button" onclick="backToPhoneStep()" class="text-xs text-blue-600 hover:text-blue-700 font-bold flex items-center gap-1">
             <i data-lucide="arrow-left" class="w-3.5 h-3.5"></i>
-            <span>Change Mobile Number</span>
+            <span>Change Email Address</span>
           </button>
 
           <div>
