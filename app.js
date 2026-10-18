@@ -3408,50 +3408,6 @@ function setupOtpInputs() {
     });
   }
 
-  // Setup MPIN Login inputs (4 digits auto-advance & paste)
-  const mpinBoxes = document.querySelectorAll('.mpin-login-box');
-  if (mpinBoxes && mpinBoxes.length > 0) {
-    mpinBoxes.forEach((box, idx) => {
-      box.addEventListener('input', (e) => {
-        const val = e.target.value.replace(/[^0-9]/g, '');
-        box.value = val ? val[0] : '';
-        clearMpinError();
-        if (val && idx < mpinBoxes.length - 1) {
-          mpinBoxes[idx + 1].focus();
-        } else if (val && idx === mpinBoxes.length - 1) {
-          // Auto trigger verify if all 4 digits entered
-          const enteredMpin = Array.from(mpinBoxes).map(b => b.value).join('');
-          if (enteredMpin.length === 4) {
-            handleVerifyMpin();
-          }
-        }
-      });
-
-      box.addEventListener('keydown', (e) => {
-        if (e.key === 'Backspace') {
-          if (!box.value && idx > 0) {
-            mpinBoxes[idx - 1].focus();
-          }
-        }
-      });
-
-      box.addEventListener('paste', (e) => {
-        e.preventDefault();
-        const pasteData = (e.clipboardData || window.clipboardData).getData('text').trim().replace(/[^0-9]/g, '');
-        if (pasteData) {
-          pasteData.slice(0, 4).split('').forEach((digit, i) => {
-            if (mpinBoxes[i]) mpinBoxes[i].value = digit;
-          });
-          const targetIdx = Math.min(pasteData.length, mpinBoxes.length - 1);
-          mpinBoxes[targetIdx].focus();
-          clearMpinError();
-          if (pasteData.length >= 4) {
-            handleVerifyMpin();
-          }
-        }
-      });
-    });
-  }
 }
 
 function clearPhoneError() {
@@ -3464,26 +3420,15 @@ function clearOtpError() {
   if (errEl) errEl.classList.add('hidden');
 }
 
-function clearMpinError() {
-  const errEl = document.getElementById('authMpinError');
-  if (errEl) errEl.classList.add('hidden');
-}
-
-function clearSetMpinError() {
-  const errEl = document.getElementById('authSetMpinError');
-  if (errEl) errEl.classList.add('hidden');
-}
+function clearMpinError() {}
+function clearSetMpinError() {}
 
 function backToPhoneStep() {
   const phoneStep = document.getElementById('authStepPhone');
-  const mpinStep = document.getElementById('authStepMpinLogin');
-  const setMpinStep = document.getElementById('authStepSetMpin');
   const otpStep = document.getElementById('authStepOtp');
   const profileStep = document.getElementById('authStepProfile');
 
   if (phoneStep) phoneStep.classList.remove('hidden');
-  if (mpinStep) mpinStep.classList.add('hidden');
-  if (setMpinStep) setMpinStep.classList.add('hidden');
   if (otpStep) otpStep.classList.add('hidden');
   if (profileStep) profileStep.classList.add('hidden');
 
@@ -3493,20 +3438,16 @@ function backToPhoneStep() {
   }
   clearPhoneError();
   clearOtpError();
-  clearMpinError();
-  clearSetMpinError();
   clearOnboardingErrors();
 }
 
 // ----------------------------------------------------
-// 1. SMART PHONE SUBMIT: Route to MPIN Login vs Setup OTP
+// 1. PHONE NUMBER SUBMIT: Direct OTP Verification Flow
 // ----------------------------------------------------
 async function handlePhoneSubmit() {
   const phoneInput = document.getElementById('authPhoneInput');
   const errorEl = document.getElementById('authPhoneError');
   const errorText = document.getElementById('authPhoneErrorText');
-  const submitBtn = document.getElementById('btnSendOtp');
-  const submitBtnText = document.getElementById('btnSendOtpText');
 
   if (!phoneInput) return;
   const rawDigits = phoneInput.value.replace(/[^0-9]/g, '');
@@ -3521,267 +3462,7 @@ async function handlePhoneSubmit() {
   clearPhoneError();
   const fullPhone = '+91' + rawDigits;
   state.authPhone = fullPhone;
-
-  if (submitBtn) submitBtn.disabled = true;
-  if (submitBtnText) submitBtnText.textContent = 'Checking Account...';
-
-  try {
-    // Check if user has an existing MPIN registered (Supabase / local)
-    let userMpin = null;
-    if (window.db && window.db.profiles && window.db.profiles.getMpin) {
-      userMpin = await window.db.profiles.getMpin(fullPhone);
-    } else {
-      userMpin = localStorage.getItem('routemate_mpin_' + fullPhone);
-    }
-
-    const phoneStep = document.getElementById('authStepPhone');
-    const mpinStep = document.getElementById('authStepMpinLogin');
-    const mpinTargetPhone = document.getElementById('authMpinTargetPhone');
-
-    if (userMpin) {
-      // Returning user with preset MPIN -> Show instant 4-digit MPIN login (NO OTP needed!)
-      state.existingMpin = userMpin;
-      state.authFlow = 'mpin_login';
-
-      if (mpinTargetPhone) mpinTargetPhone.textContent = fullPhone;
-      if (phoneStep) phoneStep.classList.add('hidden');
-      if (mpinStep) mpinStep.classList.remove('hidden');
-
-      const mpinBoxes = document.querySelectorAll('.mpin-login-box');
-      mpinBoxes.forEach(b => b.value = '');
-      clearMpinError();
-      if (mpinBoxes[0]) setTimeout(() => mpinBoxes[0].focus(), 150);
-      showToast(`Welcome back! Enter your 4-digit MPIN for instant access.`, 'info');
-    } else {
-      // First-time user without MPIN -> Send OTP to verify and proceed to MPIN setup
-      state.authFlow = 'first_registration';
-      await handleSendOtp();
-    }
-  } catch (err) {
-    console.error('Exception in handlePhoneSubmit:', err);
-    // Fallback: send OTP
-    state.authFlow = 'first_registration';
-    await handleSendOtp();
-  } finally {
-    if (submitBtn) submitBtn.disabled = false;
-    if (submitBtnText) submitBtnText.textContent = 'Continue';
-    if (window.lucide) lucide.createIcons();
-  }
-}
-
-// ----------------------------------------------------
-// 2. MPIN LOGIN HANDLER
-// ----------------------------------------------------
-async function handleVerifyMpin() {
-  const mpinBoxes = document.querySelectorAll('.mpin-login-box');
-  const enteredMpin = Array.from(mpinBoxes).map(b => b.value).join('');
-  const errorEl = document.getElementById('authMpinError');
-  const errorText = document.getElementById('authMpinErrorText');
-  const verifyBtn = document.getElementById('btnVerifyMpin');
-  const verifyBtnText = document.getElementById('btnVerifyMpinText');
-
-  if (enteredMpin.length !== 4) {
-    if (errorText) errorText.textContent = 'Please enter your 4-digit MPIN';
-    if (errorEl) errorEl.classList.remove('hidden');
-    return;
-  }
-
-  clearMpinError();
-  if (verifyBtn) verifyBtn.disabled = true;
-  if (verifyBtnText) verifyBtnText.textContent = 'Verifying MPIN...';
-
-  try {
-    let savedMpin = state.existingMpin;
-    if (!savedMpin && window.db && window.db.profiles && window.db.profiles.getMpin) {
-      savedMpin = await window.db.profiles.getMpin(state.authPhone);
-    }
-    if (!savedMpin) {
-      savedMpin = localStorage.getItem('routemate_mpin_' + state.authPhone);
-    }
-
-    // Require real verified MPIN configured by user
-    if (savedMpin && savedMpin === enteredMpin) {
-      // MPIN Verified! Retrieve profile
-      let profile = null;
-      if (window.db && window.db.profiles) {
-        try {
-          profile = await window.db.profiles.getOrCreateByPhone(state.authPhone);
-        } catch (e) {
-          console.warn('Profile fetch warning in MPIN login:', e);
-        }
-      }
-
-      const hasCompletedProfile = Boolean(
-        profile &&
-        profile.profile_completed &&
-        profile.name &&
-        profile.name.trim().length >= 2 &&
-        profile.name !== 'Verified Commuter' &&
-        profile.name !== 'Guest Commuter' &&
-        profile.gender
-      );
-
-      const sessionUser = {
-        id: (profile && profile.id) || ('usr_' + Date.now()),
-        phone: state.authPhone,
-        name: (profile && profile.name && profile.name !== 'Verified Commuter') ? profile.name : '',
-        gender: (profile && profile.gender) || '',
-        avatar: (profile && profile.avatar_url && !profile.avatar_url.includes('photo-1535713875002-d1d0cf377fde')) ? profile.avatar_url : null,
-        is_verified: true,
-        is_kyc_verified: profile ? Boolean(profile.is_kyc_verified) : false,
-        kyc_status: (profile && profile.kyc_status) || (profile && profile.is_kyc_verified ? 'verified_success' : 'unverified'),
-        aadhaar_number: (profile && profile.aadhaar_number) || '',
-        dl_number: (profile && profile.dl_number) || '',
-        email: (profile && profile.email) || '',
-        dob: (profile && profile.dob) || '',
-        memberSince: (profile && profile.member_since) || 'October 2024',
-        profile_completed: hasCompletedProfile,
-        authenticatedAt: new Date().toISOString()
-      };
-
-      state.currentUser = sessionUser;
-      localStorage.setItem('routemate_auth_user', JSON.stringify(sessionUser));
-
-      if (!hasCompletedProfile) {
-        showOnboardingStep(state.authPhone, profile);
-        showToast('Please complete your profile details', 'info');
-        return;
-      }
-
-      showToast('✅ MPIN verified! Welcome back to Routemate.', 'success');
-      showDashboardView();
-      backToPhoneStep();
-      const phoneInput = document.getElementById('authPhoneInput');
-      if (phoneInput) phoneInput.value = '';
-    } else {
-      if (errorText) errorText.textContent = 'Incorrect MPIN. Please try again or tap "Forgot MPIN".';
-      if (errorEl) errorEl.classList.remove('hidden');
-      mpinBoxes.forEach(b => b.value = '');
-      if (mpinBoxes[0]) mpinBoxes[0].focus();
-    }
-  } catch (err) {
-    console.error('Exception during MPIN login:', err);
-    if (errorText) errorText.textContent = 'Verification error. Please retry.';
-    if (errorEl) errorEl.classList.remove('hidden');
-  } finally {
-    if (verifyBtn) verifyBtn.disabled = false;
-    if (verifyBtnText) verifyBtnText.textContent = 'Login to Routemate';
-  }
-}
-
-// ----------------------------------------------------
-// 3. FORGOT MPIN: Trigger OTP to reset MPIN securely
-// ----------------------------------------------------
-async function handleForgotMpin() {
-  state.authFlow = 'forgot_mpin';
-  showToast('Sending OTP to reset your MPIN...', 'info');
   await handleSendOtp();
-}
-
-// ----------------------------------------------------
-// 4. SHOW & SAVE MPIN SETUP
-// ----------------------------------------------------
-function showSetMpinStep(isReset = false) {
-  const phoneStep = document.getElementById('authStepPhone');
-  const mpinStep = document.getElementById('authStepMpinLogin');
-  const otpStep = document.getElementById('authStepOtp');
-  const setMpinStep = document.getElementById('authStepSetMpin');
-  const title = document.getElementById('authSetMpinTitle');
-  const subtitle = document.getElementById('authSetMpinSubtitle');
-  const badge = document.getElementById('authSetMpinBadge');
-  const newMpinInput = document.getElementById('authNewMpinInput');
-  const confirmMpinInput = document.getElementById('authConfirmMpinInput');
-
-  if (phoneStep) phoneStep.classList.add('hidden');
-  if (mpinStep) mpinStep.classList.add('hidden');
-  if (otpStep) otpStep.classList.add('hidden');
-  if (setMpinStep) setMpinStep.classList.remove('hidden');
-
-  if (isReset) {
-    if (badge) badge.textContent = 'Security Reset';
-    if (title) title.textContent = 'Reset Your 4-Digit MPIN';
-    if (subtitle) subtitle.textContent = 'Create a new 4-digit MPIN for your Routemate account.';
-  } else {
-    if (badge) badge.textContent = 'Security Setup';
-    if (title) title.textContent = 'Set Your 4-Digit MPIN';
-    if (subtitle) subtitle.textContent = 'Create a 4-digit security MPIN for instant logins without OTP delays.';
-  }
-
-  if (newMpinInput) newMpinInput.value = '';
-  if (confirmMpinInput) confirmMpinInput.value = '';
-  clearSetMpinError();
-  if (newMpinInput) setTimeout(() => newMpinInput.focus(), 150);
-  if (window.lucide) lucide.createIcons();
-}
-
-async function handleSaveMpin() {
-  const newMpinInput = document.getElementById('authNewMpinInput');
-  const confirmMpinInput = document.getElementById('authConfirmMpinInput');
-  const errorEl = document.getElementById('authSetMpinError');
-  const errorText = document.getElementById('authSetMpinErrorText');
-  const saveBtn = document.getElementById('btnSaveMpin');
-  const saveBtnText = document.getElementById('btnSaveMpinText');
-
-  const newMpin = newMpinInput ? newMpinInput.value.replace(/[^0-9]/g, '') : '';
-  const confirmMpin = confirmMpinInput ? confirmMpinInput.value.replace(/[^0-9]/g, '') : '';
-
-  if (newMpin.length !== 4) {
-    if (errorText) errorText.textContent = 'Please enter a 4-digit numeric MPIN';
-    if (errorEl) errorEl.classList.remove('hidden');
-    if (newMpinInput) newMpinInput.focus();
-    return;
-  }
-
-  if (newMpin !== confirmMpin) {
-    if (errorText) errorText.textContent = 'MPINs do not match. Please re-enter both.';
-    if (errorEl) errorEl.classList.remove('hidden');
-    if (confirmMpinInput) confirmMpinInput.focus();
-    return;
-  }
-
-  clearSetMpinError();
-  if (saveBtn) saveBtn.disabled = true;
-  if (saveBtnText) saveBtnText.textContent = 'Saving MPIN...';
-
-  try {
-    const phone = state.authPhone || (state.currentUser && state.currentUser.phone);
-    if (phone) {
-      localStorage.setItem('routemate_mpin_' + phone, newMpin);
-      if (window.db && window.db.profiles && window.db.profiles.updateMpin) {
-        await window.db.profiles.updateMpin(phone, newMpin).catch(e => console.warn(e));
-      }
-    }
-    state.existingMpin = newMpin;
-
-    showToast('🔒 4-digit MPIN saved securely!', 'success');
-
-    // If user already completed profile onboarding, go straight to dashboard
-    const user = state.currentUser;
-    const hasCompletedProfile = Boolean(
-      user &&
-      user.profile_completed &&
-      user.name &&
-      user.name.trim().length >= 2 &&
-      user.gender
-    );
-
-    if (hasCompletedProfile) {
-      showDashboardView();
-      backToPhoneStep();
-      const phoneInput = document.getElementById('authPhoneInput');
-      if (phoneInput) phoneInput.value = '';
-    } else {
-      // Continue to mandatory profile onboarding (Name & Gender)
-      showOnboardingStep(state.authPhone, user);
-      showToast('Please enter your legal name and gender to finalize profile', 'info');
-    }
-  } catch (err) {
-    console.error('Exception saving MPIN:', err);
-    showToast('Failed to save MPIN. Please retry.', 'error');
-  } finally {
-    if (saveBtn) saveBtn.disabled = false;
-    if (saveBtnText) saveBtnText.textContent = 'Save MPIN & Continue';
-  }
 }
 
 async function handleSendOtp() {
@@ -3817,22 +3498,17 @@ async function handleSendOtp() {
 
     // Switch to OTP step
     const phoneStep = document.getElementById('authStepPhone');
-    const mpinStep = document.getElementById('authStepMpinLogin');
-    const setMpinStep = document.getElementById('authStepSetMpin');
     const otpStep = document.getElementById('authStepOtp');
     const targetPhoneText = document.getElementById('authTargetPhoneText');
-    const sandboxNotice = document.getElementById('authSandboxNotice');
 
     if (targetPhoneText) targetPhoneText.textContent = fullPhone;
     if (phoneStep) phoneStep.classList.add('hidden');
-    if (mpinStep) mpinStep.classList.add('hidden');
-    if (setMpinStep) setMpinStep.classList.add('hidden');
     if (otpStep) otpStep.classList.remove('hidden');
 
     // Handle Fast2SMS response
     if (result.success) {
-      if (result.data && result.data.devOtp) {
-        showToast(`OTP Code: ${result.data.devOtp} (Fast2SMS pending ₹100 activation)`, 'info');
+      if (result.data && result.data.devOtp && result.data.status === 'pending_activation') {
+        showToast(`Test OTP: ${result.data.devOtp}`, 'info');
         const otpBoxes = document.querySelectorAll('.otp-box');
         if (otpBoxes && otpBoxes.length >= 6) {
           result.data.devOtp.split('').forEach((digit, i) => {
@@ -3970,16 +3646,6 @@ async function handleVerifyOtp() {
       state.currentUser = sessionUser;
       localStorage.setItem('routemate_auth_user', JSON.stringify(sessionUser));
 
-      // Check if user came from 'forgot_mpin' flow or needs first-time MPIN setup
-      const isReset = state.authFlow === 'forgot_mpin';
-      const existingMpin = (profile && profile.mpin) || localStorage.getItem('routemate_mpin_' + state.authPhone);
-
-      if (isReset || !existingMpin) {
-        // Direct user to set their 4-digit MPIN
-        showSetMpinStep(isReset);
-        showToast(isReset ? 'OTP verified! Please create your new 4-digit MPIN.' : 'Phone verified! Now set your 4-digit MPIN for instant logins.', 'success');
-        return;
-      }
 
       if (!hasCompletedProfile) {
         // First-time login / signup -> MANDATORY PROFILE SETUP SCREEN
@@ -7407,12 +7073,6 @@ async function handleConfirmDeleteAccount() {
 
 // Window bindings
 window.handlePhoneSubmit = handlePhoneSubmit;
-window.handleVerifyMpin = handleVerifyMpin;
-window.handleForgotMpin = handleForgotMpin;
-window.handleSaveMpin = handleSaveMpin;
-window.showSetMpinStep = showSetMpinStep;
-window.clearMpinError = clearMpinError;
-window.clearSetMpinError = clearSetMpinError;
 window.handleManualDocSelected = handleManualDocSelected;
 window.handleSendOtp = handleSendOtp;
 window.handleVerifyOtp = handleVerifyOtp;
