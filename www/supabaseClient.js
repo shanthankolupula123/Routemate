@@ -78,8 +78,9 @@ const db = {
         if (res.ok && data.success) {
           console.log('✅ Twilio OTP sent successfully:', data);
           return { success: true, method: 'twilio', data };
-        } else {
-          console.warn('Twilio send error, checking Supabase fallback:', data.error);
+        } else if (data && data.error) {
+          console.error('❌ Twilio send error:', data.error);
+          return { success: false, error: data.error };
         }
       } catch (twilioErr) {
         console.warn('Twilio endpoint error, falling back to Supabase auth:', twilioErr);
