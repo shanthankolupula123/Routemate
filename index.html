@@ -92,27 +92,108 @@
             </p>
           </div>
 
-          <!-- Quick Test Autofill Helper -->
-          <button type="button" onclick="fillDemoPhone()" class="w-full py-2 bg-blue-50/70 hover:bg-blue-100 text-blue-700 rounded-xl text-xs font-bold transition border border-blue-200/60 flex items-center justify-center gap-1.5 active:scale-[0.99]">
-            <i data-lucide="sparkles" class="w-3.5 h-3.5"></i>
-            <span>Quick Test: Auto-fill Mobile (98480 23145)</span>
+
+          <!-- Submit / Continue Button -->
+          <button id="btnSendOtp" type="button" onclick="handlePhoneSubmit()" class="w-full py-3.5 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl text-sm font-bold transition shadow-lg shadow-blue-500/25 active:scale-[0.98] flex items-center justify-center gap-2 cursor-pointer">
+            <span id="btnSendOtpText">Continue</span>
+            <i data-lucide="arrow-right" class="w-4 h-4"></i>
+          </button>
+        </div>
+
+        <!-- STEP: Enter 4-Digit MPIN for Returning User (NO OTP needed!) -->
+        <div id="authStepMpinLogin" class="hidden bg-white rounded-3xl p-6 border border-slate-200/90 shadow-sm space-y-4">
+          <!-- Back button -->
+          <button type="button" onclick="backToPhoneStep()" class="text-xs text-blue-600 hover:text-blue-700 font-bold flex items-center gap-1 cursor-pointer">
+            <i data-lucide="arrow-left" class="w-3.5 h-3.5"></i>
+            <span>Change Mobile Number</span>
           </button>
 
-          <!-- Get OTP Button -->
-          <button id="btnSendOtp" type="button" onclick="handleSendOtp()" class="w-full py-3.5 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl text-sm font-bold transition shadow-lg shadow-blue-500/25 active:scale-[0.98] flex items-center justify-center gap-2">
-            <span id="btnSendOtpText">Get Verification Code</span>
+          <div>
+            <div class="flex items-center gap-2 mb-1">
+              <span class="text-[10px] font-extrabold uppercase tracking-wider bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full">Secure MPIN Login</span>
+              <span class="text-[10px] font-bold text-slate-500">Quick Access</span>
+            </div>
+            <h2 class="text-base font-extrabold text-slate-900">Enter Your 4-Digit MPIN</h2>
+            <p class="text-xs text-slate-500 mt-0.5">Enter your preset MPIN for <strong id="authMpinTargetPhone" class="text-slate-800 font-mono">+91 98480 23145</strong></p>
+          </div>
+
+          <!-- 4-digit MPIN Inputs -->
+          <div>
+            <label class="block text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-2 text-center">4-Digit Security PIN</label>
+            <div class="flex items-center justify-center gap-3">
+              <input type="password" maxlength="1" inputmode="numeric" class="mpin-login-box w-12 h-14 py-2.5 text-center text-2xl font-mono font-black bg-slate-50 border-2 border-slate-200 rounded-2xl focus:bg-white focus:border-blue-600 focus:outline-none transition-all shadow-inner" data-index="0" />
+              <input type="password" maxlength="1" inputmode="numeric" class="mpin-login-box w-12 h-14 py-2.5 text-center text-2xl font-mono font-black bg-slate-50 border-2 border-slate-200 rounded-2xl focus:bg-white focus:border-blue-600 focus:outline-none transition-all shadow-inner" data-index="1" />
+              <input type="password" maxlength="1" inputmode="numeric" class="mpin-login-box w-12 h-14 py-2.5 text-center text-2xl font-mono font-black bg-slate-50 border-2 border-slate-200 rounded-2xl focus:bg-white focus:border-blue-600 focus:outline-none transition-all shadow-inner" data-index="2" />
+              <input type="password" maxlength="1" inputmode="numeric" class="mpin-login-box w-12 h-14 py-2.5 text-center text-2xl font-mono font-black bg-slate-50 border-2 border-slate-200 rounded-2xl focus:bg-white focus:border-blue-600 focus:outline-none transition-all shadow-inner" data-index="3" />
+            </div>
+            <p id="authMpinError" class="text-[11px] text-red-500 font-semibold mt-2.5 hidden text-center flex items-center justify-center gap-1">
+              <i data-lucide="alert-circle" class="w-3.5 h-3.5"></i>
+              <span id="authMpinErrorText">Incorrect MPIN. Please try again.</span>
+            </p>
+          </div>
+
+          <!-- Verify MPIN Button -->
+          <button id="btnVerifyMpin" type="button" onclick="handleVerifyMpin()" class="w-full py-3.5 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl text-sm font-bold transition shadow-lg shadow-blue-500/25 active:scale-[0.98] flex items-center justify-center gap-2 cursor-pointer">
+            <span id="btnVerifyMpinText">Login to Routemate</span>
             <i data-lucide="arrow-right" class="w-4 h-4"></i>
           </button>
 
-          <!-- Guest Commuter Mode -->
-          <div class="text-center pt-1 border-t border-slate-100">
-            <button type="button" onclick="loginAsGuest()" class="text-xs text-slate-500 hover:text-blue-600 font-semibold underline underline-offset-2 transition">
-              Continue as Guest Commuter
+          <!-- Forgot MPIN & Alternate Action -->
+          <div class="text-center pt-2 border-t border-slate-100 flex items-center justify-center">
+            <button type="button" onclick="handleForgotMpin()" class="text-xs text-blue-600 hover:text-blue-700 font-bold hover:underline cursor-pointer">
+              Forgot MPIN? Reset via OTP
             </button>
           </div>
         </div>
 
-        <!-- STEP 2: Verify 6-digit OTP -->
+        <!-- STEP: Set / Reset 4-Digit Security MPIN -->
+        <div id="authStepSetMpin" class="hidden bg-white rounded-3xl p-6 border border-slate-200/90 shadow-sm space-y-4">
+          <!-- Back button -->
+          <button type="button" onclick="backToPhoneStep()" class="text-xs text-blue-600 hover:text-blue-700 font-bold flex items-center gap-1 cursor-pointer">
+            <i data-lucide="arrow-left" class="w-3.5 h-3.5"></i>
+            <span>Cancel</span>
+          </button>
+
+          <div>
+            <div class="flex items-center gap-2 mb-1">
+              <span id="authSetMpinBadge" class="text-[10px] font-extrabold uppercase tracking-wider bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full">Security Setup</span>
+              <span class="text-[10px] font-bold text-slate-500">4-Digit PIN</span>
+            </div>
+            <h2 id="authSetMpinTitle" class="text-base font-extrabold text-slate-900">Set Your 4-Digit MPIN</h2>
+            <p id="authSetMpinSubtitle" class="text-xs text-slate-500 mt-0.5">Create a 4-digit security MPIN for instant logins without OTP delays.</p>
+          </div>
+
+          <!-- Enter MPIN -->
+          <div class="space-y-1">
+            <label class="block text-xs font-bold text-slate-800">Enter New 4-Digit MPIN</label>
+            <div class="flex items-center bg-slate-50 border-2 border-slate-200 rounded-xl px-3 py-2.5 focus-within:border-blue-600 focus-within:bg-white transition-all shadow-inner">
+              <i data-lucide="lock" class="w-4 h-4 text-slate-400 mr-2 flex-shrink-0"></i>
+              <input id="authNewMpinInput" type="password" inputmode="numeric" maxlength="4" placeholder="Enter 4 digits (e.g. 2468)" class="w-full bg-transparent text-sm font-mono font-bold tracking-widest text-slate-900 focus:outline-none" />
+            </div>
+          </div>
+
+          <!-- Confirm MPIN -->
+          <div class="space-y-1">
+            <label class="block text-xs font-bold text-slate-800">Confirm 4-Digit MPIN</label>
+            <div class="flex items-center bg-slate-50 border-2 border-slate-200 rounded-xl px-3 py-2.5 focus-within:border-blue-600 focus-within:bg-white transition-all shadow-inner">
+              <i data-lucide="check-circle-2" class="w-4 h-4 text-slate-400 mr-2 flex-shrink-0"></i>
+              <input id="authConfirmMpinInput" type="password" inputmode="numeric" maxlength="4" placeholder="Re-enter 4 digits" class="w-full bg-transparent text-sm font-mono font-bold tracking-widest text-slate-900 focus:outline-none" />
+            </div>
+          </div>
+
+          <p id="authSetMpinError" class="text-[11px] text-red-500 font-semibold hidden flex items-center gap-1">
+            <i data-lucide="alert-circle" class="w-3.5 h-3.5"></i>
+            <span id="authSetMpinErrorText">MPINs do not match. Please verify.</span>
+          </p>
+
+          <!-- Save MPIN Button -->
+          <button id="btnSaveMpin" type="button" onclick="handleSaveMpin()" class="w-full py-3.5 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl text-sm font-bold transition shadow-lg shadow-blue-500/25 active:scale-[0.98] flex items-center justify-center gap-2 cursor-pointer">
+            <span id="btnSaveMpinText">Save MPIN & Continue</span>
+            <i data-lucide="arrow-right" class="w-4 h-4"></i>
+          </button>
+        </div>
+
+        <!-- STEP: Verify 6-digit OTP (Used ONLY for First Registration & Forgot MPIN) -->
         <div id="authStepOtp" class="hidden bg-white rounded-3xl p-6 border border-slate-200/90 shadow-sm space-y-4">
           <!-- Back button -->
           <button type="button" onclick="backToPhoneStep()" class="text-xs text-blue-600 hover:text-blue-700 font-bold flex items-center gap-1">
@@ -123,20 +204,6 @@
           <div>
             <h2 class="text-base font-extrabold text-slate-900">Enter Verification Code</h2>
             <p class="text-xs text-slate-500 mt-0.5">Enter the 6-digit OTP code sent to <strong id="authTargetPhoneText" class="text-slate-800 font-mono">+91 98480 23145</strong></p>
-          </div>
-
-          <!-- Supabase Sandbox / Test Notice Banner -->
-          <div id="authSandboxNotice" class="bg-amber-50 border border-amber-200 rounded-2xl p-3 text-xs text-amber-800 space-y-1.5 hidden">
-            <div class="flex items-center gap-1.5 font-bold">
-              <i data-lucide="info" class="w-4 h-4 text-amber-600 flex-shrink-0"></i>
-              <span>Supabase Sandbox / Test Mode</span>
-            </div>
-            <p class="text-[11px] text-amber-700 leading-relaxed">
-              Supabase SMS provider is in test mode. Use code <span class="font-mono font-bold text-amber-900 bg-amber-100 px-1.5 py-0.5 rounded">123456</span> to complete authentication.
-            </p>
-            <button type="button" onclick="fillTestOtp()" class="mt-1 px-2.5 py-1 bg-amber-200/80 hover:bg-amber-300 text-amber-900 font-bold rounded-lg text-[11px] transition">
-              ⚡ Auto-fill Code (123456)
-            </button>
           </div>
 
           <!-- 6-digit OTP Inputs -->
@@ -173,6 +240,121 @@
           </button>
         </div>
 
+        <!-- STEP 3: Mandatory First-Time Profile Onboarding (Driver or Customer) -->
+        <div id="authStepProfile" class="hidden bg-white rounded-3xl p-6 border border-slate-200/90 shadow-sm space-y-4">
+          <!-- Back button to change mobile number -->
+          <button type="button" onclick="backToPhoneStep()" class="text-xs text-blue-600 hover:text-blue-700 font-bold flex items-center gap-1">
+            <i data-lucide="arrow-left" class="w-3.5 h-3.5"></i>
+            <span>Change Mobile Number</span>
+          </button>
+
+          <div>
+            <div class="flex items-center gap-2 mb-1">
+              <span class="text-[10px] font-extrabold uppercase tracking-wider bg-blue-100 text-blue-800 px-2 py-0.5 rounded-full">Step 2 of 2</span>
+              <span class="text-[10px] font-bold text-slate-500">First-Time Setup</span>
+            </div>
+            <h2 class="text-base font-extrabold text-slate-900">Complete Your Profile</h2>
+            <p class="text-xs text-slate-500 mt-0.5">Required for all Drivers & Riders under safety guidelines.</p>
+          </div>
+
+          <form id="onboardingProfileForm" onsubmit="event.preventDefault(); handleOnboardingSubmit();" class="space-y-3.5 text-left">
+            <!-- 1. Full Legal Name (MANDATORY) -->
+            <div class="space-y-1">
+              <div class="flex items-center justify-between">
+                <label class="block text-xs font-bold text-slate-800">
+                  Full Name <span class="text-rose-500 font-extrabold">*</span>
+                </label>
+                <span class="text-[9px] font-bold text-blue-700 bg-blue-50 px-1.5 py-0.2 rounded border border-blue-200">Mandatory</span>
+              </div>
+              <div class="flex items-center bg-slate-50 border-2 border-slate-200 rounded-xl px-3 py-2.5 focus-within:border-blue-600 focus-within:bg-white transition-all shadow-inner">
+                <i data-lucide="user" class="w-4 h-4 text-slate-400 mr-2 flex-shrink-0"></i>
+                <input id="onboardingNameInput" type="text" placeholder="e.g. Ramesh Kumar" class="w-full bg-transparent text-xs font-bold text-slate-900 focus:outline-none placeholder-slate-400" />
+              </div>
+              <p id="onboardingNameError" class="text-[10px] text-rose-500 font-semibold hidden flex items-center gap-1">
+                <i data-lucide="alert-circle" class="w-3 h-3"></i>
+                <span id="onboardingNameErrorText">Please enter your full legal name</span>
+              </p>
+            </div>
+
+            <!-- 2. Mobile Number (MANDATORY & VERIFIED) -->
+            <div class="space-y-1">
+              <div class="flex items-center justify-between">
+                <label class="block text-xs font-bold text-slate-800">
+                  Mobile Number <span class="text-rose-500 font-extrabold">*</span>
+                </label>
+                <span class="text-[9px] font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.2 rounded border border-emerald-200 flex items-center gap-0.5">
+                  <i data-lucide="check" class="w-2.5 h-2.5"></i>
+                  <span>Verified</span>
+                </span>
+              </div>
+              <div class="flex items-center bg-slate-100 border border-slate-200 rounded-xl px-3 py-2.5 text-slate-600">
+                <i data-lucide="phone" class="w-4 h-4 text-slate-400 mr-2 flex-shrink-0"></i>
+                <input id="onboardingPhoneInput" type="text" readonly class="w-full bg-transparent text-xs font-mono font-bold text-slate-700 focus:outline-none cursor-not-allowed select-none" />
+              </div>
+            </div>
+
+            <!-- 3. Gender (MANDATORY) -->
+            <div class="space-y-1">
+              <div class="flex items-center justify-between">
+                <label class="block text-xs font-bold text-slate-800">
+                  Gender <span class="text-rose-500 font-extrabold">*</span>
+                </label>
+                <span class="text-[9px] font-bold text-blue-700 bg-blue-50 px-1.5 py-0.2 rounded border border-blue-200">Mandatory</span>
+              </div>
+              <div class="flex items-center bg-slate-50 border-2 border-slate-200 rounded-xl px-3 py-2.5 focus-within:border-blue-600 focus-within:bg-white transition-all shadow-inner">
+                <i data-lucide="users" class="w-4 h-4 text-slate-400 mr-2 flex-shrink-0"></i>
+                <select id="onboardingGenderSelect" class="w-full bg-transparent text-xs font-bold text-slate-900 focus:outline-none cursor-pointer">
+                  <option value="" disabled selected>Select your gender</option>
+                  <option value="Male">Male</option>
+                  <option value="Female">Female</option>
+                  <option value="Other">Other</option>
+                  <option value="Prefer not to say">Prefer not to say</option>
+                </select>
+              </div>
+              <p id="onboardingGenderError" class="text-[10px] text-rose-500 font-semibold hidden flex items-center gap-1">
+                <i data-lucide="alert-circle" class="w-3 h-3"></i>
+                <span id="onboardingGenderErrorText">Please select your gender</span>
+              </p>
+            </div>
+
+            <!-- 4. Email Address (OPTIONAL) -->
+            <div class="space-y-1">
+              <div class="flex items-center justify-between">
+                <label class="block text-xs font-bold text-slate-700">Email Address</label>
+                <span class="text-[9px] font-bold text-slate-500 bg-slate-100 px-1.5 py-0.2 rounded border border-slate-200">Optional</span>
+              </div>
+              <div class="flex items-center bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 focus-within:border-blue-600 focus-within:bg-white transition-all shadow-inner">
+                <i data-lucide="mail" class="w-4 h-4 text-slate-400 mr-2 flex-shrink-0"></i>
+                <input id="onboardingEmailInput" type="email" placeholder="e.g. commuter@example.com (optional)" class="w-full bg-transparent text-xs font-semibold text-slate-900 focus:outline-none placeholder-slate-400" />
+              </div>
+              <p id="onboardingEmailError" class="text-[10px] text-rose-500 font-semibold hidden flex items-center gap-1">
+                <i data-lucide="alert-circle" class="w-3 h-3"></i>
+                <span id="onboardingEmailErrorText">Please enter a valid email address</span>
+              </p>
+            </div>
+
+            <!-- 5. Date of Birth (OPTIONAL) -->
+            <div class="space-y-1">
+              <div class="flex items-center justify-between">
+                <label class="block text-xs font-bold text-slate-700">Date of Birth (DOB)</label>
+                <span class="text-[9px] font-bold text-slate-500 bg-slate-100 px-1.5 py-0.2 rounded border border-slate-200">Optional</span>
+              </div>
+              <div class="flex items-center bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 focus-within:border-blue-600 focus-within:bg-white transition-all shadow-inner">
+                <i data-lucide="calendar" class="w-4 h-4 text-slate-400 mr-2 flex-shrink-0"></i>
+                <input id="onboardingDobInput" type="date" class="w-full bg-transparent text-xs font-semibold text-slate-900 focus:outline-none text-slate-700" />
+              </div>
+            </div>
+
+            <!-- Submit Button -->
+            <div class="pt-2">
+              <button id="btnSubmitOnboarding" type="submit" class="w-full py-3.5 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl text-sm font-bold transition shadow-lg shadow-blue-500/25 active:scale-[0.98] flex items-center justify-center gap-2 cursor-pointer">
+                <span>Save & Continue to App</span>
+                <i data-lucide="arrow-right" class="w-4 h-4"></i>
+              </button>
+            </div>
+          </form>
+        </div>
+
       </div>
 
       <!-- Bottom Encryption & Terms Notice -->
@@ -187,43 +369,46 @@
     </section>
 
     <!-- 1. Top Header -->
-    <header id="appHeader" class="sticky top-0 z-30 glass-header border-b border-slate-100 px-4 py-3.5 transition-all">
-      <div class="flex items-center justify-between">
+    <header id="appHeader" class="sticky top-0 z-30 glass-header border-b border-slate-100 px-3.5 py-3 transition-all overflow-hidden">
+      <div class="flex items-center justify-between gap-2 min-w-0">
         <!-- Logo & Branding -->
-        <div class="flex items-center gap-2.5">
-          <img src="app-logo.png" alt="Routemate Logo" class="w-10 h-10 rounded-xl object-contain shadow-xs border border-slate-200/80 flex-shrink-0 bg-white p-0.5" />
-          <div>
+        <div class="flex items-center gap-2 min-w-0 flex-shrink">
+          <img src="app-logo.png" alt="Routemate Logo" class="w-9 h-9 rounded-xl object-contain shadow-xs border border-slate-200/80 flex-shrink-0 bg-white p-0.5" />
+          <div class="min-w-0">
             <div class="flex items-center gap-1.5">
-              <h1 class="text-xl font-extrabold tracking-tight text-slate-900 leading-none">Routemate</h1>
-              <span class="text-[10px] font-bold uppercase tracking-wider bg-blue-100 text-blue-800 px-1.5 py-0.5 rounded-full">P2P</span>
+              <h1 class="text-lg font-extrabold tracking-tight text-slate-900 leading-none truncate">Routemate</h1>
+              <span class="text-[9px] font-bold uppercase tracking-wider bg-blue-100 text-blue-800 px-1.5 py-0.5 rounded-full flex-shrink-0">P2P</span>
             </div>
-            <p class="text-[11px] font-medium text-slate-500 mt-0.5 tracking-tight">Share the Ride, Split the Cost</p>
+            <p class="text-[10.5px] font-medium text-slate-500 mt-0.5 tracking-tight truncate">Share the Ride, Split the Cost</p>
           </div>
         </div>
 
         <!-- Top Right Actions -->
-        <div class="flex items-center gap-2">
-          <!-- Active Corridor Indicator -->
-          <div class="hidden sm:flex items-center gap-1.5 bg-emerald-50 text-emerald-700 border border-emerald-200/80 px-2 py-1 rounded-full text-[11px] font-semibold">
-            <span class="w-2 h-2 rounded-full bg-emerald-500 live-pulse"></span>
-            <span>Uppal ➔ Jangaon Live</span>
-          </div>
-
+        <div class="flex items-center gap-1.5 flex-shrink-0">
           <!-- Safety & SOS Shield Button -->
-          <button onclick="openSafetyModal()" title="Safety & SOS Center" class="w-9 h-9 rounded-full bg-emerald-50 hover:bg-emerald-100 text-emerald-700 flex items-center justify-center transition border border-emerald-200">
+          <button onclick="openSafetyModal()" title="Safety & SOS Center" class="w-8.5 h-8.5 rounded-full bg-emerald-50 hover:bg-emerald-100 text-emerald-700 flex items-center justify-center transition border border-emerald-200 flex-shrink-0 cursor-pointer">
             <i data-lucide="shield-check" class="w-4 h-4"></i>
           </button>
 
-          <!-- Notification Bell -->
-          <button onclick="showToast('No new ride notifications at this moment.', 'info')" class="w-9 h-9 rounded-full bg-slate-50 hover:bg-slate-100 text-slate-600 flex items-center justify-center transition border border-slate-200/60 relative">
-            <i data-lucide="bell" class="w-4 h-4"></i>
-            <span class="absolute top-1.5 right-1.5 w-2 h-2 bg-blue-600 rounded-full ring-2 ring-white"></span>
+          <!-- Whitelisted Admin Portal Quick Access Button (Strictly 9494285249 / 7989031924) -->
+          <button id="headerAdminBtn" onclick="openAdminPortal()" title="KYC Admin Portal (Supervisor)" class="w-8.5 h-8.5 rounded-full bg-purple-100 hover:bg-purple-200 text-purple-800 hidden items-center justify-center transition border border-purple-300 shadow-xs cursor-pointer flex-shrink-0 relative group">
+            <i data-lucide="shield-alert" class="w-4 h-4 text-purple-700 group-hover:scale-110 transition"></i>
+            <span class="absolute -top-0.5 -right-0.5 w-2 h-2 bg-purple-600 rounded-full ring-2 ring-white"></span>
           </button>
 
-          <!-- User Avatar -->
-          <button onclick="switchTab('profile')" class="relative flex items-center">
-            <img src="https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=100&h=100&q=80" alt="Profile" class="w-9 h-9 rounded-full object-cover border-2 border-blue-600 shadow-xs" />
-            <span class="absolute -bottom-0.5 -right-0.5 bg-emerald-500 w-3 h-3 rounded-full border-2 border-white"></span>
+          <!-- Notification Bell -->
+          <button onclick="showToast('No new ride notifications at this moment.', 'info')" title="Notifications" class="w-8.5 h-8.5 rounded-full bg-slate-50 hover:bg-slate-100 text-slate-600 flex items-center justify-center transition border border-slate-200/60 relative flex-shrink-0 cursor-pointer">
+            <i data-lucide="bell" class="w-4 h-4"></i>
+            <span class="absolute top-1 right-1 w-2 h-2 bg-blue-600 rounded-full ring-2 ring-white"></span>
+          </button>
+
+          <!-- User Avatar (Strictly bounded and aligned within header) -->
+          <button onclick="switchTab('profile')" title="Go to Profile" class="relative flex-shrink-0 flex items-center justify-center w-8.5 h-8.5 rounded-full hover:ring-2 hover:ring-blue-500 transition cursor-pointer">
+            <img id="headerUserAvatar" src="" alt="Profile" class="w-8.5 h-8.5 rounded-full object-cover border-2 border-blue-600 shadow-xs hidden bg-white" />
+            <div id="headerUserAvatarPlaceholder" class="w-8.5 h-8.5 rounded-full bg-slate-100 border-2 border-slate-300 shadow-xs flex items-center justify-center text-slate-400">
+              <i data-lucide="user" class="w-4 h-4 text-slate-500"></i>
+            </div>
+            <span class="absolute -bottom-0.5 -right-0.5 bg-emerald-500 w-2.5 h-2.5 rounded-full border-2 border-white"></span>
           </button>
         </div>
       </div>
@@ -231,6 +416,24 @@
 
     <!-- Main Dynamic Content Views -->
     <main id="appMain" class="flex-1">
+
+      <!-- Real-Time Active Ride Sticky Banner (Visible during searching, driver_accepted, ride_started) -->
+      <div id="activeRideFloatingBanner" onclick="openActiveRideModal()" class="hidden mx-4 mt-3 bg-gradient-to-r from-slate-900 via-blue-950 to-indigo-950 text-white rounded-2xl p-3.5 shadow-xl border border-blue-500/40 flex items-center justify-between cursor-pointer animate-in fade-in slide-in-from-top-2 transition hover:border-blue-400">
+        <div class="flex items-center gap-3 min-w-0">
+          <div id="activeRideBannerPulse" class="w-3 h-3 rounded-full bg-emerald-400 live-pulse flex-shrink-0"></div>
+          <div class="min-w-0">
+            <div class="flex items-center gap-1.5">
+              <p id="activeRideBannerStatus" class="text-xs font-black text-white truncate">Live Ride Active</p>
+              <span id="activeRideBannerRole" class="text-[9px] font-extrabold uppercase px-1.5 py-0.2 bg-blue-500/30 text-blue-200 border border-blue-400/40 rounded-full flex-shrink-0">Rider</span>
+            </div>
+            <p id="activeRideBannerSub" class="text-[10.5px] text-blue-200 truncate mt-0.5">Tap for Live GPS route & driver status</p>
+          </div>
+        </div>
+        <div class="flex items-center gap-1 text-xs font-bold bg-blue-600 hover:bg-blue-500 text-white px-3 py-1.5 rounded-xl shadow-xs flex-shrink-0">
+          <span>Track</span>
+          <i data-lucide="chevron-right" class="w-3.5 h-3.5"></i>
+        </div>
+      </div>
 
       <!-- MAIN EXPLORE TAB -->
       <section id="mainAppView" class="p-4 pb-32 space-y-4">
@@ -371,53 +574,98 @@
         <div>
           <div class="flex items-center justify-between mb-2 px-1">
             <h3 class="text-xs font-bold text-slate-700 uppercase tracking-wider">Choose Vehicle Type</h3>
-            <span class="text-[11px] text-blue-600 font-semibold">Both single & shared seats</span>
+            <span class="text-[11px] text-purple-700 font-semibold flex items-center gap-1">
+              <i data-lucide="sparkles" class="w-3 h-3 text-purple-600"></i>
+              <span>Flexible match enabled</span>
+            </span>
           </div>
 
-          <div class="grid grid-cols-2 gap-3">
-            <!-- Bike Option Card -->
-            <div id="vehicleCardBike" onclick="selectVehicle('bike')" class="vehicle-card selected bg-white rounded-2xl p-3.5 cursor-pointer relative shadow-sm">
-              <div class="flex items-center justify-between mb-2">
-                <div class="w-9 h-9 rounded-xl bg-blue-100 text-blue-700 flex items-center justify-center">
-                  <i data-lucide="bike" class="w-5 h-5"></i>
+          <div class="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+            <!-- 1. Bike Option Card -->
+            <div id="vehicleCardBike" onclick="selectVehicle('bike')" class="vehicle-card bg-white rounded-2xl p-3 cursor-pointer relative shadow-sm transition">
+              <div class="flex items-center justify-between mb-1.5">
+                <div class="w-8 h-8 rounded-xl bg-blue-100 text-blue-700 flex items-center justify-center">
+                  <i data-lucide="bike" class="w-4 h-4"></i>
                 </div>
-                <span class="text-[10px] font-extrabold bg-blue-600 text-white px-1.5 py-0.5 rounded-full">
+                <span class="text-[9px] font-extrabold bg-blue-600 text-white px-1.5 py-0.5 rounded-full">
                   Fastest
                 </span>
               </div>
-              <h4 class="font-bold text-sm text-slate-900 leading-tight">Bike Pillion</h4>
-              <p class="text-[11px] text-slate-500 mt-0.5">1 passenger seat • Helmet provided</p>
-              <div class="mt-3 pt-2 border-t border-slate-100 flex items-baseline justify-between">
-                <span class="text-[10px] text-slate-400 uppercase font-semibold">Split Fare</span>
-                <span id="bikeCardCost" class="text-base font-extrabold text-blue-700">₹110</span>
+              <h4 class="font-bold text-xs sm:text-sm text-slate-900 leading-tight">Bike Pillion</h4>
+              <p class="text-[10px] text-slate-500 mt-0.5">1 seat • Extra Helmet</p>
+              <div class="mt-2.5 pt-1.5 border-t border-slate-100 flex items-baseline justify-between">
+                <span class="text-[9px] text-slate-400 uppercase font-semibold">Fare</span>
+                <span id="bikeCardCost" class="text-sm sm:text-base font-extrabold text-blue-700">₹110</span>
               </div>
             </div>
 
-            <!-- Car Option Card -->
-            <div id="vehicleCardCar" onclick="selectVehicle('car')" class="vehicle-card bg-white rounded-2xl p-3.5 cursor-pointer relative shadow-sm">
-              <div class="flex items-center justify-between mb-2">
-                <div class="w-9 h-9 rounded-xl bg-indigo-100 text-indigo-700 flex items-center justify-center">
-                  <i data-lucide="car" class="w-5 h-5"></i>
+            <!-- 2. Auto Option Card -->
+            <div id="vehicleCardAuto" onclick="selectVehicle('auto')" class="vehicle-card bg-white rounded-2xl p-3 cursor-pointer relative shadow-sm transition">
+              <div class="flex items-center justify-between mb-1.5">
+                <div class="w-8 h-8 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center">
+                  <i data-lucide="truck" class="w-4 h-4"></i>
                 </div>
-                <span class="text-[10px] font-extrabold bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded-full">
+                <span class="text-[9px] font-extrabold bg-amber-500 text-slate-950 px-1.5 py-0.5 rounded-full">
+                  Economical
+                </span>
+              </div>
+              <h4 class="font-bold text-xs sm:text-sm text-slate-900 leading-tight">Auto Rickshaw</h4>
+              <p class="text-[10px] text-slate-500 mt-0.5">2-3 seats • Quick stop</p>
+              <div class="mt-2.5 pt-1.5 border-t border-slate-100 flex items-baseline justify-between">
+                <span class="text-[9px] text-slate-400 uppercase font-semibold">Fare</span>
+                <span id="autoCardCost" class="text-sm sm:text-base font-extrabold text-amber-700">₹135</span>
+              </div>
+            </div>
+
+            <!-- 3. Car / Cab Option Card -->
+            <div id="vehicleCardCar" onclick="selectVehicle('car')" class="vehicle-card bg-white rounded-2xl p-3 cursor-pointer relative shadow-sm transition">
+              <div class="flex items-center justify-between mb-1.5">
+                <div class="w-8 h-8 rounded-xl bg-indigo-100 text-indigo-700 flex items-center justify-center">
+                  <i data-lucide="car" class="w-4 h-4"></i>
+                </div>
+                <span class="text-[9px] font-extrabold bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded-full">
                   AC Comfort
                 </span>
               </div>
-              <h4 class="font-bold text-sm text-slate-900 leading-tight">Car Pooling</h4>
-              <p class="text-[11px] text-slate-500 mt-0.5">2-4 shared seats • Luggage space</p>
-              <div class="mt-3 pt-2 border-t border-slate-100 flex items-baseline justify-between">
-                <span class="text-[10px] text-slate-400 uppercase font-semibold">Split Fare</span>
-                <span id="carCardCost" class="text-base font-extrabold text-slate-800">₹185</span>
+              <h4 class="font-bold text-xs sm:text-sm text-slate-900 leading-tight">Car / Cab</h4>
+              <p class="text-[10px] text-slate-500 mt-0.5">2-4 seats • Luggage</p>
+              <div class="mt-2.5 pt-1.5 border-t border-slate-100 flex items-baseline justify-between">
+                <span class="text-[9px] text-slate-400 uppercase font-semibold">Fare</span>
+                <span id="carCardCost" class="text-sm sm:text-base font-extrabold text-slate-800">₹185</span>
+              </div>
+            </div>
+
+            <!-- 4. Custom / Any Vehicle Option Card -->
+            <div id="vehicleCardAny" onclick="selectVehicle('any')" class="vehicle-card selected bg-white rounded-2xl p-3 cursor-pointer relative shadow-sm transition">
+              <div class="flex items-center justify-between mb-1.5">
+                <div class="w-8 h-8 rounded-xl bg-purple-100 text-purple-700 flex items-center justify-center">
+                  <i data-lucide="sparkles" class="w-4 h-4 text-purple-600"></i>
+                </div>
+                <span class="text-[9px] font-extrabold bg-purple-600 text-white px-1.5 py-0.5 rounded-full animate-pulse">
+                  Most Flexible
+                </span>
+              </div>
+              <h4 class="font-bold text-xs sm:text-sm text-slate-900 leading-tight">Any / Custom</h4>
+              <p class="text-[10px] text-slate-500 mt-0.5">Whichever is available</p>
+              <div class="mt-2.5 pt-1.5 border-t border-slate-100 flex items-baseline justify-between">
+                <span class="text-[9px] text-slate-400 uppercase font-semibold">Quickest</span>
+                <span id="anyCardCost" class="text-sm sm:text-base font-extrabold text-purple-700">From ₹110</span>
               </div>
             </div>
           </div>
         </div>
 
-        <!-- Rider Primary Action Button: Find Rides -->
-        <button id="btnFindRides" onclick="findRidesAction()" class="w-full py-3.5 gradient-brand text-white rounded-2xl text-xs font-bold shadow-lg shadow-blue-500/25 active:scale-95 transition-all flex items-center justify-center gap-2">
-          <i data-lucide="search" class="w-4 h-4"></i>
-          <span>Find Available Rides</span>
-        </button>
+        <!-- Rider Action Buttons: Request Instant Ride + Find Scheduled Rides -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+          <button id="btnRequestRide" onclick="requestRideAction()" class="w-full py-3.5 bg-gradient-to-r from-blue-600 via-indigo-600 to-blue-700 hover:from-blue-700 hover:to-indigo-800 text-white rounded-2xl text-xs font-extrabold shadow-lg shadow-blue-500/30 active:scale-95 transition-all flex items-center justify-center gap-2 cursor-pointer border border-blue-400/40">
+            <i data-lucide="zap" class="w-4 h-4 fill-amber-300 text-amber-300"></i>
+            <span>Request Instant Ride (₹<span id="instantRideFareVal">110</span>)</span>
+          </button>
+          <button id="btnFindRides" onclick="findRidesAction()" class="w-full py-3.5 bg-white hover:bg-slate-50 text-slate-800 border border-slate-200/90 rounded-2xl text-xs font-bold shadow-xs active:scale-95 transition-all flex items-center justify-center gap-2 cursor-pointer">
+            <i data-lucide="search" class="w-4 h-4 text-blue-600"></i>
+            <span>Explore Scheduled Pools</span>
+          </button>
+        </div>
 
         <!-- 5. RIDER MODE VIEW: Matching Rides List -->
         <div id="riderModeView" class="space-y-3 pt-1">
@@ -525,6 +773,11 @@
         <!-- 5. DRIVER MODE UI COMPONENT & INTERACTION BLOCK -->
         <div id="driverModeView" class="hidden space-y-4 pt-1 pb-24">
 
+          <!-- Driver KYC Verification Notice Banner -->
+          <div id="driverKycAlertBanner">
+            <!-- Dynamically populated via renderKycStatus() in app.js -->
+          </div>
+
           <!-- 1. Master "Go Online" Toggle Card -->
           <div class="bg-white rounded-3xl p-5 border border-slate-200 shadow-sm relative overflow-hidden">
             <div class="flex items-center justify-between gap-3">
@@ -630,18 +883,17 @@
       </section>
 
       <!-- PROFILE & VEHICLE REGISTRATION TAB -->
-      <section id="profileView" class="hidden p-4 space-y-4">
+      <section id="profileView" class="hidden p-4 space-y-4 pb-32">
         <div class="bg-white rounded-3xl p-5 border border-slate-200 shadow-sm text-center relative">
-          <!-- Top Right Settings Shortcut inside Account -->
-          <button onclick="switchTab('settings')" title="Account & App Settings" class="absolute top-4 right-4 p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-full transition">
-            <i data-lucide="settings" class="w-4 h-4"></i>
-          </button>
-
           <div class="relative w-20 h-20 mx-auto mb-3">
-            <img src="https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=200&h=200&q=80" alt="Avatar" class="w-20 h-20 rounded-full object-cover border-4 border-blue-600 shadow-md" />
-            <span class="absolute bottom-0 right-0 bg-emerald-500 text-white p-1 rounded-full border-2 border-white">
-              <i data-lucide="check" class="w-3.5 h-3.5 stroke-[3]"></i>
-            </span>
+            <img id="profileDisplayAvatar" src="" alt="Driver Photo" class="w-20 h-20 rounded-full object-cover border-4 border-blue-600 shadow-md bg-white hidden" />
+            <div id="profileDisplayAvatarPlaceholder" class="w-20 h-20 rounded-full bg-slate-100 border-4 border-slate-200 shadow-inner flex flex-col items-center justify-center text-slate-400">
+              <i data-lucide="user" class="w-7 h-7 text-slate-400"></i>
+              <span class="text-[9px] font-bold text-slate-400 mt-0.5">No Photo</span>
+            </div>
+            <button type="button" onclick="openKycModal()" title="Upload Original Photo" class="absolute bottom-0 right-0 bg-blue-600 hover:bg-blue-700 text-white p-1.5 rounded-full border-2 border-white shadow-sm transition active:scale-95 cursor-pointer">
+              <i data-lucide="camera" class="w-3.5 h-3.5"></i>
+            </button>
           </div>
           <h2 id="profileDisplayName" class="text-base font-bold text-slate-900">Verified Commuter</h2>
           <p id="profileDisplayPhone" class="text-xs font-mono font-semibold text-slate-500 mt-0.5">+91 98480 23145</p>
@@ -650,12 +902,146 @@
               <i data-lucide="shield-check" class="w-3.5 h-3.5"></i>
               <span>Phone Verified</span>
             </span>
-            <span class="text-xs font-bold text-blue-700 bg-blue-50 px-2.5 py-1 rounded-full border border-blue-200">
-              Aadhaar & DL Verified
+            <span id="profileKycBadgeContainer">
+              <!-- Dynamically populated via renderKycStatus() -->
+              <button type="button" onclick="openKycModal()" class="text-xs font-bold text-amber-800 bg-amber-50 hover:bg-amber-100 px-2.5 py-1 rounded-full border border-amber-300 flex items-center gap-1 transition">
+                <i data-lucide="alert-circle" class="w-3.5 h-3.5 text-amber-600"></i>
+                <span>KYC Pending</span>
+              </button>
+            </span>
+            <span id="profileMemberSinceBadge" class="text-xs font-bold text-slate-700 bg-slate-100 px-2.5 py-1 rounded-full border border-slate-200 flex items-center gap-1">
+              <i data-lucide="calendar" class="w-3.5 h-3.5 text-blue-600"></i>
+              <span id="profileMemberSinceText">Member Since: October 2024</span>
             </span>
             <span class="text-xs font-bold text-amber-700 bg-amber-50 px-2.5 py-1 rounded-full border border-amber-200">
               ★ 5.0 Rating
             </span>
+          </div>
+        </div>
+
+        <!-- 1. Personal Details: Full Name, Gender, Email & DOB -->
+        <div class="bg-white rounded-3xl p-5 border border-slate-200 shadow-sm space-y-3.5">
+          <div class="flex items-center justify-between pb-2 border-b border-slate-100">
+            <div class="flex items-center gap-2">
+              <div class="w-7 h-7 rounded-lg bg-blue-100 text-blue-700 flex items-center justify-center">
+                <i data-lucide="user-check" class="w-4 h-4"></i>
+              </div>
+              <div>
+                <h3 class="font-bold text-slate-900 text-sm">Personal Details</h3>
+                <p class="text-[10px] text-slate-500">Legal name, gender & contact details</p>
+              </div>
+            </div>
+            <span id="profileEmailStatusBadge" class="text-[10px] font-extrabold uppercase tracking-wider bg-slate-100 text-slate-600 px-2.5 py-0.5 rounded-full border border-slate-200">
+              Unverified
+            </span>
+          </div>
+
+          <!-- 1. Full Legal Name (First Option) -->
+          <div class="space-y-1">
+            <div class="flex items-center justify-between">
+              <label class="block text-xs font-bold text-slate-700">Full Name</label>
+              <span class="text-[10px] font-medium text-slate-400">As shown on government ID</span>
+            </div>
+            <div class="flex items-center bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 focus-within:border-blue-600 focus-within:bg-white transition">
+              <i data-lucide="user" class="w-4 h-4 text-slate-400 mr-2 flex-shrink-0"></i>
+              <input id="profileFullNameInput" type="text" placeholder="e.g. Ramesh Kumar" class="w-full bg-transparent text-xs font-semibold text-slate-900 focus:outline-none placeholder-slate-400" />
+            </div>
+          </div>
+
+          <!-- 2. Gender (Second Option) -->
+          <div class="space-y-1">
+            <div class="flex items-center justify-between">
+              <label class="block text-xs font-bold text-slate-700">Gender</label>
+              <span id="profileGenderBadge" class="text-[10px] font-semibold text-slate-500">Select option</span>
+            </div>
+            <div class="flex items-center bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 focus-within:border-blue-600 focus-within:bg-white transition">
+              <i data-lucide="users" class="w-4 h-4 text-slate-400 mr-2 flex-shrink-0"></i>
+              <select id="profileGenderInput" onchange="handleGenderInputChange(this.value)" class="w-full bg-transparent text-xs font-semibold text-slate-900 focus:outline-none cursor-pointer">
+                <option value="Male">Male</option>
+                <option value="Female">Female</option>
+                <option value="Other">Other</option>
+                <option value="Prefer not to say">Prefer not to say</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- 3. Email Field -->
+          <div class="space-y-1">
+            <div class="flex items-center justify-between">
+              <label class="block text-xs font-bold text-slate-700">Email Address</label>
+              <span id="profileEmailValidationText" class="text-[10px] font-medium text-slate-400">Required for trip receipts</span>
+            </div>
+            <div class="flex items-center bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 focus-within:border-blue-600 focus-within:bg-white transition">
+              <i data-lucide="mail" class="w-4 h-4 text-slate-400 mr-2 flex-shrink-0"></i>
+              <input id="profileEmailInput" type="email" placeholder="e.g. commuter@example.com" oninput="handleEmailInputValidation(this.value)" class="w-full bg-transparent text-xs font-semibold text-slate-900 focus:outline-none placeholder-slate-400" />
+            </div>
+          </div>
+
+          <!-- 4. Date of Birth (DOB) Field -->
+          <div class="space-y-1">
+            <div class="flex items-center justify-between">
+              <label class="block text-xs font-bold text-slate-700">Date of Birth (DOB)</label>
+              <span id="profileDobDisplayBadge" class="text-[10px] font-mono font-semibold text-blue-600">Not Set</span>
+            </div>
+            <div class="flex items-center bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 focus-within:border-blue-600 focus-within:bg-white transition">
+              <i data-lucide="calendar" class="w-4 h-4 text-slate-400 mr-2 flex-shrink-0"></i>
+              <input id="profileDobInput" type="date" onchange="handleDobInputChange(this.value)" class="w-full bg-transparent text-xs font-semibold text-slate-900 focus:outline-none text-slate-700" />
+            </div>
+          </div>
+
+          <!-- Save Personal Details Button -->
+          <button type="button" onclick="savePersonalDetails()" class="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition shadow-xs flex items-center justify-center gap-1.5 active:scale-[0.99] cursor-pointer">
+            <i data-lucide="save" class="w-3.5 h-3.5"></i>
+            <span>Save Personal Details</span>
+          </button>
+        </div>
+
+        <!-- 2. Emergency Contact Section -->
+        <div class="bg-white rounded-3xl p-5 border border-slate-200 shadow-sm space-y-3">
+          <div class="flex items-center justify-between pb-2 border-b border-slate-100">
+            <div class="flex items-center gap-2">
+              <div class="w-7 h-7 rounded-lg bg-rose-100 text-rose-700 flex items-center justify-center">
+                <i data-lucide="shield-alert" class="w-4 h-4"></i>
+              </div>
+              <div>
+                <h3 class="font-bold text-slate-900 text-sm">Emergency Contact</h3>
+                <p class="text-[10px] text-slate-500">Trusted contact notified during safety alerts</p>
+              </div>
+            </div>
+            <button type="button" onclick="openEmergencyContactModal()" class="text-xs font-bold text-blue-600 hover:text-blue-700 hover:underline flex items-center gap-1 cursor-pointer">
+              <i data-lucide="plus" class="w-3.5 h-3.5"></i> Add
+            </button>
+          </div>
+
+          <div id="emergencyContactDisplayContainer">
+            <!-- Rendered dynamically via renderEmergencyContact() in app.js -->
+          </div>
+        </div>
+
+        <!-- Driver KYC Verification Status Card -->
+        <div id="driverKycCard" class="bg-white rounded-3xl p-5 border border-slate-200 shadow-sm space-y-3">
+          <div class="flex items-center justify-between pb-2 border-b border-slate-100">
+            <div class="flex items-center gap-2">
+              <div class="w-7 h-7 rounded-lg bg-amber-100 text-amber-800 flex items-center justify-center">
+                <i data-lucide="shield-alert" class="w-4 h-4"></i>
+              </div>
+              <div>
+                <h3 class="font-bold text-slate-900 text-sm">Driver KYC Verification</h3>
+                <p class="text-[10px] text-amber-700 font-medium">Required before offering corridor rides</p>
+              </div>
+            </div>
+            <span class="text-[10px] font-extrabold uppercase tracking-wider bg-amber-100 text-amber-800 px-2.5 py-0.5 rounded-full border border-amber-200">
+              Pending
+            </span>
+          </div>
+          <div class="bg-amber-50/70 border border-amber-200/80 rounded-2xl p-3 text-xs space-y-2.5">
+            <p class="text-[11px] text-amber-900 leading-relaxed">
+              Upload your photo, legal name, 12-digit Aadhaar UID and state Driving License to earn verified driver credentials on Routemate.
+            </p>
+            <button type="button" onclick="openKycModal()" class="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition shadow-xs flex items-center justify-center gap-1.5 active:scale-95 cursor-pointer">
+              <i data-lucide="shield-check" class="w-3.5 h-3.5"></i>
+              <span>Complete Driver KYC</span>
+            </button>
           </div>
         </div>
 
@@ -671,117 +1057,180 @@
           </div>
         </div>
 
-        <!-- Sign Out Button -->
-        <div class="pt-2">
-          <button onclick="handleSignOut()" class="w-full py-3.5 bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 rounded-2xl text-xs font-bold transition flex items-center justify-center gap-2 shadow-xs active:scale-[0.98]">
-            <i data-lucide="log-out" class="w-4 h-4"></i>
-            <span>Log Out of Routemate</span>
-          </button>
+        <!-- SETTINGS: GENERAL SECTION -->
+        <div class="bg-white rounded-3xl p-5 border border-slate-200 shadow-sm space-y-3">
+          <div class="flex items-center justify-between pb-2 border-b border-slate-100">
+            <div class="flex items-center gap-2">
+              <div class="w-7 h-7 rounded-lg bg-indigo-100 text-indigo-700 flex items-center justify-center">
+                <i data-lucide="sliders" class="w-4 h-4"></i>
+              </div>
+              <div>
+                <h3 class="font-bold text-slate-900 text-sm">Settings — General</h3>
+                <p class="text-[10px] text-slate-500">Favourites, ride preferences & shortcuts</p>
+              </div>
+            </div>
+            <span class="text-[10px] font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-full border border-indigo-200">General</span>
+          </div>
+
+          <div class="divide-y divide-slate-100">
+            <!-- Favourites Option -->
+            <button type="button" onclick="openFavouritesModal()" class="w-full py-3 flex items-center justify-between text-left hover:bg-slate-50/80 px-1 rounded-xl transition cursor-pointer group">
+              <div class="flex items-center gap-3">
+                <div class="w-8 h-8 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center flex-shrink-0 group-hover:scale-105 transition">
+                  <i data-lucide="heart" class="w-4 h-4"></i>
+                </div>
+                <div>
+                  <p class="text-xs font-bold text-slate-900">Favourites</p>
+                  <p class="text-[10px] text-slate-500">Manage saved places & frequent corridors</p>
+                </div>
+              </div>
+              <div class="flex items-center gap-1.5 text-slate-400">
+                <span id="favCountBadge" class="text-[10px] font-bold bg-rose-50 text-rose-700 px-2 py-0.5 rounded-full border border-rose-200">2 Saved</span>
+                <i data-lucide="chevron-right" class="w-4 h-4 text-slate-400 group-hover:translate-x-0.5 transition"></i>
+              </div>
+            </button>
+
+            <!-- Preferences Option -->
+            <button type="button" onclick="openPreferencesModal()" class="w-full py-3 flex items-center justify-between text-left hover:bg-slate-50/80 px-1 rounded-xl transition cursor-pointer group">
+              <div class="flex items-center gap-3">
+                <div class="w-8 h-8 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center flex-shrink-0 group-hover:scale-105 transition">
+                  <i data-lucide="sliders-horizontal" class="w-4 h-4"></i>
+                </div>
+                <div>
+                  <p class="text-xs font-bold text-slate-900">Preferences</p>
+                  <p class="text-[10px] text-slate-500">Auto-confirm, quiet ride, AC & app behaviors</p>
+                </div>
+              </div>
+              <i data-lucide="chevron-right" class="w-4 h-4 text-slate-400 group-hover:translate-x-0.5 transition"></i>
+            </button>
+
+            <!-- App Shortcuts Option -->
+            <button type="button" onclick="openAppShortcutsModal()" class="w-full py-3 flex items-center justify-between text-left hover:bg-slate-50/80 px-1 rounded-xl transition cursor-pointer group">
+              <div class="flex items-center gap-3">
+                <div class="w-8 h-8 rounded-xl bg-sky-50 text-sky-600 flex items-center justify-center flex-shrink-0 group-hover:scale-105 transition">
+                  <i data-lucide="smartphone" class="w-4 h-4"></i>
+                </div>
+                <div>
+                  <p class="text-xs font-bold text-slate-900">App Shortcuts</p>
+                  <p class="text-[10px] text-slate-500">Quick launcher shortcuts on your home screen</p>
+                </div>
+              </div>
+              <div class="flex items-center gap-1.5 text-slate-400">
+                <span class="text-[10px] font-bold bg-sky-50 text-sky-700 px-2 py-0.5 rounded-full border border-sky-200">Launcher</span>
+                <i data-lucide="chevron-right" class="w-4 h-4 text-slate-400 group-hover:translate-x-0.5 transition"></i>
+              </div>
+            </button>
+          </div>
         </div>
-      </section>
 
-      <!-- SETTINGS TAB (Right of Account) -->
-      <section id="settingsView" class="hidden p-4 space-y-4 pb-32">
-        <div class="bg-white rounded-3xl p-5 border border-slate-200 shadow-sm">
-          <div class="flex items-center justify-between pb-4 border-b border-slate-100">
-            <div>
-              <h2 class="text-base font-extrabold text-slate-900">Settings & Preferences</h2>
-              <p class="text-xs text-slate-500 mt-0.5">Manage notifications, route safety & app behavior</p>
+        <!-- SETTINGS: OTHERS SECTION -->
+        <div class="bg-white rounded-3xl p-5 border border-slate-200 shadow-sm space-y-3">
+          <div class="flex items-center justify-between pb-2 border-b border-slate-100">
+            <div class="flex items-center gap-2">
+              <div class="w-7 h-7 rounded-lg bg-slate-100 text-slate-700 flex items-center justify-center">
+                <i data-lucide="more-horizontal" class="w-4 h-4"></i>
+              </div>
+              <div>
+                <h3 class="font-bold text-slate-900 text-sm">Settings — Others</h3>
+                <p class="text-[10px] text-slate-500">Version info, beta access & account actions</p>
+              </div>
             </div>
-            <div class="w-10 h-10 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center shadow-xs">
-              <i data-lucide="settings" class="w-5 h-5"></i>
-            </div>
+            <span class="text-[10px] font-bold text-slate-700 bg-slate-100 px-2 py-0.5 rounded-full border border-slate-200">Others</span>
           </div>
 
-          <!-- 1. Notification Preferences -->
-          <div class="mt-4 space-y-3">
-            <h3 class="text-xs font-bold uppercase tracking-wider text-slate-400">Ride Alerts & Notifications</h3>
-            
-            <div class="flex items-center justify-between p-3.5 bg-slate-50 rounded-2xl border border-slate-200/80">
+          <div class="divide-y divide-slate-100">
+            <!-- About Option -->
+            <button type="button" onclick="openAboutModal()" class="w-full py-3 flex items-center justify-between text-left hover:bg-slate-50/80 px-1 rounded-xl transition cursor-pointer group">
               <div class="flex items-center gap-3">
-                <div class="w-8 h-8 rounded-xl bg-blue-100 text-blue-600 flex items-center justify-center flex-shrink-0">
-                  <i data-lucide="bell" class="w-4 h-4"></i>
+                <div class="w-8 h-8 rounded-xl bg-slate-100 text-slate-600 flex items-center justify-center flex-shrink-0 group-hover:scale-105 transition">
+                  <i data-lucide="info" class="w-4 h-4"></i>
                 </div>
                 <div>
-                  <p class="text-xs font-bold text-slate-900">Instant Ride Match Alerts</p>
-                  <p class="text-[11px] text-slate-500">Get notified when co-commuters match your corridor</p>
+                  <p class="text-xs font-bold text-slate-900">About Routemate</p>
+                  <p class="text-[10px] text-slate-500">Legal, safety policy & platform license</p>
                 </div>
               </div>
-              <input type="checkbox" checked class="w-4 h-4 text-blue-600 rounded accent-blue-600 cursor-pointer" />
-            </div>
+              <div class="flex items-center gap-1.5 text-slate-400">
+                <span class="text-[10px] font-mono font-bold bg-slate-100 text-slate-700 px-2 py-0.5 rounded-full border border-slate-200">v8.104.0</span>
+                <i data-lucide="chevron-right" class="w-4 h-4 text-slate-400 group-hover:translate-x-0.5 transition"></i>
+              </div>
+            </button>
 
-            <div class="flex items-center justify-between p-3.5 bg-slate-50 rounded-2xl border border-slate-200/80">
+            <!-- Subscribe to Beta Option -->
+            <div class="py-3 flex items-center justify-between px-1">
               <div class="flex items-center gap-3">
-                <div class="w-8 h-8 rounded-xl bg-emerald-100 text-emerald-600 flex items-center justify-center flex-shrink-0">
-                  <i data-lucide="message-square" class="w-4 h-4"></i>
+                <div class="w-8 h-8 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center flex-shrink-0">
+                  <i data-lucide="sparkles" class="w-4 h-4"></i>
                 </div>
                 <div>
-                  <p class="text-xs font-bold text-slate-900">SMS / WhatsApp Updates</p>
-                  <p class="text-[11px] text-slate-500">Trip start notifications & booking verification PINs</p>
+                  <div class="flex items-center gap-1.5">
+                    <p class="text-xs font-bold text-slate-900">Subscribe to Beta</p>
+                    <span id="betaBadge" class="text-[9px] font-extrabold uppercase px-1.5 py-0.2 rounded bg-amber-100 text-amber-800 border border-amber-300 hidden">Active</span>
+                  </div>
+                  <p class="text-[10px] text-slate-500">Early access to AI routing & UPI AutoPay</p>
                 </div>
               </div>
-              <input type="checkbox" checked class="w-4 h-4 text-blue-600 rounded accent-blue-600 cursor-pointer" />
+              <label class="relative inline-flex items-center cursor-pointer">
+                <input type="checkbox" id="betaSubscriberToggle" onchange="handleBetaToggleChange(this.checked)" class="sr-only peer" />
+                <div class="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
+              </label>
             </div>
-          </div>
 
-          <!-- 2. Commute & Safety Options -->
-          <div class="mt-5 space-y-3">
-            <h3 class="text-xs font-bold uppercase tracking-wider text-slate-400">Safety & Location</h3>
-
-            <div class="flex items-center justify-between p-3.5 bg-slate-50 rounded-2xl border border-slate-200/80">
+            <!-- Whitelisted Admin Portal Option (Visible ONLY to 9494285249 or 7989031924) -->
+            <button id="adminPortalOptionItem" type="button" onclick="openAdminPortal()" class="w-full py-3 flex items-center justify-between text-left hover:bg-purple-50/60 px-1 rounded-xl transition cursor-pointer group hidden">
               <div class="flex items-center gap-3">
-                <div class="w-8 h-8 rounded-xl bg-purple-100 text-purple-600 flex items-center justify-center flex-shrink-0">
-                  <i data-lucide="locate-fixed" class="w-4 h-4"></i>
+                <div class="w-8 h-8 rounded-xl bg-purple-100 text-purple-700 flex items-center justify-center flex-shrink-0 group-hover:scale-105 transition">
+                  <i data-lucide="shield-check" class="w-4 h-4"></i>
                 </div>
                 <div>
-                  <p class="text-xs font-bold text-slate-900">High-Accuracy GPS Pickup</p>
-                  <p class="text-[11px] text-slate-500">Automatically locate your nearest highway stop</p>
+                  <div class="flex items-center gap-1.5">
+                    <p class="text-xs font-bold text-slate-900">Admin Portal (Restricted)</p>
+                    <span class="text-[9px] font-bold bg-purple-100 text-purple-800 px-1.5 py-0.2 rounded-full border border-purple-200">Whitelisted Only</span>
+                  </div>
+                  <p class="text-[10px] text-slate-500">Manual KYC verification & driver approvals</p>
                 </div>
               </div>
-              <input type="checkbox" checked class="w-4 h-4 text-blue-600 rounded accent-blue-600 cursor-pointer" />
-            </div>
+              <div class="flex items-center gap-1.5 text-slate-400">
+                <i data-lucide="chevron-right" class="w-4 h-4 text-slate-400 group-hover:translate-x-0.5 transition"></i>
+              </div>
+            </button>
 
-            <div class="flex items-center justify-between p-3.5 bg-slate-50 rounded-2xl border border-slate-200/80">
+            <!-- Logout Option -->
+            <button type="button" onclick="handleSignOut()" class="w-full py-3 flex items-center justify-between text-left hover:bg-red-50/50 px-1 rounded-xl transition cursor-pointer group">
               <div class="flex items-center gap-3">
-                <div class="w-8 h-8 rounded-xl bg-amber-100 text-amber-600 flex items-center justify-center flex-shrink-0">
-                  <i data-lucide="shield-alert" class="w-4 h-4"></i>
+                <div class="w-8 h-8 rounded-xl bg-red-50 text-red-600 flex items-center justify-center flex-shrink-0 group-hover:scale-105 transition">
+                  <i data-lucide="log-out" class="w-4 h-4"></i>
                 </div>
                 <div>
-                  <p class="text-xs font-bold text-slate-900">Emergency & SOS Shield</p>
-                  <p class="text-[11px] text-slate-500">Quick-access trusted contacts & emergency helpline</p>
+                  <p class="text-xs font-bold text-red-600">Log Out</p>
+                  <p class="text-[10px] text-slate-500">End session on this device</p>
                 </div>
               </div>
-              <button onclick="openSafetyModal()" class="px-3 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-800 font-bold text-xs rounded-xl border border-amber-200 transition">
-                Configure
-              </button>
-            </div>
-          </div>
+              <i data-lucide="chevron-right" class="w-4 h-4 text-red-300 group-hover:translate-x-0.5 transition"></i>
+            </button>
 
-          <!-- 3. App Diagnostics & Version -->
-          <div class="mt-5 pt-4 border-t border-slate-100 space-y-3">
-            <div class="flex items-center justify-between text-xs">
-              <span class="text-slate-500 font-semibold">Active Corridor</span>
-              <span class="font-bold text-blue-700 bg-blue-50 px-2.5 py-0.5 rounded-full border border-blue-200">Uppal ➔ Jangaon (84km)</span>
-            </div>
-            <div class="flex items-center justify-between text-xs">
-              <span class="text-slate-500 font-semibold">Application Version</span>
-              <span class="font-bold text-slate-800 font-mono">v1.2.0 (P2P Android)</span>
-            </div>
-            <div class="flex items-center justify-between text-xs pt-1">
-              <span class="text-slate-500 font-semibold">Route Cache</span>
-              <button onclick="showToast('Route cache cleared successfully', 'success')" class="text-blue-600 font-bold hover:underline">
-                Refresh Cache
-              </button>
-            </div>
+            <!-- Delete Account Option -->
+            <button type="button" onclick="openDeleteAccountModal()" class="w-full py-3 flex items-center justify-between text-left hover:bg-slate-50 px-1 rounded-xl transition cursor-pointer group">
+              <div class="flex items-center gap-3">
+                <div class="w-8 h-8 rounded-xl bg-slate-100 text-slate-600 flex items-center justify-center flex-shrink-0 group-hover:scale-105 transition">
+                  <i data-lucide="trash-2" class="w-4 h-4"></i>
+                </div>
+                <div>
+                  <p class="text-xs font-bold text-slate-700">Delete Account</p>
+                  <p class="text-[10px] text-slate-400">Permanently remove profile & stored data</p>
+                </div>
+              </div>
+              <i data-lucide="chevron-right" class="w-4 h-4 text-slate-400 group-hover:translate-x-0.5 transition"></i>
+            </button>
           </div>
         </div>
       </section>
 
     </main>
 
-    <!-- 6. Clean Footer / Bottom Navigation (4 Adjusted Columns) -->
+    <!-- 6. Clean Footer / Bottom Navigation (Rides | Activity | Account) -->
     <nav id="appBottomNav" class="fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-200 py-2 shadow-lg md:absolute">
-      <div class="max-w-md mx-auto px-2 sm:px-4 grid grid-cols-4 gap-1">
+      <div class="max-w-md mx-auto px-6 grid grid-cols-3 gap-2">
         <!-- Explore / Rides -->
         <button id="nav-explore" onclick="switchTab('explore')" class="nav-item active flex flex-col items-center justify-center py-1 text-slate-400 hover:text-blue-600 transition">
           <i data-lucide="compass" class="w-5 h-5 mb-0.5"></i>
@@ -794,16 +1243,10 @@
           <span class="text-[10px]">Activity</span>
         </button>
 
-        <!-- Account -->
+        <!-- Account (Settings inside) -->
         <button id="nav-profile" onclick="switchTab('profile')" class="nav-item flex flex-col items-center justify-center py-1 text-slate-400 hover:text-blue-600 transition">
           <i data-lucide="user" class="w-5 h-5 mb-0.5"></i>
           <span class="text-[10px]">Account</span>
-        </button>
-
-        <!-- Settings (To the right of Account) -->
-        <button id="nav-settings" onclick="switchTab('settings')" class="nav-item flex flex-col items-center justify-center py-1 text-slate-400 hover:text-blue-600 transition">
-          <i data-lucide="settings" class="w-5 h-5 mb-0.5"></i>
-          <span class="text-[10px]">Settings</span>
         </button>
       </div>
     </nav>
@@ -914,16 +1357,127 @@
       </div>
     </div>
 
-    <!-- Live Trip Tracking Modal (Customer & Driver) -->
+    <!-- 1. Real-Time Driver Incoming Ride Request Modal (Popped up when Online & KYC Verified) -->
+    <div id="driverIncomingRideModal" class="modal-backdrop fixed inset-0 z-55 flex items-center justify-center p-4 hidden">
+      <div class="bg-white rounded-3xl max-w-sm w-full shadow-2xl border-2 border-blue-500 overflow-hidden animate-in fade-in zoom-in duration-200">
+        <!-- Top Live Banner with Animated Countdown -->
+        <div class="p-4 bg-gradient-to-r from-blue-900 to-indigo-950 text-white flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <span class="w-2.5 h-2.5 rounded-full bg-emerald-400 live-pulse"></span>
+            <div>
+              <h4 class="font-extrabold text-xs uppercase tracking-wider text-blue-200">Incoming Corridor Request</h4>
+              <p class="text-[10px] text-slate-300">Live Highway Match</p>
+            </div>
+          </div>
+          <span id="driverIncomingTimerBadge" class="text-xs font-mono font-black text-amber-300 bg-amber-500/20 border border-amber-400/40 px-2.5 py-1 rounded-full flex items-center gap-1">
+            <i data-lucide="timer" class="w-3.5 h-3.5 text-amber-300"></i>
+            <span id="driverIncomingTimerSeconds">45s</span>
+          </span>
+        </div>
+
+        <!-- Passenger Profile & Fare Split -->
+        <div class="p-5 space-y-4">
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-3">
+              <img id="driverIncomingRiderAvatar" src="https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=120&h=120&q=80" class="w-12 h-12 rounded-full object-cover border-2 border-blue-500 shadow-sm" />
+              <div>
+                <div class="flex items-center gap-1.5">
+                  <h4 id="driverIncomingRiderName" class="font-extrabold text-slate-900 text-sm">Ananya Verma</h4>
+                  <span id="driverIncomingRiderRating" class="text-[10px] font-bold text-amber-600 bg-amber-50 border border-amber-200 px-1.5 py-0.2 rounded">★ 4.9</span>
+                </div>
+                <p id="driverIncomingRiderRole" class="text-xs text-slate-500 mt-0.5">Daily Commuter • Verified</p>
+              </div>
+            </div>
+
+            <div class="text-right">
+              <span class="text-[10px] font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full">Fuel Split</span>
+              <p id="driverIncomingFare" class="text-2xl font-black text-blue-700 mt-1">₹110</p>
+            </div>
+          </div>
+
+          <!-- Pickup & Drop Locations -->
+          <div class="bg-slate-50 rounded-2xl p-3.5 border border-slate-200/90 space-y-2.5 text-xs">
+            <div class="flex items-start gap-2.5">
+              <span class="w-2.5 h-2.5 rounded-full bg-emerald-500 mt-1 flex-shrink-0"></span>
+              <div>
+                <p class="text-[10px] text-slate-400 font-semibold uppercase">Pickup Location</p>
+                <p id="driverIncomingPickup" class="font-bold text-slate-900">Uppal Ring Road Metro, Hyderabad</p>
+              </div>
+            </div>
+            <div class="flex items-start gap-2.5">
+              <span class="w-2.5 h-2.5 rounded-full bg-blue-600 mt-1 flex-shrink-0"></span>
+              <div>
+                <p class="text-[10px] text-slate-400 font-semibold uppercase">Destination</p>
+                <p id="driverIncomingDrop" class="font-bold text-slate-900">Jangaon Bus Depot / Chowrasta</p>
+              </div>
+            </div>
+            <div class="pt-2 border-t border-slate-200 flex items-center justify-between text-[11px] text-slate-600 font-medium">
+              <span id="driverIncomingDistance">84 km corridor</span>
+              <div class="flex items-center gap-1.5">
+                <span id="driverIncomingVehiclePref" class="font-bold text-purple-700 bg-purple-50 border border-purple-200 px-2 py-0.5 rounded text-[10px]">✨ Any Vehicle</span>
+                <span id="driverIncomingPayMethod" class="font-bold text-slate-700 bg-slate-100 px-2 py-0.5 rounded text-[10px]">Direct UPI</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Action Buttons -->
+          <div class="grid grid-cols-3 gap-2 pt-1">
+            <button type="button" onclick="declineDriverIncomingModal()" class="py-3 border border-slate-300 hover:bg-slate-100 text-slate-700 font-bold rounded-2xl text-xs transition active:scale-95 cursor-pointer">
+              Decline
+            </button>
+            <button type="button" onclick="acceptDriverIncomingModal()" class="col-span-2 py-3.5 gradient-brand text-white font-extrabold rounded-2xl text-xs shadow-lg shadow-blue-500/30 transition active:scale-95 flex items-center justify-center gap-2 cursor-pointer">
+              <i data-lucide="check-circle" class="w-4 h-4"></i>
+              <span>Accept Ride (<span id="driverIncomingBtnFare">₹110</span>)</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 2. Driver PIN Verification Modal (Before Starting Ride) -->
+    <div id="driverVerifyPinModal" class="modal-backdrop fixed inset-0 z-[100] flex items-center justify-center p-4 hidden" style="z-index: 99999;">
+      <div class="bg-white rounded-3xl max-w-sm w-full shadow-2xl p-6 text-center space-y-4 animate-in fade-in zoom-in duration-200 border border-slate-100">
+        <div class="w-14 h-14 rounded-2xl bg-blue-100 text-blue-700 flex items-center justify-center mx-auto shadow-sm">
+          <i data-lucide="key-round" class="w-7 h-7"></i>
+        </div>
+        <div>
+          <h3 class="text-base font-extrabold text-slate-900">Verify Passenger Boarding PIN</h3>
+          <p class="text-xs text-slate-500 mt-1">Ask rider for their 4-digit PIN or tap verify below.</p>
+        </div>
+
+        <div class="p-3 bg-slate-50 rounded-2xl border border-slate-200">
+          <div class="flex items-center justify-between mb-2">
+            <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">4-Digit Security PIN</label>
+            <span class="text-[10px] font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full border border-blue-100">Rider PIN: <strong id="driverVerifyPinHint">4821</strong></span>
+          </div>
+          <input id="driverEnteredPinInput" type="text" maxlength="4" placeholder="4821" value="4821" class="w-36 mx-auto text-center font-mono font-black text-2xl tracking-widest bg-white border-2 border-blue-500 rounded-xl py-2 focus:outline-none shadow-xs" onkeydown="if(event.key==='Enter') confirmStartRideWithPin();" />
+        </div>
+
+        <div class="flex items-center gap-2 pt-2">
+          <button type="button" onclick="closeModal('driverVerifyPinModal')" class="w-1/3 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs transition cursor-pointer">
+            Cancel
+          </button>
+          <button type="button" onclick="confirmStartRideWithPin()" class="w-2/3 py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold rounded-xl text-xs shadow-md shadow-emerald-600/30 transition flex items-center justify-center gap-1.5 cursor-pointer active:scale-95">
+            <i data-lucide="check" class="w-4 h-4 stroke-[3]"></i>
+            <span>Verify & Start Ride</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 3. Live Trip Tracking & Lifecycle Modal (Customer & Driver) -->
     <div id="liveTrackingModal" class="modal-backdrop fixed inset-0 z-50 flex items-center justify-center p-3 hidden">
       <div class="bg-white rounded-3xl max-w-md w-full shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200 flex flex-col max-h-[92vh]">
-        <!-- Top Bar -->
+        <!-- Top Bar with Stage Badge -->
         <div class="p-4 border-b border-slate-100 flex items-center justify-between bg-white z-10">
           <div class="flex items-center gap-2">
-            <span class="w-2.5 h-2.5 rounded-full bg-emerald-500 live-pulse"></span>
+            <span id="trackingLivePulseDot" class="w-2.5 h-2.5 rounded-full bg-emerald-500 live-pulse"></span>
             <div>
-              <h3 class="text-sm font-extrabold text-slate-900">Live Highway Corridor Tracking</h3>
-              <p class="text-[10px] text-slate-500">NH 163 Corridor • Live GPS Route</p>
+              <div class="flex items-center gap-1.5">
+                <h3 id="trackingStageTitle" class="text-sm font-extrabold text-slate-900">Live Highway Corridor Tracking</h3>
+                <span id="trackingStagePill" class="text-[9px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-blue-100 text-blue-800">In Transit</span>
+              </div>
+              <p id="trackingStageSubtitle" class="text-[10px] text-slate-500">NH 163 Corridor • Live GPS Route</p>
             </div>
           </div>
           <button onclick="closeModal('liveTrackingModal')" class="p-1.5 text-slate-400 hover:text-slate-600 rounded-full hover:bg-slate-100">
@@ -931,83 +1485,203 @@
           </button>
         </div>
 
-        <!-- Live Google Map Canvas -->
-        <div class="relative w-full h-64 bg-slate-100 flex-shrink-0">
-          <div id="trackingMapCanvas" class="w-full h-full"></div>
-          
-          <!-- Live Floating Route HUD Badge -->
-          <div class="absolute top-3 left-3 z-10 bg-white/95 backdrop-blur-md px-3.5 py-2 rounded-2xl border border-slate-200 shadow-md">
-            <p class="text-[10px] text-slate-400 font-semibold uppercase">Estimated Arrival</p>
-            <div class="flex items-baseline gap-1.5">
-              <span id="trackingLiveEta" class="text-lg font-black text-blue-700">18 mins</span>
-              <span id="trackingLiveDist" class="text-xs font-bold text-slate-600">84 km</span>
+        <!-- SEARCHING STATE VIEW (When rider is waiting for nearby drivers) -->
+        <div id="trackingSearchingStateView" class="hidden p-6 text-center space-y-5 bg-gradient-to-b from-blue-50/50 to-white">
+          <div class="relative w-24 h-24 mx-auto flex items-center justify-center">
+            <div class="absolute inset-0 rounded-full bg-blue-400/20 radar-ring"></div>
+            <div class="absolute inset-2 rounded-full bg-blue-500/30 radar-ring" style="animation-delay: 0.6s;"></div>
+            <div class="w-14 h-14 rounded-full bg-blue-600 text-white flex items-center justify-center shadow-lg shadow-blue-500/30 relative z-10">
+              <i data-lucide="radio" class="w-7 h-7"></i>
             </div>
           </div>
 
-          <!-- Emergency Quick Access on Map -->
-          <div class="absolute top-3 right-3 z-10 flex flex-col gap-1.5">
-            <button onclick="showToast('Calling Emergency Services 112...', 'error')" title="Emergency SOS" class="w-8 h-8 rounded-full bg-rose-600 text-white shadow-md flex items-center justify-center font-bold text-xs hover:bg-rose-700 transition">
-              SOS
-            </button>
-            <button onclick="triggerEmergencyHelp()" title="Safety Help Desk" class="w-8 h-8 rounded-full bg-white text-blue-600 shadow-md border border-slate-200 flex items-center justify-center transition hover:bg-blue-50">
-              <i data-lucide="life-buoy" class="w-4 h-4"></i>
-            </button>
+          <div>
+            <span class="text-[10px] font-extrabold uppercase tracking-wider bg-blue-100 text-blue-800 px-2.5 py-0.5 rounded-full border border-blue-200">
+              Broadcasting to Drivers
+            </span>
+            <h4 class="text-base font-extrabold text-slate-900 mt-2">Connecting to Verified Drivers</h4>
+            <p class="text-xs text-slate-500 mt-1 max-w-xs mx-auto">Sending your ride request to active verified drivers along the Uppal ➔ Jangaon corridor...</p>
           </div>
+
+          <!-- Corridor Ride Summary -->
+          <div class="bg-white rounded-2xl p-4 border border-slate-200 shadow-xs text-left space-y-2 text-xs">
+            <div class="flex items-center justify-between pb-2 border-b border-slate-100">
+              <span class="text-slate-400 font-semibold uppercase text-[10px]">Estimated Fuel Fare</span>
+              <span id="searchingFareText" class="text-base font-black text-blue-700">₹110</span>
+            </div>
+            <div class="flex items-center justify-between pb-2 border-b border-slate-100">
+              <span class="text-slate-400 font-semibold uppercase text-[10px]">Vehicle Preference</span>
+              <span id="searchingVehicleText" class="font-bold text-purple-700 bg-purple-50 border border-purple-200 px-2 py-0.5 rounded text-[10px]">✨ Any / Custom (Flexible)</span>
+            </div>
+            <div class="flex items-start gap-2">
+              <span class="w-2 h-2 rounded-full bg-emerald-500 mt-1 flex-shrink-0"></span>
+              <p class="text-slate-800 font-medium"><strong class="text-slate-900">Pickup:</strong> <span id="searchingPickupText">Uppal Ring Road Metro</span></p>
+            </div>
+            <div class="flex items-start gap-2">
+              <span class="w-2 h-2 rounded-full bg-blue-600 mt-1 flex-shrink-0"></span>
+              <p class="text-slate-800 font-medium"><strong class="text-slate-900">Drop:</strong> <span id="searchingDropText">Jangaon Bus Depot</span></p>
+            </div>
+            <div class="pt-2 border-t border-slate-100 flex items-center justify-between">
+              <span class="text-slate-500 text-[11px]">Security Boarding PIN</span>
+              <span id="searchingPinText" class="font-mono font-extrabold text-sm text-slate-900 bg-slate-100 px-2.5 py-0.5 rounded-lg">4821</span>
+            </div>
+          </div>
+
+          <button type="button" onclick="cancelCurrentActiveRide()" class="w-full py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition">
+            Cancel Ride Request
+          </button>
         </div>
 
-        <!-- Trip Details & Actions -->
-        <div class="p-4 space-y-3 overflow-y-auto flex-1">
-          <!-- Progress Bar -->
-          <div>
-            <div class="flex justify-between text-[11px] font-semibold text-slate-600 mb-1">
-              <span id="trackingOriginLabel">Uppal Metro Gate 2</span>
-              <span id="trackingDestLabel">Jangaon Chowrasta</span>
-            </div>
-            <div class="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
-              <div id="trackingProgressBar" class="bg-blue-600 h-full rounded-full transition-all duration-500" style="width: 35%;"></div>
-            </div>
-          </div>
-
-          <!-- Driver / Co-Commuter Info -->
-          <div id="trackingPartyInfo" class="p-3 bg-slate-50 rounded-2xl border border-slate-200/80 flex items-center justify-between text-xs">
-            <div class="flex items-center gap-3">
-              <img id="trackingPartyAvatar" src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=120&h=120&q=80" class="w-10 h-10 rounded-full object-cover border border-blue-500" />
-              <div>
-                <p id="trackingPartyName" class="font-bold text-slate-900">Ramesh Kumar</p>
-                <p id="trackingPartyVehicle" class="text-[11px] text-slate-500">Bajaj Pulsar 150 • TS 08 EK 4321</p>
+        <!-- ACTIVE TRACKING VIEW (Driver Accepted or Ride Started) -->
+        <div id="trackingActiveStateView" class="flex-1 flex flex-col overflow-hidden">
+          <!-- Live Google Map Canvas -->
+          <div class="relative w-full h-64 bg-slate-100 flex-shrink-0">
+            <div id="trackingMapCanvas" class="w-full h-full"></div>
+            
+            <!-- Live Floating Route HUD Badge -->
+            <div class="absolute top-3 left-3 z-10 bg-white/95 backdrop-blur-md px-3.5 py-2 rounded-2xl border border-slate-200 shadow-md">
+              <p id="trackingHudTitle" class="text-[10px] text-slate-400 font-semibold uppercase">Estimated Arrival</p>
+              <div class="flex items-baseline gap-1.5">
+                <span id="trackingLiveEta" class="text-lg font-black text-blue-700">18 mins</span>
+                <span id="trackingLiveDist" class="text-xs font-bold text-slate-600">84 km</span>
               </div>
             </div>
-            <div class="text-right">
-              <span class="text-[10px] font-bold text-blue-700 bg-blue-100 px-2 py-0.5 rounded-full">Boarding PIN</span>
-              <p id="trackingPartyPin" class="text-sm font-mono font-extrabold text-slate-900 mt-0.5">4821</p>
+
+            <!-- Emergency Quick Access on Map -->
+            <div class="absolute top-3 right-3 z-10 flex flex-col gap-1.5">
+              <button onclick="showToast('Calling Emergency Services 112...', 'error')" title="Emergency SOS" class="w-8 h-8 rounded-full bg-rose-600 text-white shadow-md flex items-center justify-center font-bold text-xs hover:bg-rose-700 transition">
+                SOS
+              </button>
+              <button onclick="triggerEmergencyHelp()" title="Safety Help Desk" class="w-8 h-8 rounded-full bg-white text-blue-600 shadow-md border border-slate-200 flex items-center justify-center transition hover:bg-blue-50">
+                <i data-lucide="life-buoy" class="w-4 h-4"></i>
+              </button>
             </div>
           </div>
 
-          <!-- Quick Action Buttons -->
-          <div class="grid grid-cols-2 gap-2 text-xs">
-            <button onclick="callCurrentDriver()" class="py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold rounded-xl transition flex items-center justify-center gap-1.5">
-              <i data-lucide="phone" class="w-3.5 h-3.5 text-blue-600"></i>
-              <span>Call</span>
-            </button>
-            <button onclick="shareTripWithFamily()" class="py-2.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 font-bold rounded-xl border border-emerald-200 transition flex items-center justify-center gap-1.5">
-              <i data-lucide="share-2" class="w-3.5 h-3.5 text-emerald-600"></i>
-              <span>Share Trip</span>
-            </button>
-          </div>
+          <!-- Trip Details & Actions -->
+          <div class="p-4 space-y-3 overflow-y-auto flex-1">
+            <!-- Progress Bar -->
+            <div>
+              <div class="flex justify-between text-[11px] font-semibold text-slate-600 mb-1">
+                <span id="trackingOriginLabel">Uppal Metro Gate 2</span>
+                <span id="trackingDestLabel">Jangaon Chowrasta</span>
+              </div>
+              <div class="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
+                <div id="trackingProgressBar" class="bg-blue-600 h-full rounded-full transition-all duration-500" style="width: 35%;"></div>
+              </div>
+            </div>
 
-          <!-- Complete / Rate Commute shortcut (Passenger Only vs Driver) -->
-          <div id="trackingPassengerActionContainer">
-            <button onclick="closeModal('liveTrackingModal'); openRatingModal();" class="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-sm transition flex items-center justify-center gap-1.5">
-              <i data-lucide="star" class="w-3.5 h-3.5"></i>
-              <span>Arrived? Rate Driver & Finish Trip</span>
-            </button>
+            <!-- Driver / Co-Commuter Info -->
+            <div id="trackingPartyInfo" class="p-3 bg-slate-50 rounded-2xl border border-slate-200/80 flex items-center justify-between text-xs">
+              <div class="flex items-center gap-3">
+                <img id="trackingPartyAvatar" src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=120&h=120&q=80" class="w-10 h-10 rounded-full object-cover border border-blue-500" />
+                <div>
+                  <p id="trackingPartyName" class="font-bold text-slate-900">Ramesh Kumar</p>
+                  <p id="trackingPartyVehicle" class="text-[11px] text-slate-500">Bajaj Pulsar 150 • TS 08 EK 4321</p>
+                </div>
+              </div>
+              <div class="text-right">
+                <span class="text-[10px] font-bold text-blue-700 bg-blue-100 px-2 py-0.5 rounded-full">Boarding PIN</span>
+                <p id="trackingPartyPin" class="text-sm font-mono font-extrabold text-slate-900 mt-0.5">4821</p>
+              </div>
+            </div>
+
+            <!-- Quick Action Buttons -->
+            <div class="grid grid-cols-3 gap-2 text-xs">
+              <button onclick="callCurrentDriver()" class="py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold rounded-xl transition flex items-center justify-center gap-1 cursor-pointer">
+                <i data-lucide="phone" class="w-3.5 h-3.5 text-blue-600"></i>
+                <span id="trackingCallBtnLabel">Call</span>
+              </button>
+              <button onclick="openInAppChatModal()" class="py-2.5 bg-blue-50 hover:bg-blue-100 text-blue-800 font-bold rounded-xl border border-blue-200 transition flex items-center justify-center gap-1 cursor-pointer relative">
+                <i data-lucide="message-square" class="w-3.5 h-3.5 text-blue-600"></i>
+                <span>Live Chat</span>
+                <span id="chatUnreadDot" class="w-2 h-2 rounded-full bg-blue-600 absolute top-1 right-1 hidden"></span>
+              </button>
+              <button onclick="chatPassengerWhatsApp()" class="py-2.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 font-bold rounded-xl border border-emerald-200 transition flex items-center justify-center gap-1 cursor-pointer">
+                <i data-lucide="message-circle" class="w-3.5 h-3.5 text-emerald-600"></i>
+                <span>WhatsApp</span>
+              </button>
+            </div>
+
+            <!-- Dynamic Action Controls based on Role & Stage -->
+            <!-- Driver: Arrived at Pickup / Start Ride -->
+            <div id="trackingDriverHeadingActionContainer" class="hidden">
+              <div class="flex items-center gap-2">
+                <button type="button" onclick="openDriverVerifyPinModal()" class="flex-1 py-3.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-extrabold shadow-md shadow-blue-500/25 transition flex items-center justify-center gap-2 cursor-pointer active:scale-95">
+                  <i data-lucide="map-pin" class="w-4 h-4"></i>
+                  <span>Arrived at Pickup • Enter PIN & Start Ride</span>
+                </button>
+                <button type="button" onclick="confirmStartRideWithPin('4821')" title="1-Tap Instant Boarding (PIN 4821)" class="py-3.5 px-3.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-extrabold shadow-md shadow-emerald-600/30 transition flex items-center justify-center gap-1 cursor-pointer active:scale-95">
+                  <i data-lucide="check" class="w-4 h-4 stroke-[3]"></i>
+                  <span class="text-[11px]">Start</span>
+                </button>
+              </div>
+            </div>
+
+            <!-- Driver: Complete Commute & Settle -->
+            <div id="trackingDriverCompleteActionContainer" class="hidden">
+              <button type="button" onclick="driverCompleteRideAction()" class="w-full py-3.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-extrabold shadow-md shadow-emerald-500/25 transition flex items-center justify-center gap-2 cursor-pointer">
+                <i data-lucide="check-check" class="w-4 h-4 stroke-[3]"></i>
+                <span>Complete Commute & Settle Fuel Share</span>
+              </button>
+            </div>
+
+            <!-- Rider: Rate Driver after completion -->
+            <div id="trackingPassengerActionContainer">
+              <button onclick="closeModal('liveTrackingModal'); openRatingModal();" class="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-sm transition flex items-center justify-center gap-1.5 cursor-pointer">
+                <i data-lucide="star" class="w-3.5 h-3.5"></i>
+                <span>Arrived? Rate Driver & Finish Trip</span>
+              </button>
+            </div>
           </div>
-          <div id="trackingDriverActionContainer" class="hidden">
-            <button onclick="closeModal('liveTrackingModal');" class="w-full py-3 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold shadow-sm transition flex items-center justify-center gap-1.5">
-              <i data-lucide="check" class="w-3.5 h-3.5"></i>
-              <span>Close Live Tracking</span>
-            </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 3.1. In-App Live Realtime Chat Modal (Supabase WebSockets) -->
+    <div id="inAppChatModal" class="modal-backdrop fixed inset-0 z-[100] flex items-center justify-center p-3 hidden" style="z-index: 99999;">
+      <div class="bg-white rounded-3xl max-w-sm w-full shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200 flex flex-col h-[520px] max-h-[88vh] border border-slate-100">
+        <!-- Chat Top Bar -->
+        <div class="p-3.5 border-b border-slate-100 flex items-center justify-between bg-slate-900 text-white">
+          <div class="flex items-center gap-2.5">
+            <div class="relative">
+              <img id="chatRecipientAvatar" src="https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=120&h=120&q=80" class="w-9 h-9 rounded-full object-cover border border-white/20" />
+              <span class="w-2.5 h-2.5 rounded-full bg-emerald-400 absolute bottom-0 right-0 border-2 border-slate-900"></span>
+            </div>
+            <div>
+              <div class="flex items-center gap-1.5">
+                <h4 id="chatRecipientName" class="text-xs font-bold text-white">Verified Commuter</h4>
+                <span id="chatRecipientRolePill" class="text-[9px] uppercase font-extrabold px-1.5 py-0.2 rounded bg-blue-500/30 text-blue-200">Rider</span>
+              </div>
+              <p class="text-[10px] text-emerald-400 font-semibold flex items-center gap-1">
+                <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 live-pulse"></span>
+                <span>Supabase Realtime Live</span>
+              </p>
+            </div>
           </div>
+          <button type="button" onclick="closeModal('inAppChatModal')" class="p-1.5 text-slate-400 hover:text-white rounded-full hover:bg-slate-800 transition cursor-pointer">
+            <i data-lucide="x" class="w-4 h-4"></i>
+          </button>
+        </div>
+
+        <!-- Chat Messages History Container -->
+        <div id="chatMessagesContainer" class="flex-1 p-3.5 overflow-y-auto space-y-2.5 bg-slate-50 text-xs">
+          <!-- Messages will be rendered dynamically -->
+        </div>
+
+        <!-- Quick Response Chips -->
+        <div class="px-3 py-1.5 bg-white border-t border-slate-100 flex items-center gap-1.5 overflow-x-auto no-scrollbar text-[11px]">
+          <button type="button" onclick="sendQuickChatMessage('I have arrived at pickup!')" class="whitespace-nowrap px-2.5 py-1 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium transition cursor-pointer">📍 At pickup</button>
+          <button type="button" onclick="sendQuickChatMessage('On my way, 2 mins away.')" class="whitespace-nowrap px-2.5 py-1 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium transition cursor-pointer">⚡ 2 mins away</button>
+          <button type="button" onclick="sendQuickChatMessage('Waiting near Gate 2 Metro.')" class="whitespace-nowrap px-2.5 py-1 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium transition cursor-pointer">🚇 At Metro Gate</button>
+        </div>
+
+        <!-- Chat Input Footer -->
+        <div class="p-2.5 bg-white border-t border-slate-100 flex items-center gap-2">
+          <input id="chatMessageInput" type="text" placeholder="Type a message..." maxlength="300" class="flex-1 bg-slate-100 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 focus:outline-none focus:border-blue-600 focus:bg-white transition" onkeydown="if(event.key==='Enter') sendInAppChatMessage();" />
+          <button type="button" onclick="sendInAppChatMessage()" class="w-9 h-9 rounded-xl bg-blue-600 hover:bg-blue-700 text-white flex items-center justify-center shadow-sm shadow-blue-500/30 transition cursor-pointer active:scale-95">
+            <i data-lucide="send" class="w-4 h-4"></i>
+          </button>
         </div>
       </div>
     </div>
@@ -1071,6 +1745,12 @@
             </div>
           </div>
 
+          <!-- Written Review / Feedback -->
+          <div>
+            <label class="block text-[11px] font-bold text-slate-700 mb-1">Written Feedback / Review (Optional)</label>
+            <textarea id="rideFeedbackComment" placeholder="Write about your experience, route punctuality, driving comfort, or driver conduct..." rows="2" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs text-slate-900 focus:bg-white focus:border-blue-500 focus:outline-none transition"></textarea>
+          </div>
+
           <!-- Safety Issue Toggle & Comment -->
           <div class="pt-2 border-t border-slate-100">
             <label class="flex items-center gap-2 cursor-pointer mb-2">
@@ -1100,14 +1780,18 @@
         <form onsubmit="handleAddVehicleSubmit(event)" class="mt-4 space-y-3.5 text-xs">
           <div>
             <label class="block font-bold text-slate-700 mb-1">Vehicle Category</label>
-            <div class="grid grid-cols-2 gap-2">
-              <label class="flex items-center justify-center gap-2 p-2.5 bg-slate-50 border border-slate-200 rounded-xl cursor-pointer has-[:checked]:border-blue-600 has-[:checked]:bg-blue-50">
-                <input type="radio" name="newVehType" value="bike" checked class="text-blue-600" />
-                <span class="font-bold text-slate-800">Motorcycle</span>
+            <div class="grid grid-cols-3 gap-2">
+              <label class="flex flex-col items-center justify-center p-2.5 bg-slate-50 border border-slate-200 rounded-xl cursor-pointer has-[:checked]:border-blue-600 has-[:checked]:bg-blue-50 text-center">
+                <input type="radio" name="newVehType" value="bike" checked class="text-blue-600 mb-1" />
+                <span class="font-bold text-slate-800 text-[11px]">Motorcycle</span>
               </label>
-              <label class="flex items-center justify-center gap-2 p-2.5 bg-slate-50 border border-slate-200 rounded-xl cursor-pointer has-[:checked]:border-blue-600 has-[:checked]:bg-blue-50">
-                <input type="radio" name="newVehType" value="car" class="text-blue-600" />
-                <span class="font-bold text-slate-800">Car / Sedan</span>
+              <label class="flex flex-col items-center justify-center p-2.5 bg-slate-50 border border-slate-200 rounded-xl cursor-pointer has-[:checked]:border-amber-600 has-[:checked]:bg-amber-50 text-center">
+                <input type="radio" name="newVehType" value="auto" class="text-amber-600 mb-1" />
+                <span class="font-bold text-slate-800 text-[11px]">Shared Auto</span>
+              </label>
+              <label class="flex flex-col items-center justify-center p-2.5 bg-slate-50 border border-slate-200 rounded-xl cursor-pointer has-[:checked]:border-indigo-600 has-[:checked]:bg-indigo-50 text-center">
+                <input type="radio" name="newVehType" value="car" class="text-indigo-600 mb-1" />
+                <span class="font-bold text-slate-800 text-[11px]">Car / Cab</span>
               </label>
             </div>
           </div>
@@ -1131,6 +1815,1137 @@
       </div>
     </div>
 
+    <!-- Driver KYC Verification Modal -->
+    <div id="kycVerificationModal" class="modal-backdrop fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 hidden">
+      <div class="bg-white rounded-3xl max-w-sm w-full max-h-[92vh] overflow-y-auto shadow-2xl animate-in fade-in zoom-in duration-200 p-5 sm:p-6">
+        
+        <!-- Modal Header -->
+        <div class="flex items-center justify-between pb-3 border-b border-slate-100">
+          <div class="flex items-center gap-2.5">
+            <div class="w-10 h-10 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center shadow-xs">
+              <i data-lucide="shield-check" class="w-5 h-5"></i>
+            </div>
+            <div>
+              <h3 class="text-base font-extrabold text-slate-900 leading-tight">Driver KYC Verification</h3>
+              <p class="text-[11px] text-slate-500">Government ID & License Validation</p>
+            </div>
+          </div>
+          <button onclick="closeModal('kycVerificationModal')" class="p-1.5 text-slate-400 hover:text-slate-600 rounded-full hover:bg-slate-100">
+            <i data-lucide="x" class="w-5 h-5"></i>
+          </button>
+        </div>
+
+        <!-- Trust Information Banner -->
+        <div class="mt-3.5 bg-blue-50/70 border border-blue-200/80 rounded-2xl p-3 text-xs text-blue-900 flex items-start gap-2.5">
+          <i data-lucide="shield" class="w-4 h-4 text-blue-600 flex-shrink-0 mt-0.5"></i>
+          <p class="text-[11px] leading-relaxed text-blue-800">
+            To ensure highway corridor security, verified drivers are linked via <strong>Aadhaar UID</strong> and state <strong>Driving License</strong>. Stored safely in Supabase.
+          </p>
+        </div>
+
+        <!-- Live Verification Status / Validation Warning Banner -->
+        <div id="kycVerificationAlert" class="mt-3 hidden"></div>
+
+        <!-- Manual KYC Submission Form -->
+        <form onsubmit="handleKycFormSubmit(event)" class="mt-4 space-y-4 text-xs">
+          
+          <!-- 1. Driver Original Photo / Selfie Upload Block -->
+          <div class="bg-slate-50 border-2 border-dashed border-slate-200 hover:border-blue-400 transition rounded-2xl p-3.5 text-center space-y-2.5">
+            <div class="flex items-center justify-between">
+              <label class="block font-bold text-slate-800 text-xs">1. Driver Original Photo / Selfie</label>
+              <span class="text-[9px] text-rose-700 font-bold bg-rose-50 px-2 py-0.5 rounded-full border border-rose-200">Mandatory</span>
+            </div>
+
+            <div class="relative w-24 h-24 mx-auto">
+              <img id="kycAvatarPreview" src="" alt="Driver Photo" class="w-24 h-24 rounded-full object-cover border-4 border-blue-600 shadow-md bg-white hidden" />
+              <div id="kycAvatarPlaceholder" class="w-24 h-24 rounded-full bg-white border-2 border-dashed border-slate-300 flex flex-col items-center justify-center text-slate-400 shadow-2xs">
+                <i data-lucide="camera" class="w-6 h-6 text-slate-400 mb-0.5"></i>
+                <span class="text-[8px] font-bold text-slate-500 uppercase">Selfie</span>
+              </div>
+              <label for="kycPhotoFileInput" class="absolute bottom-0 right-0 bg-blue-600 hover:bg-blue-700 text-white p-1.5 rounded-full border-2 border-white shadow-md cursor-pointer transition active:scale-95">
+                <i data-lucide="upload" class="w-3.5 h-3.5"></i>
+              </label>
+              <input id="kycPhotoFileInput" type="file" accept="image/*" class="hidden" onchange="handleKycPhotoSelected(event)" />
+            </div>
+
+            <div class="flex flex-col items-center justify-center gap-1">
+              <label for="kycPhotoFileInput" class="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-[11px] font-bold cursor-pointer transition shadow-xs flex items-center gap-1.5 active:scale-95">
+                <i data-lucide="camera" class="w-3.5 h-3.5"></i>
+                <span id="kycPhotoBtnText">Select Real Driver Photo</span>
+              </label>
+              <p id="kycPhotoStatusText" class="text-[10px] text-slate-500 font-medium">Real photo required for driver verification.</p>
+            </div>
+            <p id="kycPhotoError" class="text-[10px] text-red-500 font-semibold hidden">Original photo is required.</p>
+          </div>
+
+          <!-- 2. Full Legal Name -->
+          <div>
+            <label class="block font-bold text-slate-700 mb-1">Driver Legal Full Name (as on Govt ID) <span class="text-rose-500">*</span></label>
+            <div class="flex items-center bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 focus-within:border-blue-600 focus-within:bg-white transition">
+              <i data-lucide="user" class="w-4 h-4 text-slate-400 mr-2 flex-shrink-0"></i>
+              <input id="kycFullName" type="text" placeholder="e.g. Ramesh Kumar" oninput="clearKycErrors()" required class="w-full bg-transparent font-semibold text-slate-900 focus:outline-none" />
+            </div>
+            <p id="kycNameError" class="text-[10px] text-red-500 font-semibold mt-1 hidden">Please enter legal full name.</p>
+          </div>
+
+          <!-- 3. Identity Document (Aadhaar Card) -->
+          <div class="bg-slate-50/80 border border-slate-200 rounded-2xl p-3 space-y-2">
+            <div class="flex items-center justify-between">
+              <label class="block font-bold text-slate-800 text-xs">2. Aadhaar / Identity Document <span class="text-rose-500">*</span></label>
+              <span class="text-[9px] font-mono font-bold text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-200">UIDAI</span>
+            </div>
+
+            <!-- Aadhaar Number -->
+            <div class="flex items-center bg-white border border-slate-200 rounded-xl px-3 py-2 focus-within:border-blue-600 transition">
+              <i data-lucide="credit-card" class="w-4 h-4 text-slate-400 mr-2 flex-shrink-0"></i>
+              <input id="kycAadhaarNumber" type="text" maxlength="14" placeholder="12-digit Aadhaar UID (e.g. 5412 8920 8423)" oninput="formatAadhaarInput(this)" required class="w-full bg-transparent font-mono font-bold text-slate-900 focus:outline-none placeholder-slate-400" />
+            </div>
+            <p id="kycAadhaarError" class="text-[10px] text-red-500 font-semibold hidden">Please enter valid 12-digit Aadhaar number.</p>
+
+            <!-- Aadhaar Document Image Upload -->
+            <div>
+              <label class="block text-[10px] font-bold text-slate-600 mb-1">Aadhaar Card Photo / Scan <span class="text-rose-500">*</span></label>
+              <div class="flex items-center gap-2.5">
+                <div class="relative w-16 h-12 rounded-xl bg-white border border-slate-300 overflow-hidden flex items-center justify-center flex-shrink-0 shadow-2xs">
+                  <img id="kycAadhaarDocPreview" src="" alt="Aadhaar Document" class="w-full h-full object-cover hidden" />
+                  <div id="kycAadhaarDocPlaceholder" class="text-slate-400 flex flex-col items-center">
+                    <i data-lucide="file-text" class="w-4 h-4"></i>
+                  </div>
+                </div>
+                <div class="flex-1">
+                  <label for="kycAadhaarDocFile" class="w-full py-1.5 px-2.5 bg-slate-200/80 hover:bg-slate-300 text-slate-800 rounded-xl text-[11px] font-bold cursor-pointer transition flex items-center justify-center gap-1 active:scale-95">
+                    <i data-lucide="upload" class="w-3.5 h-3.5 text-slate-600"></i>
+                    <span id="kycAadhaarDocBtnText">Upload Aadhaar Photo</span>
+                  </label>
+                  <p id="kycAadhaarDocStatus" class="text-[9px] text-slate-500 mt-0.5 truncate">Front copy showing photo & UID</p>
+                </div>
+                <input id="kycAadhaarDocFile" type="file" accept="image/*" class="hidden" onchange="handleManualDocSelected(event, 'aadhaar')" />
+              </div>
+              <p id="kycAadhaarDocError" class="text-[10px] text-red-500 font-semibold mt-1 hidden">Aadhaar card document photo is required.</p>
+            </div>
+          </div>
+
+          <!-- 4. Driving License (DL) -->
+          <div class="bg-slate-50/80 border border-slate-200 rounded-2xl p-3 space-y-2">
+            <div class="flex items-center justify-between">
+              <label class="block font-bold text-slate-800 text-xs">3. Driving License (DL) <span class="text-rose-500">*</span></label>
+              <span class="text-[9px] font-mono font-bold text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-200">Parivahan</span>
+            </div>
+
+            <!-- DL Number -->
+            <div class="flex items-center bg-white border border-slate-200 rounded-xl px-3 py-2 focus-within:border-blue-600 transition">
+              <i data-lucide="award" class="w-4 h-4 text-slate-400 mr-2 flex-shrink-0"></i>
+              <input id="kycDlNumber" type="text" maxlength="20" placeholder="DL Number (e.g. TS-08-20210012345)" oninput="this.value = this.value.toUpperCase(); clearKycErrors();" required class="w-full bg-transparent font-mono font-bold uppercase text-slate-900 focus:outline-none placeholder-slate-400" />
+            </div>
+            <p id="kycDlError" class="text-[10px] text-red-500 font-semibold hidden">Please enter valid Driving License number.</p>
+
+            <!-- DL Expiry Date -->
+            <div>
+              <label class="block text-[10px] font-bold text-slate-600 mb-0.5">License Valid Till / Expiry Date <span class="text-rose-500">*</span></label>
+              <div class="flex items-center bg-white border border-slate-200 rounded-xl px-3 py-1.5 focus-within:border-blue-600 transition">
+                <i data-lucide="calendar" class="w-4 h-4 text-slate-400 mr-2 flex-shrink-0"></i>
+                <input id="kycDlExpiryDate" type="date" required class="w-full bg-transparent font-medium text-slate-800 focus:outline-none" />
+              </div>
+            </div>
+
+            <!-- DL Document Image Upload -->
+            <div>
+              <label class="block text-[10px] font-bold text-slate-600 mb-1">Driving License Photo / Scan <span class="text-rose-500">*</span></label>
+              <div class="flex items-center gap-2.5">
+                <div class="relative w-16 h-12 rounded-xl bg-white border border-slate-300 overflow-hidden flex items-center justify-center flex-shrink-0 shadow-2xs">
+                  <img id="kycDlDocPreview" src="" alt="Driving License" class="w-full h-full object-cover hidden" />
+                  <div id="kycDlDocPlaceholder" class="text-slate-400 flex flex-col items-center">
+                    <i data-lucide="award" class="w-4 h-4"></i>
+                  </div>
+                </div>
+                <div class="flex-1">
+                  <label for="kycDlDocFile" class="w-full py-1.5 px-2.5 bg-slate-200/80 hover:bg-slate-300 text-slate-800 rounded-xl text-[11px] font-bold cursor-pointer transition flex items-center justify-center gap-1 active:scale-95">
+                    <i data-lucide="upload" class="w-3.5 h-3.5 text-slate-600"></i>
+                    <span id="kycDlDocBtnText">Upload DL Photo</span>
+                  </label>
+                  <p id="kycDlDocStatus" class="text-[9px] text-slate-500 mt-0.5 truncate">Clear photo of full DL card</p>
+                </div>
+                <input id="kycDlDocFile" type="file" accept="image/*" class="hidden" onchange="handleManualDocSelected(event, 'dl')" />
+              </div>
+              <p id="kycDlDocError" class="text-[10px] text-red-500 font-semibold mt-1 hidden">Driving license document photo is required.</p>
+            </div>
+          </div>
+
+          <!-- 5. Vehicle Registration Certificate (RC) -->
+          <div class="bg-slate-50/80 border border-slate-200 rounded-2xl p-3 space-y-2">
+            <div class="flex items-center justify-between">
+              <label class="block font-bold text-slate-800 text-xs">4. Vehicle Registration (RC) <span class="text-rose-500">*</span></label>
+              <span class="text-[9px] font-mono font-bold text-indigo-700 bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-200">Vehicle RC</span>
+            </div>
+
+            <!-- RC Plate Number & Vehicle Model -->
+            <div class="grid grid-cols-2 gap-2">
+              <div class="flex items-center bg-white border border-slate-200 rounded-xl px-2.5 py-2 focus-within:border-blue-600 transition">
+                <input id="kycRcNumber" type="text" maxlength="15" placeholder="Plate No (TS 08 AB 1234)" oninput="this.value = this.value.toUpperCase();" required class="w-full bg-transparent font-mono font-bold uppercase text-slate-900 focus:outline-none placeholder-slate-400 text-xs" />
+              </div>
+              <div class="flex items-center bg-white border border-slate-200 rounded-xl px-2.5 py-2 focus-within:border-blue-600 transition">
+                <input id="kycRcVehicleModel" type="text" placeholder="Model (e.g. Pulsar 150)" required class="w-full bg-transparent font-medium text-slate-900 focus:outline-none placeholder-slate-400 text-xs" />
+              </div>
+            </div>
+            <p id="kycRcError" class="text-[10px] text-red-500 font-semibold hidden">Please enter vehicle plate and model.</p>
+
+            <!-- Vehicle RC Document Image Upload -->
+            <div>
+              <label class="block text-[10px] font-bold text-slate-600 mb-1">Vehicle RC Photo / Smart Card <span class="text-rose-500">*</span></label>
+              <div class="flex items-center gap-2.5">
+                <div class="relative w-16 h-12 rounded-xl bg-white border border-slate-300 overflow-hidden flex items-center justify-center flex-shrink-0 shadow-2xs">
+                  <img id="kycRcDocPreview" src="" alt="Vehicle RC" class="w-full h-full object-cover hidden" />
+                  <div id="kycRcDocPlaceholder" class="text-slate-400 flex flex-col items-center">
+                    <i data-lucide="truck" class="w-4 h-4"></i>
+                  </div>
+                </div>
+                <div class="flex-1">
+                  <label for="kycRcDocFile" class="w-full py-1.5 px-2.5 bg-slate-200/80 hover:bg-slate-300 text-slate-800 rounded-xl text-[11px] font-bold cursor-pointer transition flex items-center justify-center gap-1 active:scale-95">
+                    <i data-lucide="upload" class="w-3.5 h-3.5 text-slate-600"></i>
+                    <span id="kycRcDocBtnText">Upload RC Photo</span>
+                  </label>
+                  <p id="kycRcDocStatus" class="text-[9px] text-slate-500 mt-0.5 truncate">Photo of RC certificate / card</p>
+                </div>
+                <input id="kycRcDocFile" type="file" accept="image/*" class="hidden" onchange="handleManualDocSelected(event, 'rc')" />
+              </div>
+              <p id="kycRcDocError" class="text-[10px] text-red-500 font-semibold mt-1 hidden">Vehicle RC photo is required.</p>
+            </div>
+          </div>
+
+          <!-- Consent & Admin Review Notice -->
+          <div class="pt-1 space-y-1.5">
+            <label class="flex items-start gap-2 cursor-pointer text-slate-600 text-[11px]">
+              <input id="kycConsentCheck" type="checkbox" required checked class="mt-0.5 rounded text-blue-600 accent-blue-600 w-4 h-4 cursor-pointer flex-shrink-0" />
+              <span>I confirm that all uploaded documents are authentic and belong to me. I submit them for manual verification by Routemate Admin.</span>
+            </label>
+            <p class="text-[10px] text-amber-700 bg-amber-50 border border-amber-200/70 rounded-xl p-2 font-medium">
+              ℹ️ After submission, driver features remain locked until an Admin approves your documents.
+            </p>
+          </div>
+
+          <!-- Submit Button -->
+          <div class="pt-1">
+            <button id="btnSubmitKyc" type="submit" class="w-full py-3.5 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl text-xs font-bold transition shadow-lg shadow-blue-500/25 active:scale-[0.98] flex items-center justify-center gap-2 cursor-pointer">
+              <span id="btnSubmitKycText">Submit KYC for Verification</span>
+              <i data-lucide="send" class="w-4 h-4"></i>
+            </button>
+          </div>
+
+        </form>
+      </div>
+    </div>
+
+    <!-- 1. Emergency Contact Modal -->
+    <div id="emergencyContactModal" class="modal-backdrop fixed inset-0 z-50 flex items-center justify-center p-4 hidden">
+      <div class="bg-white rounded-3xl max-w-sm w-full shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200 p-6">
+        <div class="flex items-center justify-between pb-3 border-b border-slate-100">
+          <div class="flex items-center gap-2">
+            <div class="w-8 h-8 rounded-xl bg-rose-100 text-rose-700 flex items-center justify-center">
+              <i data-lucide="shield-alert" class="w-4 h-4"></i>
+            </div>
+            <div>
+              <h3 class="text-base font-bold text-slate-900">Emergency Contact</h3>
+              <p class="text-[10px] text-slate-500">Stored safely for emergency alerts</p>
+            </div>
+          </div>
+          <button onclick="closeModal('emergencyContactModal')" class="p-1.5 text-slate-400 hover:text-slate-600 rounded-full hover:bg-slate-100">
+            <i data-lucide="x" class="w-5 h-5"></i>
+          </button>
+        </div>
+
+        <form id="emergencyContactForm" onsubmit="handleSaveEmergencyContact(event)" class="mt-4 space-y-3.5 text-xs">
+          <div>
+            <label class="block font-bold text-slate-700 mb-1">Contact Full Name</label>
+            <div class="flex items-center bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 focus-within:border-blue-600 focus-within:bg-white transition">
+              <i data-lucide="user" class="w-4 h-4 text-slate-400 mr-2 flex-shrink-0"></i>
+              <input id="emContactName" type="text" placeholder="e.g. Suresh Kumar" required class="w-full bg-transparent font-semibold text-slate-900 focus:outline-none" />
+            </div>
+          </div>
+
+          <div>
+            <label class="block font-bold text-slate-700 mb-1">Relationship</label>
+            <div class="flex items-center bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 focus-within:border-blue-600 focus-within:bg-white transition">
+              <i data-lucide="heart" class="w-4 h-4 text-slate-400 mr-2 flex-shrink-0"></i>
+              <select id="emContactRelation" class="w-full bg-transparent font-semibold text-slate-900 focus:outline-none">
+                <option value="Parent">Parent</option>
+                <option value="Spouse">Spouse / Partner</option>
+                <option value="Sibling">Sibling</option>
+                <option value="Friend">Trusted Friend</option>
+                <option value="Colleague">Colleague</option>
+                <option value="Other">Other Family Member</option>
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <label class="block font-bold text-slate-700 mb-1">Phone Number (10 Digits)</label>
+            <div class="flex items-center bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 focus-within:border-blue-600 focus-within:bg-white transition">
+              <span class="text-xs font-bold text-slate-400 mr-1.5">+91</span>
+              <input id="emContactPhone" type="tel" maxlength="10" placeholder="98480 12345" required class="w-full bg-transparent font-mono font-bold text-slate-900 focus:outline-none" />
+            </div>
+            <p id="emContactPhoneError" class="text-[10px] text-red-500 font-semibold mt-1 hidden">Please enter a valid 10-digit mobile number.</p>
+          </div>
+
+          <div class="pt-2 flex items-center gap-2">
+            <button type="submit" class="flex-1 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition shadow-xs flex items-center justify-center gap-1.5 active:scale-95">
+              <i data-lucide="check" class="w-3.5 h-3.5"></i>
+              <span>Save Contact</span>
+            </button>
+            <button id="btnDeleteEmContact" type="button" onclick="handleRemoveEmergencyContact()" class="py-3 px-3 bg-red-50 hover:bg-red-100 text-red-600 rounded-xl text-xs font-bold transition border border-red-200 hidden">
+              <i data-lucide="trash-2" class="w-4 h-4"></i>
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- 2. Favourites Modal -->
+    <div id="favouritesModal" class="modal-backdrop fixed inset-0 z-50 flex items-center justify-center p-4 hidden">
+      <div class="bg-white rounded-3xl max-w-sm w-full shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200 p-6 max-h-[90vh] flex flex-col">
+        <div class="flex items-center justify-between pb-3 border-b border-slate-100 flex-shrink-0">
+          <div class="flex items-center gap-2">
+            <div class="w-8 h-8 rounded-xl bg-rose-100 text-rose-700 flex items-center justify-center">
+              <i data-lucide="heart" class="w-4 h-4"></i>
+            </div>
+            <div>
+              <h3 class="text-base font-bold text-slate-900">Manage Favourites</h3>
+              <p class="text-[10px] text-slate-500">Quick-book frequent pickup & drop stops</p>
+            </div>
+          </div>
+          <button onclick="closeModal('favouritesModal')" class="p-1.5 text-slate-400 hover:text-slate-600 rounded-full hover:bg-slate-100">
+            <i data-lucide="x" class="w-5 h-5"></i>
+          </button>
+        </div>
+
+        <div class="overflow-y-auto flex-1 my-3 space-y-3">
+          <div id="favouritesListContainer" class="space-y-2">
+            <!-- Rendered dynamically via renderFavouritesList() -->
+          </div>
+
+          <!-- Add New Favourite Section -->
+          <div class="p-3 bg-slate-50 border border-slate-200 rounded-2xl space-y-2 text-xs">
+            <p class="font-bold text-slate-900 text-xs flex items-center gap-1.5">
+              <i data-lucide="plus-circle" class="w-3.5 h-3.5 text-blue-600"></i>
+              Add New Favourite
+            </p>
+            <input id="favNewTitle" type="text" placeholder="Label (e.g. Home, Office, Gym)" class="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs font-semibold focus:outline-none focus:border-blue-600" />
+            <input id="favNewAddress" type="text" placeholder="Location / Highway Stop" class="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs font-semibold focus:outline-none focus:border-blue-600" />
+            <button type="button" onclick="handleAddFavourite()" class="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition">
+              + Save To Favourites
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 3. Preferences Modal -->
+    <div id="preferencesModal" class="modal-backdrop fixed inset-0 z-50 flex items-center justify-center p-4 hidden">
+      <div class="bg-white rounded-3xl max-w-sm w-full shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200 p-6 max-h-[90vh] flex flex-col">
+        <div class="flex items-center justify-between pb-3 border-b border-slate-100 flex-shrink-0">
+          <div class="flex items-center gap-2">
+            <div class="w-8 h-8 rounded-xl bg-blue-100 text-blue-700 flex items-center justify-center">
+              <i data-lucide="sliders-horizontal" class="w-4 h-4"></i>
+            </div>
+            <div>
+              <h3 class="text-base font-bold text-slate-900">Ride & App Preferences</h3>
+              <p class="text-[10px] text-slate-500">Custom commute behaviors & styling</p>
+            </div>
+          </div>
+          <button onclick="closeModal('preferencesModal')" class="p-1.5 text-slate-400 hover:text-slate-600 rounded-full hover:bg-slate-100">
+            <i data-lucide="x" class="w-5 h-5"></i>
+          </button>
+        </div>
+
+        <div class="overflow-y-auto flex-1 my-3 space-y-4 text-xs">
+          <!-- Ride Preferences Group -->
+          <div class="space-y-2.5">
+            <h4 class="font-extrabold uppercase tracking-wider text-[10px] text-slate-400">Ride Experience</h4>
+            
+            <div class="flex items-center justify-between p-3 bg-slate-50 border border-slate-200 rounded-2xl">
+              <div>
+                <p class="font-bold text-slate-900 text-xs">Auto-confirm Ride Matches</p>
+                <p class="text-[10px] text-slate-500">Instantly accept compatible corridor commuters</p>
+              </div>
+              <input type="checkbox" id="prefAutoConfirm" class="w-4 h-4 rounded text-blue-600 accent-blue-600 cursor-pointer" />
+            </div>
+
+            <div class="flex items-center justify-between p-3 bg-slate-50 border border-slate-200 rounded-2xl">
+              <div>
+                <p class="font-bold text-slate-900 text-xs">Quiet Ride / Low Conversation</p>
+                <p class="text-[10px] text-slate-500">Notify co-riders that you prefer silent commute</p>
+              </div>
+              <input type="checkbox" id="prefQuietRide" class="w-4 h-4 rounded text-blue-600 accent-blue-600 cursor-pointer" />
+            </div>
+
+            <div class="flex items-center justify-between p-3 bg-slate-50 border border-slate-200 rounded-2xl">
+              <div>
+                <p class="font-bold text-slate-900 text-xs">AC Preferred (Car Rides)</p>
+                <p class="text-[10px] text-slate-500">Filter carpools with climate control active</p>
+              </div>
+              <input type="checkbox" id="prefAcComfort" checked class="w-4 h-4 rounded text-blue-600 accent-blue-600 cursor-pointer" />
+            </div>
+
+            <div class="flex items-center justify-between p-3 bg-slate-50 border border-slate-200 rounded-2xl">
+              <div>
+                <p class="font-bold text-slate-900 text-xs">Luggage Friendly</p>
+                <p class="text-[10px] text-slate-500">Allow carry-on backpacks / small trolley bags</p>
+              </div>
+              <input type="checkbox" id="prefLuggage" checked class="w-4 h-4 rounded text-blue-600 accent-blue-600 cursor-pointer" />
+            </div>
+          </div>
+
+          <!-- App Behaviors Group -->
+          <div class="space-y-2.5 pt-2 border-t border-slate-100">
+            <h4 class="font-extrabold uppercase tracking-wider text-[10px] text-slate-400">App Behaviors</h4>
+
+            <div class="flex items-center justify-between p-3 bg-slate-50 border border-slate-200 rounded-2xl">
+              <div>
+                <p class="font-bold text-slate-900 text-xs">Haptic & Sound Feedback</p>
+                <p class="text-[10px] text-slate-500">Audio alerts on match and booking confirmation</p>
+              </div>
+              <input type="checkbox" id="prefSounds" checked class="w-4 h-4 rounded text-blue-600 accent-blue-600 cursor-pointer" />
+            </div>
+
+            <div class="flex items-center justify-between p-3 bg-slate-50 border border-slate-200 rounded-2xl">
+              <div>
+                <p class="font-bold text-slate-900 text-xs">High-Contrast Eye Comfort</p>
+                <p class="text-[10px] text-slate-500">Optimized reading mode for highway sun glare</p>
+              </div>
+              <input type="checkbox" id="prefHighContrast" class="w-4 h-4 rounded text-blue-600 accent-blue-600 cursor-pointer" />
+            </div>
+          </div>
+        </div>
+
+        <div class="pt-2 flex-shrink-0">
+          <button type="button" onclick="saveUserPreferences()" class="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition shadow-xs active:scale-95">
+            Save Preferences
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 4. App Shortcuts Modal -->
+    <div id="appShortcutsModal" class="modal-backdrop fixed inset-0 z-50 flex items-center justify-center p-4 hidden">
+      <div class="bg-white rounded-3xl max-w-sm w-full shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200 p-6">
+        <div class="flex items-center justify-between pb-3 border-b border-slate-100">
+          <div class="flex items-center gap-2">
+            <div class="w-8 h-8 rounded-xl bg-sky-100 text-sky-700 flex items-center justify-center">
+              <i data-lucide="smartphone" class="w-4 h-4"></i>
+            </div>
+            <div>
+              <h3 class="text-base font-bold text-slate-900">App Shortcuts</h3>
+              <p class="text-[10px] text-slate-500">Home screen quick actions & PWA</p>
+            </div>
+          </div>
+          <button onclick="closeModal('appShortcutsModal')" class="p-1.5 text-slate-400 hover:text-slate-600 rounded-full hover:bg-slate-100">
+            <i data-lucide="x" class="w-5 h-5"></i>
+          </button>
+        </div>
+
+        <div class="my-4 space-y-3 text-xs">
+          <div class="bg-sky-50 border border-sky-200 rounded-2xl p-3.5 text-sky-950 space-y-2">
+            <div class="flex items-center gap-2">
+              <i data-lucide="download" class="w-4 h-4 text-sky-600"></i>
+              <span class="font-bold text-xs">Add Routemate to Home Screen</span>
+            </div>
+            <p class="text-[11px] text-sky-800 leading-relaxed">
+              Install Routemate directly on your Android / iOS home screen for instant 1-tap launcher access without opening the browser.
+            </p>
+            <button type="button" onclick="triggerPwaInstall()" class="w-full py-2 bg-sky-600 hover:bg-sky-700 text-white font-bold rounded-xl text-xs transition shadow-xs active:scale-95">
+              + Install to Home Screen
+            </button>
+          </div>
+
+          <h4 class="font-extrabold uppercase tracking-wider text-[10px] text-slate-400 pt-1">Launcher Shortcuts Preview</h4>
+
+          <div class="space-y-2">
+            <button type="button" onclick="launchShortcut('offer')" class="w-full p-2.5 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl flex items-center justify-between text-left transition">
+              <div class="flex items-center gap-2.5">
+                <span class="w-6 h-6 rounded-lg bg-emerald-100 text-emerald-700 flex items-center justify-center text-xs font-bold">🚗</span>
+                <div>
+                  <p class="text-xs font-bold text-slate-900">Offer Highway Ride</p>
+                  <p class="text-[10px] text-slate-500">Jump straight into driver publishing</p>
+                </div>
+              </div>
+              <i data-lucide="arrow-right" class="w-4 h-4 text-slate-400"></i>
+            </button>
+
+            <button type="button" onclick="launchShortcut('find')" class="w-full p-2.5 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl flex items-center justify-between text-left transition">
+              <div class="flex items-center gap-2.5">
+                <span class="w-6 h-6 rounded-lg bg-blue-100 text-blue-700 flex items-center justify-center text-xs font-bold">🔍</span>
+                <div>
+                  <p class="text-xs font-bold text-slate-900">Find Corridor Ride</p>
+                  <p class="text-[10px] text-slate-500">Search instant commuter rides</p>
+                </div>
+              </div>
+              <i data-lucide="arrow-right" class="w-4 h-4 text-slate-400"></i>
+            </button>
+
+            <button type="button" onclick="launchShortcut('sos')" class="w-full p-2.5 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl flex items-center justify-between text-left transition">
+              <div class="flex items-center gap-2.5">
+                <span class="w-6 h-6 rounded-lg bg-rose-100 text-rose-700 flex items-center justify-center text-xs font-bold">🚨</span>
+                <div>
+                  <p class="text-xs font-bold text-slate-900">Emergency SOS 112</p>
+                  <p class="text-[10px] text-slate-500">Instant safety shield dispatch</p>
+                </div>
+              </div>
+              <i data-lucide="arrow-right" class="w-4 h-4 text-slate-400"></i>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 5. About Modal -->
+    <div id="aboutModal" class="modal-backdrop fixed inset-0 z-50 flex items-center justify-center p-4 hidden">
+      <div class="bg-white rounded-3xl max-w-sm w-full shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200 p-6">
+        <div class="flex items-center justify-between pb-3 border-b border-slate-100">
+          <div class="flex items-center gap-2">
+            <div class="w-8 h-8 rounded-xl bg-blue-100 text-blue-700 flex items-center justify-center">
+              <i data-lucide="info" class="w-4 h-4"></i>
+            </div>
+            <div>
+              <h3 class="text-base font-bold text-slate-900">About Routemate</h3>
+              <p class="text-[10px] text-slate-500">P2P Highway Commuter Network</p>
+            </div>
+          </div>
+          <button onclick="closeModal('aboutModal')" class="p-1.5 text-slate-400 hover:text-slate-600 rounded-full hover:bg-slate-100">
+            <i data-lucide="x" class="w-5 h-5"></i>
+          </button>
+        </div>
+
+        <div class="my-4 space-y-3 text-xs text-slate-600 leading-relaxed">
+          <div class="p-3 bg-blue-50 border border-blue-200 rounded-2xl flex items-center justify-between">
+            <div>
+              <p class="text-[10px] text-blue-600 font-bold uppercase tracking-wider">Release Version</p>
+              <p class="text-sm font-extrabold text-blue-950 font-mono">v8.104.0</p>
+            </div>
+            <span class="text-[10px] font-bold bg-blue-600 text-white px-2 py-0.5 rounded-full">Official</span>
+          </div>
+
+          <p>
+            <strong class="text-slate-900">Routemate</strong> is an open peer-to-peer corridor ride-sharing ecosystem connecting daily commuters across Telangana & Andhra Pradesh highway corridors (Uppal, Bhongir, Aler, Jangaon, Warangal).
+          </p>
+
+          <div class="space-y-1.5 pt-1 text-[11px]">
+            <p class="flex items-center gap-2">
+              <i data-lucide="shield-check" class="w-3.5 h-3.5 text-emerald-600 flex-shrink-0"></i>
+              <span>Government UIDAI & Parivahan KYC Validation</span>
+            </p>
+            <p class="flex items-center gap-2">
+              <i data-lucide="zap" class="w-3.5 h-3.5 text-amber-500 flex-shrink-0"></i>
+              <span>Fair Fuel-Share & Zero Commission Pricing</span>
+            </p>
+            <p class="flex items-center gap-2">
+              <i data-lucide="lock" class="w-3.5 h-3.5 text-blue-600 flex-shrink-0"></i>
+              <span>End-to-End Encrypted Live Corridor Telemetry</span>
+            </p>
+          </div>
+
+          <div class="pt-2 text-center text-[10px] text-slate-400">
+            © 2026 Routemate Technologies Pvt Ltd. All rights reserved.
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 6. Delete Account Modal -->
+    <div id="deleteAccountModal" class="modal-backdrop fixed inset-0 z-50 flex items-center justify-center p-4 hidden">
+      <div class="bg-white rounded-3xl max-w-sm w-full shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200 p-6">
+        <div class="flex items-center justify-between pb-3 border-b border-slate-100">
+          <div class="flex items-center gap-2">
+            <div class="w-8 h-8 rounded-xl bg-slate-100 text-slate-700 flex items-center justify-center">
+              <i data-lucide="trash-2" class="w-4 h-4"></i>
+            </div>
+            <div>
+              <h3 class="text-base font-bold text-slate-900">Delete Account</h3>
+              <p class="text-[10px] text-slate-500">Account removal confirmation</p>
+            </div>
+          </div>
+          <button onclick="closeModal('deleteAccountModal')" class="p-1.5 text-slate-400 hover:text-slate-600 rounded-full hover:bg-slate-100">
+            <i data-lucide="x" class="w-5 h-5"></i>
+          </button>
+        </div>
+
+        <div class="my-4 space-y-3.5 text-xs">
+          <div class="p-3 bg-slate-50 border border-slate-200 rounded-2xl text-slate-600 text-[11px] leading-relaxed space-y-1.5">
+            <p class="font-bold text-slate-900 flex items-center gap-1.5">
+              <i data-lucide="info" class="w-3.5 h-3.5 text-slate-600"></i>
+              Account Removal Confirmation
+            </p>
+            <p>
+              Deleting your account will remove your profile, phone number, vehicle registrations, and saved bookings from Supabase and this device.
+            </p>
+          </div>
+
+          <div>
+            <label class="block font-bold text-slate-700 mb-1">
+              To confirm, type <span class="font-mono text-rose-600 font-extrabold uppercase">DELETE</span> below:
+            </label>
+            <input id="deleteAccountConfirmInput" type="text" placeholder="DELETE" oninput="handleDeleteAccountInput(this.value)" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-mono font-bold tracking-wider uppercase text-slate-900 focus:outline-none focus:border-rose-600" />
+          </div>
+
+          <div class="pt-1 flex items-center gap-2">
+            <button id="btnConfirmDeleteAccount" type="button" disabled onclick="handleConfirmDeleteAccount()" class="flex-1 py-3 bg-red-600 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-red-700 text-white rounded-xl text-xs font-bold transition shadow-xs flex items-center justify-center gap-1.5 active:scale-95">
+              <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+              <span>Delete My Account</span>
+            </button>
+            <button type="button" onclick="closeModal('deleteAccountModal')" class="py-3 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition">
+              Cancel
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 7. Smart ID Card OCR Camera Scanner Modal -->
+    <div id="ocrScanModal" class="modal-backdrop fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 hidden">
+      <div class="bg-slate-900 text-white rounded-3xl max-w-md w-full max-h-[94vh] overflow-y-auto shadow-2xl animate-in fade-in zoom-in duration-200 p-5 sm:p-6 border border-slate-800">
+        
+        <!-- Modal Header -->
+        <div class="flex items-center justify-between pb-3 border-b border-slate-800">
+          <div class="flex items-center gap-2.5">
+            <div class="w-10 h-10 rounded-2xl bg-blue-600/20 text-blue-400 border border-blue-500/30 flex items-center justify-center">
+              <i data-lucide="scan-line" class="w-5 h-5"></i>
+            </div>
+            <div>
+              <h3 class="text-base font-extrabold text-white leading-tight">Smart ID OCR Scanner</h3>
+              <p class="text-[11px] text-slate-400">Driving License & Government ID Auto-Fill</p>
+            </div>
+          </div>
+          <button type="button" onclick="closeOcrScannerModal()" class="p-1.5 text-slate-400 hover:text-white rounded-full hover:bg-slate-800 transition">
+            <i data-lucide="x" class="w-5 h-5"></i>
+          </button>
+        </div>
+
+        <!-- Camera Viewfinder & Guide Frame -->
+        <div class="mt-4 relative bg-black rounded-2xl overflow-hidden border border-slate-700 aspect-[4/3] flex items-center justify-center">
+          <!-- Live Video Stream -->
+          <video id="ocrVideoFeed" autoplay playsinline muted class="w-full h-full object-cover"></video>
+          
+          <!-- Static Image Preview (when file is uploaded or demo is chosen) -->
+          <img id="ocrImagePreview" src="" alt="Captured ID" class="w-full h-full object-contain hidden" />
+          
+          <!-- Hidden Processing Canvas -->
+          <canvas id="ocrCanvas" class="hidden"></canvas>
+
+          <!-- Card Alignment Frame Overlay -->
+          <div id="ocrFrameOverlay" class="absolute inset-4 border-2 border-dashed border-blue-400/80 rounded-xl pointer-events-none flex flex-col justify-between p-2 shadow-[0_0_15px_rgba(59,130,246,0.3)]">
+            <!-- Corner Brackets -->
+            <div class="flex justify-between">
+              <span class="w-4 h-4 border-t-2 border-l-2 border-blue-400"></span>
+              <span class="w-4 h-4 border-t-2 border-r-2 border-blue-400"></span>
+            </div>
+
+            <!-- Animated Laser Scan Line -->
+            <div id="ocrLaserLine" class="w-full h-0.5 bg-gradient-to-r from-transparent via-cyan-400 to-transparent shadow-[0_0_8px_#22d3ee] animate-pulse"></div>
+
+            <div class="flex justify-between items-end">
+              <span class="w-4 h-4 border-b-2 border-l-2 border-blue-400"></span>
+              <span class="text-[9px] font-mono font-bold tracking-wider text-blue-300 bg-slate-900/80 px-2 py-0.5 rounded-full border border-blue-500/30">
+                ALIGN DL / ID CARD HERE
+              </span>
+              <span class="w-4 h-4 border-b-2 border-r-2 border-blue-400"></span>
+            </div>
+          </div>
+
+          <!-- Camera Inactive / Fallback Notice -->
+          <div id="ocrCameraNotice" class="absolute inset-0 bg-slate-900/90 flex flex-col items-center justify-center p-4 text-center hidden">
+            <div class="w-12 h-12 rounded-2xl bg-slate-800 text-slate-400 flex items-center justify-center mb-2">
+              <i data-lucide="camera-off" class="w-6 h-6"></i>
+            </div>
+            <p class="text-xs font-bold text-white mb-1">Live Camera Feed Inactive</p>
+            <p class="text-[11px] text-slate-400 mb-3 max-w-xs">You can capture a photo with your camera or upload an official ID card image.</p>
+            <label for="ocrUploadFileInput" class="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer">
+              <i data-lucide="upload" class="w-3.5 h-3.5"></i>
+              <span>Upload ID Card Image</span>
+            </label>
+          </div>
+        </div>
+
+        <!-- Processing Status & Progress Bar -->
+        <div id="ocrStatusContainer" class="mt-3.5 bg-slate-800/80 rounded-xl p-3 border border-slate-700 hidden">
+          <div class="flex items-center justify-between text-xs mb-1.5">
+            <span id="ocrStatusLabel" class="font-bold text-blue-400 flex items-center gap-1.5">
+              <i data-lucide="loader-2" class="w-3.5 h-3.5 animate-spin"></i>
+              <span id="ocrStatusText">Analyzing Document OCR...</span>
+            </span>
+            <span id="ocrStatusPercent" class="font-mono font-bold text-slate-300">0%</span>
+          </div>
+          <div class="w-full bg-slate-700 rounded-full h-1.5 overflow-hidden">
+            <div id="ocrProgressBar" class="bg-gradient-to-r from-blue-500 to-cyan-400 h-1.5 rounded-full transition-all duration-300" style="width: 0%"></div>
+          </div>
+        </div>
+
+        <!-- Extracted Fields & Authenticity Detection Card -->
+        <div id="ocrResultContainer" class="mt-3.5 rounded-2xl p-3.5 space-y-3 hidden border transition-all">
+          
+          <!-- Live Real-Time Fraud / Authenticity Header Badge -->
+          <div id="ocrAuthenticityBanner" class="p-2.5 rounded-xl flex items-start gap-2.5 text-xs">
+            <div id="ocrAuthenticityIconWrap" class="w-6 h-6 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5">
+              <i id="ocrAuthenticityIcon" data-lucide="shield-check" class="w-4 h-4"></i>
+            </div>
+            <div class="min-w-0 flex-1">
+              <div class="flex items-center justify-between gap-1">
+                <h4 id="ocrAuthenticityTitle" class="font-extrabold text-xs">Document Verification</h4>
+                <span id="ocrDocumentTypeBadge" class="text-[9px] font-extrabold uppercase px-2 py-0.5 rounded-full border">
+                  ID Card
+                </span>
+              </div>
+              <p id="ocrAuthenticitySubtitle" class="text-[11px] mt-0.5 leading-relaxed">
+                Analyzing cryptographic markers...
+              </p>
+            </div>
+          </div>
+
+          <!-- Forensic Checks & Validation Feedback Box -->
+          <div id="ocrForensicFeedbackBox" class="p-2.5 rounded-xl bg-slate-900/90 border border-slate-800 text-[11px] space-y-1.5">
+            <p class="font-bold text-slate-300 text-[10px] uppercase tracking-wider">Automated Forensic Verification Results:</p>
+            <ul id="ocrForensicList" class="space-y-1 text-slate-300">
+              <!-- Dynamically populated by verifyDocumentAuthenticity() -->
+            </ul>
+          </div>
+
+          <!-- Extracted Credentials Preview Grid -->
+          <div class="grid grid-cols-1 gap-2 text-xs">
+            <div class="bg-slate-900/80 p-2.5 rounded-xl border border-slate-800">
+              <span class="text-[10px] text-slate-400 block font-medium">Extracted Name:</span>
+              <span id="ocrExtractedName" class="font-bold text-white text-sm">--</span>
+            </div>
+            <div class="grid grid-cols-2 gap-2">
+              <div class="bg-slate-900/80 p-2 rounded-xl border border-slate-800">
+                <span class="text-[10px] text-slate-400 block font-medium">DL Number:</span>
+                <span id="ocrExtractedDl" class="font-mono font-bold text-amber-300 text-xs truncate block">--</span>
+              </div>
+              <div class="bg-slate-900/80 p-2 rounded-xl border border-slate-800">
+                <span class="text-[10px] text-slate-400 block font-medium">Aadhaar (UID):</span>
+                <span id="ocrExtractedAadhaar" class="font-mono font-bold text-blue-300 text-xs truncate block">--</span>
+              </div>
+            </div>
+            <div class="bg-slate-900/80 p-2 rounded-xl border border-slate-800 flex items-center justify-between">
+              <span class="text-[10px] text-slate-400 font-medium">Date of Birth (DOB):</span>
+              <span id="ocrExtractedDob" class="font-mono font-bold text-slate-200 text-xs">--</span>
+            </div>
+          </div>
+
+          <!-- Action Button: Disabled if Fake, Enabled if Authentic -->
+          <button id="btnApplyOcr" type="button" onclick="applyOcrExtractedFields()" class="w-full py-2.5 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 shadow-md active:scale-95 cursor-pointer">
+            <i id="btnApplyOcrIcon" data-lucide="check" class="w-4 h-4"></i>
+            <span id="btnApplyOcrText">Auto-Fill KYC Fields Now</span>
+          </button>
+        </div>
+
+        <!-- Scanner Action Controls (REAL CAMERA & REAL DOCUMENT UPLOAD ONLY - NO DEMO BUTTONS) -->
+        <div class="mt-4 space-y-2.5">
+          <!-- Primary: Capture Frame Button -->
+          <button id="btnCaptureOcr" type="button" onclick="captureAndProcessOcr()" class="w-full py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold transition shadow-lg shadow-blue-600/30 flex items-center justify-center gap-2 active:scale-95 cursor-pointer">
+            <i data-lucide="camera" class="w-4 h-4"></i>
+            <span id="btnCaptureOcrText">Capture & Run OCR Scan</span>
+          </button>
+
+          <!-- Secondary Option: Real Photo / Document File Upload -->
+          <div>
+            <label for="ocrUploadFileInput" class="w-full py-2.5 px-3 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold transition border border-slate-700 flex items-center justify-center gap-2 cursor-pointer active:scale-98">
+              <i data-lucide="image" class="w-4 h-4 text-slate-400"></i>
+              <span>Upload ID Card Image from Device Gallery</span>
+            </label>
+            <input type="file" id="ocrUploadFileInput" accept="image/*" class="hidden" onchange="handleOcrFileUpload(event)" />
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- ======================================================== -->
+    <!-- RESTRICTED ADMIN PORTAL MODALS -->
+    <!-- ======================================================== -->
+
+    <!-- 1. Admin Authentication Login Modal -->
+    <div id="adminAuthModal" class="modal-backdrop fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 hidden">
+      <div class="bg-white rounded-3xl max-w-sm w-full shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200 p-6 border border-slate-200">
+        <div class="flex items-center justify-between pb-3 border-b border-slate-100">
+          <div class="flex items-center gap-2.5">
+            <div class="w-10 h-10 rounded-2xl bg-purple-100 text-purple-700 flex items-center justify-center">
+              <i data-lucide="shield-alert" class="w-5 h-5"></i>
+            </div>
+            <div>
+              <h3 class="text-base font-extrabold text-slate-900 leading-tight">Admin Portal Login</h3>
+              <p class="text-[11px] text-slate-500">Restricted to Routemate Verifiers</p>
+            </div>
+          </div>
+          <button onclick="closeModal('adminAuthModal')" class="p-1.5 text-slate-400 hover:text-slate-600 rounded-full hover:bg-slate-100 cursor-pointer">
+            <i data-lucide="x" class="w-5 h-5"></i>
+          </button>
+        </div>
+
+        <form onsubmit="handleAdminLogin(event)" class="mt-4 space-y-3.5 text-xs">
+          <!-- Credentials Info Pill -->
+          <div class="p-3 bg-purple-50 border border-purple-200/80 rounded-2xl text-[11px] text-purple-900 space-y-1">
+            <p class="font-bold flex items-center gap-1.5">
+              <i data-lucide="key" class="w-3.5 h-3.5 text-purple-600"></i>
+              <span>Authorized Admin Access Only</span>
+            </p>
+            <p class="text-purple-700 text-[10px]">Restricted to authorized supervisors: <span class="font-mono font-bold bg-white px-1.5 py-0.5 rounded border border-purple-200">9494285249</span> / <span class="font-mono font-bold bg-white px-1.5 py-0.5 rounded border border-purple-200">7989031924</span></p>
+          </div>
+
+          <div>
+            <label class="block font-bold text-slate-700 mb-1">Admin Email or Username</label>
+            <div class="flex items-center bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 focus-within:border-purple-600 focus-within:bg-white transition">
+              <i data-lucide="mail" class="w-4 h-4 text-slate-400 mr-2 flex-shrink-0"></i>
+              <input id="adminLoginEmail" type="text" value="admin@routemate.com" required placeholder="admin@routemate.com" class="w-full bg-transparent font-medium text-slate-900 focus:outline-none" />
+            </div>
+          </div>
+
+          <div>
+            <label class="block font-bold text-slate-700 mb-1">Admin Password / Secret Key</label>
+            <div class="flex items-center bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 focus-within:border-purple-600 focus-within:bg-white transition">
+              <i data-lucide="lock" class="w-4 h-4 text-slate-400 mr-2 flex-shrink-0"></i>
+              <input id="adminLoginPassword" type="password" value="admin@2026" required placeholder="••••••••" class="w-full bg-transparent font-mono font-bold text-slate-900 focus:outline-none" />
+            </div>
+          </div>
+
+          <p id="adminLoginError" class="text-[11px] text-red-500 font-semibold hidden flex items-center gap-1">
+            <i data-lucide="alert-circle" class="w-3.5 h-3.5"></i>
+            <span id="adminLoginErrorText">Invalid admin credentials. Access denied.</span>
+          </p>
+
+          <button id="btnAdminLogin" type="submit" class="w-full py-3.5 bg-purple-700 hover:bg-purple-800 text-white rounded-2xl text-xs font-bold transition shadow-lg shadow-purple-600/25 active:scale-[0.98] flex items-center justify-center gap-2 cursor-pointer">
+            <span>Access Admin Console</span>
+            <i data-lucide="arrow-right" class="w-4 h-4"></i>
+          </button>
+        </form>
+      </div>
+    </div>
+
+    <!-- 2. Full Admin Management Panel Modal -->
+    <div id="adminPanelModal" class="modal-backdrop fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 hidden">
+      <div class="bg-white rounded-3xl max-w-xl w-full max-h-[94vh] flex flex-col shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200 border border-slate-200">
+        
+        <!-- Admin Panel Header -->
+        <div class="p-4 sm:p-5 border-b border-slate-100 flex items-center justify-between bg-slate-900 text-white flex-shrink-0">
+          <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-2xl bg-purple-600/30 border border-purple-400/40 text-purple-300 flex items-center justify-center">
+              <i data-lucide="shield-check" class="w-5 h-5"></i>
+            </div>
+            <div>
+              <div class="flex items-center gap-2">
+                <h3 class="text-base font-extrabold text-white">Routemate KYC Admin Portal</h3>
+                <span class="text-[9px] font-bold uppercase tracking-wider bg-purple-500/30 text-purple-200 border border-purple-400/30 px-2 py-0.5 rounded-full">Supervisor</span>
+              </div>
+              <p class="text-[11px] text-slate-300 mt-0.5">Manual Document Verification & Driver Approval Desk</p>
+            </div>
+          </div>
+          <div class="flex items-center gap-2">
+            <button type="button" onclick="refreshAdminPortal()" title="Refresh Submissions & Feedback" class="p-2 text-slate-300 hover:text-white rounded-xl hover:bg-slate-800 transition cursor-pointer">
+              <i data-lucide="refresh-cw" class="w-4 h-4"></i>
+            </button>
+            <button type="button" onclick="handleAdminLogout()" title="Logout Admin" class="p-2 text-rose-300 hover:text-white rounded-xl hover:bg-rose-900/40 transition cursor-pointer">
+              <i data-lucide="log-out" class="w-4 h-4"></i>
+            </button>
+            <button type="button" onclick="closeModal('adminPanelModal')" class="p-2 text-slate-400 hover:text-white rounded-xl hover:bg-slate-800 transition cursor-pointer">
+              <i data-lucide="x" class="w-4 h-4"></i>
+            </button>
+          </div>
+        </div>
+
+        <!-- Section Switcher: KYC Submissions vs Feedback & Moderation -->
+        <div class="px-3 py-2 bg-slate-900 border-b border-slate-800 flex items-center gap-2 flex-shrink-0">
+          <button id="adminSectionKycBtn" type="button" onclick="switchAdminSection('kyc')" class="flex-1 py-2 px-3 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition bg-purple-600 text-white shadow-sm cursor-pointer">
+            <i data-lucide="file-check-2" class="w-4 h-4"></i>
+            <span>KYC Verifications</span>
+          </button>
+          <button id="adminSectionFeedbackBtn" type="button" onclick="switchAdminSection('feedback')" class="flex-1 py-2 px-3 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition bg-slate-800 text-slate-300 hover:text-white cursor-pointer relative">
+            <i data-lucide="star" class="w-4 h-4 text-amber-400"></i>
+            <span>Customer Feedback</span>
+            <span id="adminFeedbackBadgeCount" class="ml-1 bg-amber-400 text-slate-950 font-black text-[10px] px-1.5 py-0.5 rounded-full hidden">0</span>
+          </button>
+        </div>
+
+        <!-- ======================================================== -->
+        <!-- 1. KYC Submissions View -->
+        <!-- ======================================================== -->
+        <div id="adminKycSection" class="flex flex-col flex-1 overflow-hidden">
+          <!-- Dedicated Driver Search Bar -->
+          <div class="p-3 bg-white border-b border-slate-200 flex-shrink-0">
+            <div class="relative flex items-center">
+              <i data-lucide="search" class="w-4 h-4 text-purple-600 absolute left-3.5 pointer-events-none"></i>
+              <input id="adminDriverSearchInput" type="text" oninput="handleAdminSearch(this.value)" placeholder="Search driver by name, phone (+91...), DL, Aadhaar, vehicle RC..." class="w-full bg-slate-50 border border-slate-200 rounded-2xl pl-10 pr-24 py-2.5 text-xs font-semibold text-slate-900 focus:outline-none focus:border-purple-600 focus:bg-white transition placeholder-slate-400" />
+              <div class="absolute right-2 flex items-center gap-1">
+                <button id="adminSearchClearBtn" type="button" onclick="clearAdminSearch()" class="hidden px-2 py-0.5 text-[10px] font-bold text-slate-500 hover:text-slate-800 bg-slate-200 hover:bg-slate-300 rounded-full cursor-pointer">Clear</button>
+                <button type="button" onclick="triggerDeepDriverSearch()" title="Search Across Supabase Database" class="px-2 py-1 bg-purple-100 hover:bg-purple-200 text-purple-800 text-[10px] font-bold rounded-xl transition cursor-pointer flex items-center gap-1">
+                  <i data-lucide="database" class="w-3 h-3"></i>
+                  <span class="hidden sm:inline">Search DB</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Metric Badges & Filter Tabs -->
+          <div class="p-3.5 bg-slate-50 border-b border-slate-200 flex-shrink-0 space-y-2.5">
+            <!-- Metric Badges -->
+            <div class="grid grid-cols-4 gap-1.5 sm:gap-2 text-center text-xs">
+              <div class="bg-amber-50 border border-amber-200 rounded-2xl p-2">
+                <span class="text-[9px] uppercase font-bold text-amber-700 block truncate">Pending</span>
+                <span id="adminCountPending" class="text-base sm:text-lg font-black text-amber-900">0</span>
+              </div>
+              <div class="bg-emerald-50 border border-emerald-200 rounded-2xl p-2">
+                <span class="text-[9px] uppercase font-bold text-emerald-700 block truncate">Verified</span>
+                <span id="adminCountApproved" class="text-base sm:text-lg font-black text-emerald-900">0</span>
+              </div>
+              <div class="bg-rose-50 border border-rose-200 rounded-2xl p-2">
+                <span class="text-[9px] uppercase font-bold text-rose-700 block truncate">Suspended</span>
+                <span id="adminCountBlocked" class="text-base sm:text-lg font-black text-rose-900">0</span>
+              </div>
+              <div class="bg-slate-100 border border-slate-200 rounded-2xl p-2">
+                <span class="text-[9px] uppercase font-bold text-slate-700 block truncate">Rejected</span>
+                <span id="adminCountRejected" class="text-base sm:text-lg font-black text-slate-800">0</span>
+              </div>
+            </div>
+
+            <!-- Filter Navigation -->
+            <div class="flex items-center gap-1.5 overflow-x-auto pb-0.5 text-xs">
+              <button id="adminTabPending" type="button" onclick="setAdminFilter('pending')" class="px-3 py-1.5 rounded-xl font-bold transition bg-amber-600 text-white shadow-xs cursor-pointer flex-shrink-0">
+                Pending Review
+              </button>
+              <button id="adminTabApproved" type="button" onclick="setAdminFilter('approved')" class="px-3 py-1.5 rounded-xl font-medium transition bg-white text-slate-700 border border-slate-200 hover:bg-slate-100 cursor-pointer flex-shrink-0">
+                Verified Drivers
+              </button>
+              <button id="adminTabBlocked" type="button" onclick="setAdminFilter('blocked')" class="px-3 py-1.5 rounded-xl font-medium transition bg-white text-rose-700 border border-rose-200 hover:bg-rose-50 cursor-pointer flex-shrink-0">
+                Suspended / Blocked
+              </button>
+              <button id="adminTabRejected" type="button" onclick="setAdminFilter('rejected')" class="px-3 py-1.5 rounded-xl font-medium transition bg-white text-slate-700 border border-slate-200 hover:bg-slate-100 cursor-pointer flex-shrink-0">
+                Rejected
+              </button>
+              <button id="adminTabAll" type="button" onclick="setAdminFilter('all')" class="px-3 py-1.5 rounded-xl font-medium transition bg-white text-slate-700 border border-slate-200 hover:bg-slate-100 cursor-pointer flex-shrink-0">
+                All Submissions
+              </button>
+            </div>
+          </div>
+
+          <!-- Submissions Scrollable List -->
+          <div id="adminSubmissionsList" class="p-4 overflow-y-auto flex-1 space-y-4">
+            <!-- Dynamically populated via loadAdminKycSubmissions() -->
+          </div>
+        </div>
+
+        <!-- ======================================================== -->
+        <!-- 2. Customer Feedback & Driver Moderation Section -->
+        <!-- ======================================================== -->
+        <div id="adminFeedbackSection" class="flex flex-col flex-1 overflow-hidden hidden">
+          <!-- Feedback Search Bar -->
+          <div class="p-3 bg-white border-b border-slate-200 flex-shrink-0">
+            <div class="relative flex items-center">
+              <i data-lucide="search" class="w-4 h-4 text-amber-500 absolute left-3.5 pointer-events-none"></i>
+              <input id="adminFeedbackSearchInput" type="text" oninput="handleAdminFeedbackSearch(this.value)" placeholder="Search reviews by driver, phone, complaint keywords..." class="w-full bg-slate-50 border border-slate-200 rounded-2xl pl-10 pr-20 py-2.5 text-xs font-semibold text-slate-900 focus:outline-none focus:border-amber-500 focus:bg-white transition placeholder-slate-400" />
+              <div class="absolute right-2 flex items-center gap-1">
+                <button id="adminFbSearchClearBtn" type="button" onclick="clearAdminFeedbackSearch()" class="hidden px-2 py-0.5 text-[10px] font-bold text-slate-500 hover:text-slate-800 bg-slate-200 hover:bg-slate-300 rounded-full cursor-pointer">Clear</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Feedback Metric Badges & Filters -->
+          <div class="p-3.5 bg-slate-50 border-b border-slate-200 flex-shrink-0 space-y-2.5">
+            <!-- Metric Badges -->
+            <div class="grid grid-cols-4 gap-1.5 sm:gap-2 text-center text-xs">
+              <div class="bg-blue-50 border border-blue-200 rounded-2xl p-2">
+                <span class="text-[9px] uppercase font-bold text-blue-700 block truncate">Total Reviews</span>
+                <span id="adminCountTotalFeedbacks" class="text-base sm:text-lg font-black text-blue-900">0</span>
+              </div>
+              <div class="bg-amber-50 border border-amber-200 rounded-2xl p-2">
+                <span class="text-[9px] uppercase font-bold text-amber-700 block truncate">Avg Rating</span>
+                <span id="adminAvgDriverRating" class="text-base sm:text-lg font-black text-amber-900">5.0★</span>
+              </div>
+              <div class="bg-rose-50 border border-rose-200 rounded-2xl p-2">
+                <span class="text-[9px] uppercase font-bold text-rose-700 block truncate">Critical (≤3★)</span>
+                <span id="adminCountCriticalFeedbacks" class="text-base sm:text-lg font-black text-rose-900">0</span>
+              </div>
+              <div class="bg-emerald-50 border border-emerald-200 rounded-2xl p-2">
+                <span class="text-[9px] uppercase font-bold text-emerald-700 block truncate">Positive (4-5★)</span>
+                <span id="adminCountPositiveFeedbacks" class="text-base sm:text-lg font-black text-emerald-900">0</span>
+              </div>
+            </div>
+
+            <!-- Filter Buttons -->
+            <div class="flex items-center gap-1.5 overflow-x-auto pb-0.5 text-xs">
+              <button id="adminFbTabAll" type="button" onclick="setAdminFeedbackFilter('all')" class="px-3 py-1.5 rounded-xl font-bold transition bg-amber-500 text-slate-950 shadow-xs cursor-pointer flex-shrink-0">
+                All Reviews
+              </button>
+              <button id="adminFbTabCritical" type="button" onclick="setAdminFeedbackFilter('critical')" class="px-3 py-1.5 rounded-xl font-medium transition bg-white text-rose-700 border border-rose-200 hover:bg-rose-50 cursor-pointer flex-shrink-0">
+                Critical (≤3★)
+              </button>
+              <button id="adminFbTabSafety" type="button" onclick="setAdminFeedbackFilter('safety')" class="px-3 py-1.5 rounded-xl font-medium transition bg-white text-rose-800 border border-rose-300 hover:bg-rose-50 cursor-pointer flex-shrink-0">
+                ⚠️ Safety Issues
+              </button>
+              <button id="adminFbTabPositive" type="button" onclick="setAdminFeedbackFilter('positive')" class="px-3 py-1.5 rounded-xl font-medium transition bg-white text-slate-700 border border-slate-200 hover:bg-slate-100 cursor-pointer flex-shrink-0">
+                Positive (4-5★)
+              </button>
+            </div>
+          </div>
+
+          <!-- Feedbacks Scrollable List -->
+          <div id="adminFeedbacksContainer" class="p-4 overflow-y-auto flex-1 space-y-3.5">
+            <!-- Dynamically populated via loadAdminFeedbacks() -->
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- 3. Full Document Image Viewer Modal -->
+    <div id="adminDocViewerModal" class="modal-backdrop fixed inset-0 z-60 flex items-center justify-center p-4 hidden">
+      <div class="bg-slate-900 text-white rounded-3xl max-w-lg w-full max-h-[90vh] overflow-hidden shadow-2xl flex flex-col p-4 border border-slate-700">
+        <div class="flex items-center justify-between pb-3 border-b border-slate-800 flex-shrink-0">
+          <div>
+            <h4 id="adminDocViewerTitle" class="text-sm font-bold text-white">Document Inspection</h4>
+            <p id="adminDocViewerSubtitle" class="text-[10px] text-slate-400">High resolution image review</p>
+          </div>
+          <button type="button" onclick="closeModal('adminDocViewerModal')" class="p-1.5 text-slate-400 hover:text-white rounded-full hover:bg-slate-800 cursor-pointer">
+            <i data-lucide="x" class="w-5 h-5"></i>
+          </button>
+        </div>
+        <div class="mt-3 flex-1 overflow-auto flex items-center justify-center bg-black/60 rounded-2xl p-2">
+          <img id="adminDocViewerImg" src="" alt="Document Preview" class="max-w-full max-h-[70vh] object-contain rounded-xl shadow-lg" />
+        </div>
+      </div>
+    </div>
+
+    <!-- 4. Rejection Reason Modal -->
+    <div id="adminRejectModal" class="modal-backdrop fixed inset-0 z-60 flex items-center justify-center p-4 hidden">
+      <div class="bg-white rounded-3xl max-w-sm w-full shadow-2xl p-6 border border-slate-200">
+        <div class="flex items-center justify-between pb-3 border-b border-slate-100">
+          <div class="flex items-center gap-2">
+            <div class="w-8 h-8 rounded-xl bg-rose-100 text-rose-700 flex items-center justify-center">
+              <i data-lucide="x-circle" class="w-4 h-4"></i>
+            </div>
+            <h4 class="text-sm font-bold text-slate-900">Reject KYC Submission</h4>
+          </div>
+          <button type="button" onclick="closeModal('adminRejectModal')" class="p-1 text-slate-400 hover:text-slate-600 rounded-full cursor-pointer">
+            <i data-lucide="x" class="w-4 h-4"></i>
+          </button>
+        </div>
+
+        <form onsubmit="handleConfirmAdminReject(event)" class="mt-4 space-y-3 text-xs">
+          <div>
+            <label class="block font-bold text-slate-700 mb-1">Reason for Rejection</label>
+            <select id="adminRejectReasonPreset" onchange="handleRejectPresetChange(this.value)" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 font-medium text-slate-900 focus:outline-none focus:border-rose-500 cursor-pointer">
+              <option value="Blurry or unreadable document photo">Blurry or unreadable document photo</option>
+              <option value="Name on Government ID does not match profile">Name on ID does not match profile name</option>
+              <option value="Expired Driving License">Expired Driving License</option>
+              <option value="Invalid or counterfeit Vehicle RC">Invalid or counterfeit Vehicle RC</option>
+              <option value="Aadhaar UID number mismatch">Aadhaar UID number mismatch</option>
+              <option value="Other">Other (custom reason)</option>
+            </select>
+          </div>
+
+          <div>
+            <label class="block font-bold text-slate-700 mb-1">Detailed Explanation for Driver</label>
+            <textarea id="adminRejectReasonText" rows="3" required placeholder="Specify why the submission was rejected and what the driver should fix." class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 font-medium text-slate-900 focus:outline-none focus:border-rose-500"></textarea>
+          </div>
+
+          <div class="flex items-center gap-2 pt-2">
+            <button type="button" onclick="closeModal('adminRejectModal')" class="w-1/2 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-bold transition cursor-pointer">
+              Cancel
+            </button>
+            <button type="submit" class="w-1/2 py-2.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl font-bold transition shadow-md shadow-rose-600/30 cursor-pointer">
+              Confirm Reject
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- 5. Administrative Block / Suspend Driver Modal -->
+    <div id="adminBlockDriverModal" class="modal-backdrop fixed inset-0 z-60 flex items-center justify-center p-4 hidden">
+      <div class="bg-white rounded-3xl max-w-sm w-full shadow-2xl p-6 border border-slate-200 animate-in fade-in zoom-in duration-150">
+        <div class="flex items-center justify-between pb-3 border-b border-slate-100">
+          <div class="flex items-center gap-2">
+            <div class="w-9 h-9 rounded-2xl bg-rose-100 text-rose-700 flex items-center justify-center flex-shrink-0">
+              <i data-lucide="shield-alert" class="w-5 h-5"></i>
+            </div>
+            <div>
+              <h4 class="text-sm font-extrabold text-slate-900 leading-tight">Suspend Driver Account</h4>
+              <p class="text-[10px] text-slate-500">Administrative Enforcement</p>
+            </div>
+          </div>
+          <button type="button" onclick="closeModal('adminBlockDriverModal')" class="p-1 text-slate-400 hover:text-slate-600 rounded-full cursor-pointer">
+            <i data-lucide="x" class="w-4 h-4"></i>
+          </button>
+        </div>
+
+        <!-- Target Driver Pill -->
+        <div class="mt-3.5 p-3 bg-rose-50 border border-rose-200/80 rounded-2xl flex items-center justify-between text-xs">
+          <div>
+            <span class="text-[10px] font-bold uppercase tracking-wider text-rose-600 block">Target Account</span>
+            <h5 id="adminBlockTargetName" class="font-extrabold text-slate-900 text-xs">Driver</h5>
+          </div>
+          <span id="adminBlockTargetPhone" class="font-mono font-bold text-rose-800 text-[11px] bg-white px-2 py-1 rounded-lg border border-rose-200">+91 ...</span>
+        </div>
+
+        <form onsubmit="handleConfirmAdminBlock(event)" class="mt-3.5 space-y-3 text-xs">
+          <div>
+            <label class="block font-bold text-slate-700 mb-1">Violation / Suspension Reason</label>
+            <select id="adminBlockReasonPreset" onchange="handleBlockPresetChange(this.value)" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 font-semibold text-slate-900 focus:outline-none focus:border-rose-500 cursor-pointer">
+              <option value="Harassment or inappropriate behavior towards passengers">Harassment or abusive passenger conduct</option>
+              <option value="Fake / forged KYC documents or identity fraud">Fake / forged documents or ID fraud</option>
+              <option value="Rash driving, speeding, or severe safety violation">Dangerous / rash driving safety violation</option>
+              <option value="Extortion, overcharging, or off-app payment fraud">Payment fraud / unauthorized overcharging</option>
+              <option value="Involved in criminal / police complaint">Involved in police or legal investigation</option>
+              <option value="Repeated ride cancellations / corridor scam">Corridor abuse or repeated ride scams</option>
+              <option value="Other">Other critical infraction</option>
+            </select>
+          </div>
+
+          <div>
+            <label class="block font-bold text-slate-700 mb-1">Administrative Notes & Action Details</label>
+            <textarea id="adminBlockReasonText" rows="2.5" required placeholder="Specify details regarding this disciplinary suspension." class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 font-medium text-slate-900 focus:outline-none focus:border-rose-500 text-xs"></textarea>
+          </div>
+
+          <div class="p-2.5 bg-slate-50 rounded-xl border border-slate-200 text-[10px] text-slate-600 flex items-start gap-2">
+            <i data-lucide="info" class="w-4 h-4 text-rose-500 flex-shrink-0 mt-0.5"></i>
+            <span>Blocking will immediately revoke verified driver status and restrict the user from publishing corridor rides.</span>
+          </div>
+
+          <div class="flex items-center gap-2 pt-1">
+            <button type="button" onclick="closeModal('adminBlockDriverModal')" class="w-1/2 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-bold transition cursor-pointer">
+              Cancel
+            </button>
+            <button type="submit" class="w-1/2 py-2.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl font-bold transition shadow-md shadow-rose-600/30 flex items-center justify-center gap-1.5 cursor-pointer">
+              <i data-lucide="shield-alert" class="w-3.5 h-3.5"></i>
+              <span>Confirm Block</span>
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- 6. Account Suspended User Notice Modal -->
+    <div id="accountBlockedModal" class="modal-backdrop fixed inset-0 z-60 flex items-center justify-center p-4 hidden">
+      <div class="bg-white rounded-3xl max-w-sm w-full shadow-2xl p-6 border-2 border-rose-300 text-center space-y-4">
+        <div class="w-14 h-14 rounded-3xl bg-rose-100 text-rose-600 flex items-center justify-center mx-auto shadow-inner">
+          <i data-lucide="shield-alert" class="w-7 h-7"></i>
+        </div>
+        <div>
+          <span class="text-[10px] font-extrabold uppercase tracking-wider bg-rose-100 text-rose-800 px-2 py-0.5 rounded-full border border-rose-200">Administrative Suspension</span>
+          <h3 class="text-base font-extrabold text-slate-900 mt-2">Driver Account Suspended</h3>
+          <p class="text-xs text-slate-500 mt-1">Your Routemate privileges have been suspended due to policy or safety compliance violations.</p>
+        </div>
+
+        <div class="p-3 bg-rose-50 rounded-2xl border border-rose-200 text-left text-xs">
+          <span class="text-[9px] uppercase font-bold text-rose-600 block">Suspension Reason:</span>
+          <p id="blockedNoticeReasonText" class="font-bold text-rose-950 mt-0.5">Safety guidelines violation.</p>
+        </div>
+
+        <div class="text-[11px] text-slate-500 space-y-1">
+          <p>For inquiries or formal grievance redressal, contact:</p>
+          <p class="font-mono font-bold text-slate-800">compliance@routemate.com</p>
+        </div>
+
+        <button type="button" onclick="closeModal('accountBlockedModal')" class="w-full py-2.5 bg-slate-900 hover:bg-black text-white rounded-xl text-xs font-bold transition cursor-pointer">
+          Dismiss Notice
+        </button>
+      </div>
+    </div>
+
     <!-- Toast Notification -->
     <div id="appToast" class="fixed bottom-20 left-1/2 -translate-x-1/2 z-50 transition-all duration-300 transform translate-y-24 opacity-0 pointer-events-none w-11/12 max-w-sm">
       <div class="bg-slate-900/95 backdrop-blur text-white px-4 py-3 rounded-2xl shadow-xl flex items-center gap-2.5 text-xs font-semibold border border-slate-800">
@@ -1148,9 +2963,11 @@
   <!-- Razorpay Standard Checkout SDK -->
   <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
   <script src="payment.js"></script>
+  <!-- Tesseract.js Pure Client-Side WebAssembly OCR Engine v5 -->
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
   <!-- Supabase JS Client SDK v2 -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="supabaseClient.js"></script>
-  <script src="app.js"></script>
+  <script src="supabaseClient.js?v=10"></script>
+  <script src="app.js?v=12"></script>
 </body>
 </html>

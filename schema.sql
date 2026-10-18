@@ -1,7 +1,7 @@
 -- ==============================================================================
 -- Routemate - Supabase Database Schema
 -- Tables: profiles, rides, bookings
--- Run this in your Supabase SQL Editor: https://supabase.com/dashboard/project/hjieeizfbvubkhmlmdg/sql
+-- Run this in your Supabase SQL Editor: https://supabase.com/dashboard/project/hjieeilzfbvubkhmlmdg/sql
 -- ==============================================================================
 
 -- Enable UUID extension
@@ -17,8 +17,40 @@ create table if not exists public.profiles (
   phone text,
   avatar_url text,
   is_verified boolean default true,
+  is_kyc_verified boolean default false,
+  aadhaar_number text,
+  dl_number text,
+  kyc_verified_at timestamp with time zone,
+  mpin text,
+  kyc_status text default 'unverified',
+  aadhaar_card_photo text,
+  dl_expiry text,
+  dl_photo text,
+  rc_number text,
+  rc_vehicle_name text,
+  rc_photo text,
+  kyc_submitted_at timestamp with time zone,
+  kyc_reviewed_at timestamp with time zone,
+  rejection_reason text,
   created_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
+
+-- Idempotent Migration for Existing Databases:
+alter table public.profiles add column if not exists is_kyc_verified boolean default false;
+alter table public.profiles add column if not exists aadhaar_number text;
+alter table public.profiles add column if not exists dl_number text;
+alter table public.profiles add column if not exists kyc_verified_at timestamp with time zone;
+alter table public.profiles add column if not exists mpin text;
+alter table public.profiles add column if not exists kyc_status text default 'unverified';
+alter table public.profiles add column if not exists aadhaar_card_photo text;
+alter table public.profiles add column if not exists dl_expiry text;
+alter table public.profiles add column if not exists dl_photo text;
+alter table public.profiles add column if not exists rc_number text;
+alter table public.profiles add column if not exists rc_vehicle_name text;
+alter table public.profiles add column if not exists rc_photo text;
+alter table public.profiles add column if not exists kyc_submitted_at timestamp with time zone;
+alter table public.profiles add column if not exists kyc_reviewed_at timestamp with time zone;
+alter table public.profiles add column if not exists rejection_reason text;
 
 -- 2. RIDES TABLE
 create table if not exists public.rides (
@@ -113,3 +145,75 @@ insert into public.rides (
   'Today, 06:45 PM', 1, 115.00, 'both', true, true, false,
   'Comfortable pillion seat. Extra helmet available.'
 );
+
+-- ==============================================================================
+-- 4. RIDE_REQUESTS TABLE (Real-Time Rider-Driver Matching & Tracking)
+-- ==============================================================================
+create table if not exists public.ride_requests (
+  id text primary key,
+  rider_id text,
+  rider_name text not null,
+  rider_phone text,
+  rider_avatar text,
+  rider_role text default 'Commuter',
+  rider_rating numeric(3,2) default 4.90,
+  pickup text not null,
+  pickup_lat numeric(10,6),
+  pickup_lng numeric(10,6),
+  drop_location text not null,
+  drop_lat numeric(10,6),
+  drop_lng numeric(10,6),
+  distance_km numeric(6,2) default 84.0,
+  vehicle_type text not null default 'bike' check (vehicle_type in ('bike', 'car')),
+  seats integer not null default 1,
+  fare numeric(10,2) not null,
+  payment_method text not null default 'upi' check (payment_method in ('upi', 'cash')),
+  pin text not null default '4821',
+  status text not null default 'searching' check (status in ('searching', 'driver_accepted', 'ride_started', 'ride_completed', 'cancelled')),
+  driver_id text,
+  driver_name text,
+  driver_phone text,
+  driver_avatar text,
+  driver_vehicle_name text,
+  driver_vehicle_number text,
+  accepted_at timestamp with time zone,
+  started_at timestamp with time zone,
+  completed_at timestamp with time zone,
+  cancelled_at timestamp with time zone,
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
+alter table public.ride_requests enable row level security;
+create policy "Allow public read access to ride_requests" on public.ride_requests for select using (true);
+create policy "Allow public insert to ride_requests" on public.ride_requests for insert with check (true);
+create policy "Allow public update to ride_requests" on public.ride_requests for update using (true);
+
+-- ==============================================================================
+-- 5. FEEDBACKS & RATINGS TABLE (Customer Reviews & Admin Moderation)
+-- ==============================================================================
+create table if not exists public.feedbacks (
+  id text primary key,
+  ride_id text,
+  driver_id text,
+  driver_name text not null,
+  driver_phone text,
+  driver_avatar text,
+  driver_vehicle text,
+  rider_id text,
+  rider_name text not null,
+  rider_phone text,
+  rating numeric(2,1) not null,
+  tags text[],
+  feedback_text text,
+  has_safety_concern boolean default false,
+  route text,
+  status text default 'published',
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
+alter table public.feedbacks enable row level security;
+create policy "Allow public read access to feedbacks" on public.feedbacks for select using (true);
+create policy "Allow public insert to feedbacks" on public.feedbacks for insert with check (true);
+create policy "Allow public update to feedbacks" on public.feedbacks for update using (true);
+
+

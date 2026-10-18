@@ -34,4 +34,6 @@ android/custom_cacerts
 avg_shield.cer
 *.apk
 *.aab
+*.jks
+*.keystore
 

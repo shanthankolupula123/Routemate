@@ -28,7 +28,7 @@ if exist "android\app\build\outputs\apk\debug\app-debug.apk" (
     copy /y "android\app\build\outputs\apk\debug\app-debug.apk" "Routemate.apk" >nul
     echo.
     echo ==============================================
-    echo [SUCCESS] APK Generated & Cleaned!
+    echo [SUCCESS] APK Generated and Ready!
     echo Pick this file to install on phone:
     echo --^> Routemate.apk (located right in this main folder)
     echo ==============================================

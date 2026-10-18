@@ -4,11 +4,11 @@
   "webDir": "www",
   "server": {
     "androidScheme": "https",
-    "cleartext": true
+    "cleartext": false
   },
   "android": {
-    "allowMixedContent": true,
-    "webContentsDebuggingEnabled": true
+    "allowMixedContent": false,
+    "webContentsDebuggingEnabled": false
   },
   "plugins": {
     "StatusBar": {

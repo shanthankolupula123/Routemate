@@ -4,6 +4,8 @@
   "description": "> **\"Share the Ride, Split the Cost\"**",
   "main": "app.js",
   "scripts": {
+    "dev": "node server.js",
+    "start": "node server.js",
     "build": "node prepare-www.js",
     "cap:add": "npx cap add android",
     "cap:sync": "npm run build && npx cap sync android",
