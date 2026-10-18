@@ -357,6 +357,155 @@ const server = http.createServer(async (req, res) => {
   }
 
   // ==========================================
+  // TWILIO PHONE NUMBER OTP VERIFICATION ENDPOINTS
+  // ==========================================
+
+  // 1. Send OTP via Twilio Verify Service
+  if (urlPath === '/api/send-otp' && req.method === 'POST') {
+    try {
+      const data = await parseJsonBody(req);
+      const phone = data.phone;
+      if (!phone) {
+        res.writeHead(400, { ...corsHeaders, 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: 'Phone number is required' }));
+        return;
+      }
+
+      let formattedPhone = phone.trim();
+      if (!formattedPhone.startsWith('+')) {
+        formattedPhone = '+91' + formattedPhone.replace(/[^0-9]/g, '');
+      }
+
+      const accountSid = process.env.TWILIO_ACCOUNT_SID;
+      const authToken = process.env.TWILIO_AUTH_TOKEN;
+      const serviceSid = process.env.TWILIO_VERIFY_SERVICE_SID;
+
+      if (!accountSid || !authToken || !serviceSid) {
+        res.writeHead(500, { ...corsHeaders, 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: 'Twilio credentials not configured' }));
+        return;
+      }
+
+      const auth = Buffer.from(`${accountSid}:${authToken}`).toString('base64');
+      const params = new URLSearchParams();
+      params.append('To', formattedPhone);
+      params.append('Channel', 'sms');
+
+      const twilioRes = await fetch(`https://verify.twilio.com/v2/Services/${serviceSid}/Verifications`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Basic ${auth}`,
+          'Content-Type': 'application/x-www-form-urlencoded'
+        },
+        body: params
+      });
+
+      const twilioData = await twilioRes.json();
+
+      if (!twilioRes.ok) {
+        console.error('Twilio Send OTP Error:', twilioData);
+        res.writeHead(twilioRes.status || 400, { ...corsHeaders, 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          success: false,
+          error: twilioData.message || 'Failed to send OTP via Twilio'
+        }));
+        return;
+      }
+
+      res.writeHead(200, { ...corsHeaders, 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        success: true,
+        status: twilioData.status,
+        to: twilioData.to
+      }));
+      return;
+    } catch (err) {
+      console.error('Exception in /api/send-otp:', err);
+      res.writeHead(500, { ...corsHeaders, 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: false, error: err.message || 'Server error sending OTP' }));
+      return;
+    }
+  }
+
+  // 2. Verify OTP via Twilio Verify Service
+  if (urlPath === '/api/verify-otp' && req.method === 'POST') {
+    try {
+      const data = await parseJsonBody(req);
+      const { phone, code } = data;
+
+      if (!phone || !code) {
+        res.writeHead(400, { ...corsHeaders, 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: 'Phone number and OTP code are required' }));
+        return;
+      }
+
+      let formattedPhone = phone.trim();
+      if (!formattedPhone.startsWith('+')) {
+        formattedPhone = '+91' + formattedPhone.replace(/[^0-9]/g, '');
+      }
+
+      const accountSid = process.env.TWILIO_ACCOUNT_SID;
+      const authToken = process.env.TWILIO_AUTH_TOKEN;
+      const serviceSid = process.env.TWILIO_VERIFY_SERVICE_SID;
+
+      if (!accountSid || !authToken || !serviceSid) {
+        res.writeHead(500, { ...corsHeaders, 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: 'Twilio credentials not configured' }));
+        return;
+      }
+
+      const auth = Buffer.from(`${accountSid}:${authToken}`).toString('base64');
+      const params = new URLSearchParams();
+      params.append('To', formattedPhone);
+      params.append('Code', String(code).trim());
+
+      const twilioRes = await fetch(`https://verify.twilio.com/v2/Services/${serviceSid}/VerificationCheck`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Basic ${auth}`,
+          'Content-Type': 'application/x-www-form-urlencoded'
+        },
+        body: params
+      });
+
+      const twilioData = await twilioRes.json();
+
+      if (!twilioRes.ok) {
+        console.error('Twilio Verify Check Error:', twilioData);
+        res.writeHead(twilioRes.status || 400, { ...corsHeaders, 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          success: false,
+          error: twilioData.message || 'OTP verification check failed'
+        }));
+        return;
+      }
+
+      if (twilioData.status === 'approved') {
+        res.writeHead(200, { ...corsHeaders, 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          success: true,
+          verified: true,
+          status: 'approved',
+          to: twilioData.to
+        }));
+        return;
+      } else {
+        res.writeHead(400, { ...corsHeaders, 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          success: false,
+          error: 'Invalid or expired OTP code. Please retry.'
+        }));
+        return;
+      }
+    } catch (err) {
+      console.error('Exception in /api/verify-otp:', err);
+      res.writeHead(500, { ...corsHeaders, 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: false, error: err.message || 'Server error verifying OTP' }));
+      return;
+    }
+  }
+
+  // ==========================================
   // RAZORPAY STANDARD PAYMENT GATEWAY ENDPOINTS
   // ==========================================
 

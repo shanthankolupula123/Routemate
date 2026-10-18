@@ -64,62 +64,102 @@ const db = {
       }
     },
 
-    // Send OTP to Phone
+    // Send OTP to Phone (Twilio Verify Service with fallback)
     async signInWithOtp(phone) {
+      try {
+        console.log(`📱 Sending OTP via Twilio Verify to: ${phone}`);
+        const res = await fetch('/api/send-otp', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ phone })
+        });
+        const data = await res.json();
+
+        if (res.ok && data.success) {
+          console.log('✅ Twilio OTP sent successfully:', data);
+          return { success: true, method: 'twilio', data };
+        } else {
+          console.warn('Twilio send error, checking Supabase fallback:', data.error);
+        }
+      } catch (twilioErr) {
+        console.warn('Twilio endpoint error, falling back to Supabase auth:', twilioErr);
+      }
+
+      // Supabase Native SMS Fallback
       const client = getSupabaseClient();
       if (!client) {
-        return { success: false, error: 'Supabase client library not loaded yet.' };
+        return { success: false, error: 'Authentication service not available.' };
       }
       try {
         console.log(`📱 Sending OTP via Supabase to: ${phone}`);
-        const { data, error } = await client.auth.signInWithOtp({
-          phone: phone, // Must be E.164, e.g. +919848023145
-        });
-
+        const { data, error } = await client.auth.signInWithOtp({ phone });
         if (error) {
           console.warn('Supabase signInWithOtp error response:', error);
           return {
             success: false,
             error: error.message,
-            errorCode: error.code || error.error_code,
-            rawError: error
+            errorCode: error.code || error.error_code
           };
         }
-
-        console.log('✅ Supabase signInWithOtp success:', data);
-        return { success: true, data };
+        return { success: true, method: 'supabase', data };
       } catch (e) {
         console.error('Exception in signInWithOtp:', e);
         return { success: false, error: e.message || 'Network error sending OTP' };
       }
     },
 
-    // Verify 6-digit OTP Token
+    // Verify 6-digit OTP Token (Twilio Verify Service with fallback)
     async verifyOtp(phone, token) {
+      try {
+        console.log(`🔑 Verifying OTP token via Twilio for ${phone}...`);
+        const res = await fetch('/api/verify-otp', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ phone, code: token })
+        });
+        const data = await res.json();
+
+        if (res.ok && data.success && data.status === 'approved') {
+          console.log('✅ Twilio OTP verified successfully!');
+          return {
+            success: true,
+            method: 'twilio',
+            data: {
+              user: {
+                id: 'usr_' + phone.replace(/[^0-9]/g, ''),
+                phone: phone,
+                verified_at: new Date().toISOString()
+              }
+            }
+          };
+        } else if (res.status === 400 && data.error) {
+          return { success: false, error: data.error };
+        }
+      } catch (twilioErr) {
+        console.warn('Twilio verify endpoint error, falling back to Supabase:', twilioErr);
+      }
+
+      // Supabase Native Verify Fallback
       const client = getSupabaseClient();
       if (!client) {
-        return { success: false, error: 'Supabase client not loaded.' };
+        return { success: false, error: 'Authentication service not loaded.' };
       }
       try {
-        console.log(`🔑 Verifying OTP token for ${phone}...`);
+        console.log(`🔑 Verifying OTP token via Supabase for ${phone}...`);
         const { data, error } = await client.auth.verifyOtp({
           phone: phone,
           token: token,
           type: 'sms'
         });
-
         if (error) {
           console.warn('Supabase verifyOtp error response:', error);
           return {
             success: false,
             error: error.message,
-            errorCode: error.code || error.error_code,
-            rawError: error
+            errorCode: error.code || error.error_code
           };
         }
-
-        console.log('✅ Supabase verifyOtp success:', data);
-        return { success: true, data };
+        return { success: true, method: 'supabase', data };
       } catch (e) {
         console.error('Exception in verifyOtp:', e);
         return { success: false, error: e.message || 'Verification exception' };
