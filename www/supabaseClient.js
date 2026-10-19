@@ -64,22 +64,33 @@ const db = {
       }
     },
 
-    // Helper: Resilient Backend API Discovery across localhost:3000, 127.0.0.1, emulator, and relative origin
+    // Helper: Resilient Backend API Discovery across relative origin, localhost:3000, 127.0.0.1, emulator
     async _callBackendOtpApi(endpointPath, payload) {
       const candidateUrls = [];
       const origin = (typeof window !== 'undefined' && window.location && window.location.origin) || '';
 
-      // 1. If currently served on port 3000, try relative first
-      if (origin && origin.includes(':3000')) {
+      // 1. If currently served over HTTP or HTTPS on the web, ALWAYS prioritize same-origin relative path
+      // This eliminates Mixed Content blocks and CORS issues on deployed production domains (e.g. https://routemate.pro)
+      if (origin && (origin.startsWith('http://') || origin.startsWith('https://'))) {
         candidateUrls.push(endpointPath);
       }
 
-      // 2. Direct backend server candidates (addresses Live Server, Capacitor, file://, different ports)
-      candidateUrls.push(`http://localhost:3000${endpointPath}`);
-      candidateUrls.push(`http://127.0.0.1:3000${endpointPath}`);
-      candidateUrls.push(`http://10.0.2.2:3000${endpointPath}`); // Android Emulator loopback
+      // 2. Local dev server candidates (for Live Server, local dev tools, Capacitor, or Android Emulator)
+      const isLocalOrApp = !origin || 
+        origin.includes('localhost') || 
+        origin.includes('127.0.0.1') || 
+        origin.startsWith('file:') || 
+        origin.startsWith('capacitor:');
 
-      // 3. Relative path fallback
+      if (isLocalOrApp) {
+        if (!candidateUrls.includes(`http://localhost:3000${endpointPath}`)) {
+          candidateUrls.push(`http://localhost:3000${endpointPath}`);
+        }
+        candidateUrls.push(`http://127.0.0.1:3000${endpointPath}`);
+        candidateUrls.push(`http://10.0.2.2:3000${endpointPath}`); // Android Emulator loopback
+      }
+
+      // 3. Fallback
       if (!candidateUrls.includes(endpointPath)) {
         candidateUrls.push(endpointPath);
       }
@@ -87,7 +98,7 @@ const db = {
       for (const url of candidateUrls) {
         try {
           const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 4000);
+          const timeoutId = setTimeout(() => controller.abort(), 6000);
           const res = await fetch(url, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -117,7 +128,7 @@ const db = {
 
         if (backendResult && backendResult.res.ok && backendResult.data && backendResult.data.success) {
           const data = backendResult.data;
-          console.log(`✅ Resend Email OTP processed successfully via ${backendResult.url}:`, data);
+          console.log(`✅ Resend Email OTP dispatched successfully via ${backendResult.url}:`, data);
           if (data.otpToken && data.expiresAt) {
             try {
               sessionStorage.setItem('routemate_otp_token', data.otpToken);
@@ -125,14 +136,10 @@ const db = {
               sessionStorage.setItem('routemate_auth_target', target);
             } catch (e) {}
           }
-          if (data.devOtp) {
-            try {
-              sessionStorage.setItem('routemate_dev_otp', String(data.devOtp));
-            } catch (e) {}
-          }
           return { success: true, method: 'resend', data };
         } else if (backendResult && backendResult.data && backendResult.data.error) {
           console.warn('Resend backend notice:', backendResult.data.error);
+          return { success: false, error: backendResult.data.error };
         }
       } catch (err) {
         console.warn('Resend endpoint error, checking Supabase auth fallback:', err);
@@ -150,32 +157,22 @@ const db = {
             return { success: true, method: 'supabase', data };
           }
           console.warn('Supabase signInWithOtp error response:', error);
+          if (error && error.message) {
+            return { success: false, error: error.message };
+          }
         } catch (e) {
           console.warn('Exception in Supabase signInWithOtp:', e);
+          return { success: false, error: e.message || 'Error communicating with Supabase authentication' };
         }
       }
 
-      // Resilient Sandbox Fallback: guarantees users/testers are never locked out
-      console.log('⚡ Generating secure test verification code for sandbox environment:', target);
-      const sandboxCode = Math.floor(100000 + Math.random() * 900000).toString();
-      try {
-        sessionStorage.setItem('routemate_sandbox_otp', sandboxCode);
-        sessionStorage.setItem('routemate_dev_otp', sandboxCode);
-        sessionStorage.setItem('routemate_auth_target', target);
-      } catch (e) {}
-
       return {
-        success: true,
-        method: 'sandbox',
-        data: {
-          devOtp: sandboxCode,
-          notice: 'Test verification code generated for sandbox login.',
-          delivered: false
-        }
+        success: false,
+        error: 'Unable to send verification email. Please verify your email address and try again.'
       };
     },
 
-    // Verify 6-digit OTP Token (Resend with Supabase fallback)
+    // Verify 6-digit OTP Token (Resend HMAC verification with Supabase fallback)
     async verifyOtp(emailOrPhone, token) {
       const identifier = String(emailOrPhone || '').trim().toLowerCase();
       const cleanToken = String(token || '').trim();
@@ -201,8 +198,6 @@ const db = {
           try {
             sessionStorage.removeItem('routemate_otp_token');
             sessionStorage.removeItem('routemate_otp_expires');
-            sessionStorage.removeItem('routemate_sandbox_otp');
-            sessionStorage.removeItem('routemate_dev_otp');
           } catch (e) {}
 
           const cleanId = identifier.includes('@')
@@ -221,41 +216,17 @@ const db = {
               }
             }
           };
-        }
-      } catch (err) {
-        console.warn('Resend verify endpoint error, falling back:', err);
-      }
-
-      // Check Sandbox / Dev OTP
-      try {
-        const sandboxOtp = sessionStorage.getItem('routemate_sandbox_otp') || sessionStorage.getItem('routemate_dev_otp');
-        if ((sandboxOtp && sandboxOtp === cleanToken) || cleanToken === '123456' || cleanToken === '4821') {
-          console.log('✅ OTP verified via test sandbox code!');
-          try {
-            sessionStorage.removeItem('routemate_sandbox_otp');
-            sessionStorage.removeItem('routemate_dev_otp');
-          } catch (e) {}
-
-          const cleanId = identifier.includes('@')
-            ? 'usr_' + identifier.replace(/[^a-zA-Z0-9]/g, '_')
-            : 'usr_' + identifier.replace(/[^0-9]/g, '');
-
+        } else if (backendResult && backendResult.data && backendResult.data.error) {
           return {
-            success: true,
-            method: 'sandbox',
-            data: {
-              user: {
-                id: cleanId,
-                email: identifier.includes('@') ? identifier : '',
-                phone: !identifier.includes('@') ? identifier : '',
-                verified_at: new Date().toISOString()
-              }
-            }
+            success: false,
+            error: backendResult.data.error
           };
         }
-      } catch (e) {}
+      } catch (err) {
+        console.warn('Resend verify endpoint error, falling back to Supabase:', err);
+      }
 
-      // Supabase Native Verify Fallback
+      // Supabase Native Email OTP Verification
       const client = getSupabaseClient();
       if (client) {
         try {
@@ -280,7 +251,7 @@ const db = {
         }
       }
 
-      return { success: false, error: 'Invalid 6-digit verification code. Please check and try again.' };
+      return { success: false, error: 'Invalid 6-digit verification code. Please check your email and try again.' };
     },
 
     // Sign Out

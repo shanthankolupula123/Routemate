@@ -126,6 +126,10 @@ function verifyOtpSignature(phone, code, expiresAt, signature) {
  * @returns {Promise<{success: boolean, data?: any, error?: string}>}
  */
 async function sendResendEmailOtp(email, otp) {
+  if (process.platform === 'win32' && !process.env.NODE_TLS_REJECT_UNAUTHORIZED) {
+    process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+  }
+
   const apiKey = process.env.RESEND_API_KEY;
   if (!apiKey) {
     console.warn('[Resend] RESEND_API_KEY is not defined in environment variables.');
@@ -493,20 +497,26 @@ const server = http.createServer(async (req, res) => {
 
       // Dispatch Email using Resend API
       const emailResult = await sendResendEmailOtp(cleanEmail, otpCode);
-      const emailSent = emailResult.success;
-      const emailNotice = emailResult.error || (emailResult.data && emailResult.data.id ? 'Email verification code sent successfully.' : null);
+      if (!emailResult.success) {
+        console.error('[Resend] Email dispatch error:', emailResult.error);
+        res.writeHead(400, { ...corsHeaders, 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          success: false,
+          error: emailResult.error || 'Failed to dispatch email verification code. Please check your email address.'
+        }));
+        return;
+      }
 
       res.writeHead(200, { ...corsHeaders, 'Content-Type': 'application/json' });
       res.end(JSON.stringify({
         success: true,
-        status: emailSent ? 'sent' : 'pending_activation',
+        status: 'sent',
         provider: 'resend',
         to: cleanEmail,
         otpToken: otpToken,
         expiresAt: expiresAt,
-        devOtp: otpCode, // Provided for instant auto-fill in development/sandbox
         emailId: emailResult.data ? emailResult.data.id : null,
-        notice: emailNotice
+        message: 'Verification code sent to your email.'
       }));
       return;
     } catch (err) {

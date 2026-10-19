@@ -1,5 +1,26 @@
 // Serverless Function: POST /api/send-otp (Resend Email OTP API)
 const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
+
+// Load environment variables locally if .env is present
+const envPath = path.join(process.cwd(), '.env');
+if (fs.existsSync(envPath)) {
+  try {
+    const envContent = fs.readFileSync(envPath, 'utf8');
+    envContent.split(/\r?\n/).forEach(line => {
+      const trimmed = line.trim();
+      if (trimmed && !trimmed.startsWith('#')) {
+        const idx = trimmed.indexOf('=');
+        if (idx !== -1) {
+          const k = trimmed.slice(0, idx).trim();
+          const v = trimmed.slice(idx + 1).trim().replace(/^["']|["']$/g, '');
+          if (!process.env[k]) process.env[k] = v;
+        }
+      }
+    });
+  } catch (e) {}
+}
 
 const OTP_SECRET = process.env.OTP_SECRET || process.env.RAZORPAY_KEY_SECRET || 'routemate_otp_hmac_secret_2026';
 
@@ -16,6 +37,10 @@ function signOtp(email, code, expiresAt) {
  * @returns {Promise<{success: boolean, data?: any, error?: string}>}
  */
 async function sendResendEmailOtp(email, otp) {
+  if (process.platform === 'win32' && !process.env.NODE_TLS_REJECT_UNAUTHORIZED) {
+    process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+  }
+
   const apiKey = process.env.RESEND_API_KEY;
   if (!apiKey) {
     console.warn('[Resend] RESEND_API_KEY is not configured in environment variables.');
@@ -128,19 +153,23 @@ module.exports = async (req, res) => {
 
     // Dispatch Email via Resend API
     const emailResult = await sendResendEmailOtp(cleanEmail, otpCode);
-    const emailSent = emailResult.success;
-    const emailNotice = emailResult.error || (emailResult.data && emailResult.data.id ? 'Email verification code sent successfully.' : null);
+    if (!emailResult.success) {
+      console.error('[Resend] Email dispatch failed:', emailResult.error);
+      return res.status(400).json({
+        success: false,
+        error: emailResult.error || 'Failed to dispatch verification email. Please check your email address.'
+      });
+    }
 
     return res.status(200).json({
       success: true,
-      status: emailSent ? 'sent' : 'pending_activation',
+      status: 'sent',
       provider: 'resend',
       to: cleanEmail,
       otpToken: otpToken,
       expiresAt: expiresAt,
-      devOtp: otpCode, // Instant code provision so users are never blocked
       emailId: emailResult.data ? emailResult.data.id : null,
-      notice: emailNotice
+      message: 'Verification code sent to your email.'
     });
   } catch (err) {
     console.error('Exception in /api/send-otp:', err);

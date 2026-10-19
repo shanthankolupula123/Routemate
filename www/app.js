@@ -3578,25 +3578,12 @@ async function handleSendOtp() {
       result = await window.db.auth.signInWithOtp(email);
     }
 
-    // Ultimate Fail-safe: if result failed for any reason (network/CORS/rate-limit), generate an instant code
     if (!result || !result.success) {
-      console.warn('Dispatch failed, activating instant client-side verification fallback.');
-      const fallbackCode = Math.floor(100000 + Math.random() * 900000).toString();
-      try {
-        sessionStorage.setItem('routemate_local_otp', fallbackCode);
-        sessionStorage.setItem('routemate_sandbox_otp', fallbackCode);
-        sessionStorage.setItem('routemate_dev_otp', fallbackCode);
-        sessionStorage.setItem('routemate_auth_target', email);
-      } catch (e) {}
-      result = {
-        success: true,
-        method: 'sandbox',
-        data: {
-          devOtp: fallbackCode,
-          delivered: false,
-          notice: 'Instant verification code generated.'
-        }
-      };
+      const errMsg = (result && result.error) || 'Failed to send verification code. Please verify your email address.';
+      if (errorText) errorText.textContent = errMsg;
+      if (errorEl) errorEl.classList.remove('hidden');
+      showToast(errMsg, 'error');
+      return;
     }
 
     // Switch to OTP step
@@ -3604,64 +3591,26 @@ async function handleSendOtp() {
     const otpStep = document.getElementById('authStepOtp');
     const targetPhoneText = document.getElementById('authTargetPhoneText');
     const liveHint = document.getElementById('authOtpLiveHint');
-    const liveCodeEl = document.getElementById('authOtpLiveCode');
 
     if (targetPhoneText) targetPhoneText.textContent = email;
+    if (liveHint) liveHint.classList.add('hidden');
 
-    // Handle Resend / Sandbox response
     if (phoneStep) phoneStep.classList.add('hidden');
     if (otpStep) otpStep.classList.remove('hidden');
 
-    const otpCode = (result.data && result.data.devOtp) || sessionStorage.getItem('routemate_dev_otp') || '4821';
-    if (otpCode) {
-      if (liveCodeEl) liveCodeEl.textContent = otpCode;
-      if (liveHint) liveHint.classList.remove('hidden');
+    // Always clear all OTP input boxes so the user manually types the code from their email
+    const otpBoxes = document.querySelectorAll('.otp-box');
+    otpBoxes.forEach(b => { b.value = ''; });
+    if (otpBoxes[0]) setTimeout(() => otpBoxes[0].focus(), 150);
 
-      if (result.data && result.data.delivered === false) {
-        showToast(`Verification code: ${otpCode} (Auto-filled on screen)`, 'info');
-      } else {
-        showToast(`Verification code: ${otpCode} (Check Gmail Inbox / Spam)`, 'success');
-      }
-
-      const otpBoxes = document.querySelectorAll('.otp-box');
-      if (otpBoxes && otpBoxes.length >= 6) {
-        otpCode.split('').forEach((digit, i) => {
-          if (otpBoxes[i]) otpBoxes[i].value = digit;
-        });
-      }
-    } else {
-      if (liveHint) liveHint.classList.add('hidden');
-      showToast(`Verification code sent to ${email}. Check your inbox / spam.`, 'success');
-      const otpBoxes = document.querySelectorAll('.otp-box');
-      otpBoxes.forEach(b => b.value = '');
-      if (otpBoxes[0]) setTimeout(() => otpBoxes[0].focus(), 150);
-    }
+    showToast(`✉️ 6-digit verification code sent to ${email}. Please check your inbox.`, 'success');
 
     // Start 30s countdown
     startOtpCountdown();
 
   } catch (err) {
     console.error('Exception sending OTP:', err);
-    // Instant recovery fallback
-    const recoveryCode = '482188';
-    try {
-      sessionStorage.setItem('routemate_local_otp', recoveryCode);
-      sessionStorage.setItem('routemate_sandbox_otp', recoveryCode);
-    } catch(e) {}
-    const phoneStep = document.getElementById('authStepPhone');
-    const otpStep = document.getElementById('authStepOtp');
-    const liveHint = document.getElementById('authOtpLiveHint');
-    const liveCodeEl = document.getElementById('authOtpLiveCode');
-    if (phoneStep) phoneStep.classList.add('hidden');
-    if (otpStep) otpStep.classList.remove('hidden');
-    if (liveCodeEl) liveCodeEl.textContent = recoveryCode;
-    if (liveHint) liveHint.classList.remove('hidden');
-    const otpBoxes = document.querySelectorAll('.otp-box');
-    if (otpBoxes && otpBoxes.length >= 6) {
-      recoveryCode.split('').forEach((digit, i) => { if (otpBoxes[i]) otpBoxes[i].value = digit; });
-    }
-    showToast(`Verification code: ${recoveryCode} (Auto-filled)`, 'info');
-    startOtpCountdown();
+    showToast('Failed to dispatch verification email. Please check your network and try again.', 'error');
   } finally {
     if (sendBtn) sendBtn.disabled = false;
     if (sendBtnText) sendBtnText.textContent = 'Send Verification Code';
@@ -3722,28 +3671,26 @@ async function handleVerifyOtp() {
 
     const authIdentifier = state.authEmail || state.authPhone || 'user@routemate.in';
 
-    // 1. Direct match with on-screen displayed code, sandbox tokens, or universal test codes
-    const onScreenCode = document.getElementById('authOtpLiveCode')?.textContent?.trim();
-    const storedLocalOtp = sessionStorage.getItem('routemate_local_otp') || sessionStorage.getItem('routemate_sandbox_otp') || sessionStorage.getItem('routemate_dev_otp');
-
-    if ((onScreenCode && onScreenCode === code) || (storedLocalOtp && storedLocalOtp === code) || code === '123456' || code === '4821') {
-      verified = true;
-      authUser = {
-        id: 'usr_' + authIdentifier.replace(/[^a-zA-Z0-9]/g, '_'),
-        email: authIdentifier.includes('@') ? authIdentifier : '',
-        phone: !authIdentifier.includes('@') ? authIdentifier : '',
-        verified_at: new Date().toISOString()
-      };
-      console.log('✅ OTP verified instantly via matching display code / sandbox token:', code);
-    }
-
-    // 2. Try Backend / Supabase email OTP verification
-    if (!verified && window.db && window.db.auth) {
+    // Verify OTP code through Resend HMAC verification or Supabase Auth
+    if (window.db && window.db.auth) {
       const res = await window.db.auth.verifyOtp(authIdentifier, code);
       if (res && res.success && res.data) {
         verified = true;
         authUser = res.data.user;
+      } else if (res && res.error) {
+        if (errorText) errorText.textContent = res.error;
+        if (errorEl) errorEl.classList.remove('hidden');
+        showToast(res.error, 'error');
+        return;
       }
+    }
+
+    if (!verified) {
+      const msg = 'Invalid or expired verification code. Please check your email.';
+      if (errorText) errorText.textContent = msg;
+      if (errorEl) errorEl.classList.remove('hidden');
+      showToast(msg, 'error');
+      return;
     }
 
     if (verified) {
