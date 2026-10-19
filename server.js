@@ -181,6 +181,7 @@ async function sendResendEmailOtp(email, otp) {
         from: fromEmail,
         to: [cleanEmail],
         subject: `Your Routemate Verification Code: ${otp}`,
+        text: `Your Routemate verification code is: ${otp}\n\nThis 6-digit code is valid for 10 minutes.\nIf you did not request this code, please safely ignore this email.`,
         html: htmlContent
       })
     });
