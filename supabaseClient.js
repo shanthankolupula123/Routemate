@@ -75,7 +75,13 @@ const db = {
         candidateUrls.push(endpointPath);
       }
 
-      // 2. Local dev server candidates (for Live Server, local dev tools, Capacitor, or Android Emulator)
+      // 2. Direct production domain candidate (handles routemate.pro -> www.routemate.pro redirect, Capacitor apps, and Android)
+      const prodUrl = `https://www.routemate.pro${endpointPath}`;
+      if (!candidateUrls.includes(prodUrl)) {
+        candidateUrls.push(prodUrl);
+      }
+
+      // 3. Local dev server candidates (for Live Server, local dev tools, Capacitor, or Android Emulator)
       const isLocalOrApp = !origin || 
         origin.includes('localhost') || 
         origin.includes('127.0.0.1') || 
@@ -90,7 +96,7 @@ const db = {
         candidateUrls.push(`http://10.0.2.2:3000${endpointPath}`); // Android Emulator loopback
       }
 
-      // 3. Fallback
+      // 4. Fallback
       if (!candidateUrls.includes(endpointPath)) {
         candidateUrls.push(endpointPath);
       }
@@ -103,7 +109,8 @@ const db = {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload),
-            signal: controller.signal
+            signal: controller.signal,
+            redirect: 'follow'
           });
           clearTimeout(timeoutId);
 
