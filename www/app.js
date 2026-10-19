@@ -3586,16 +3586,22 @@ async function handleSendOtp() {
     const liveCodeEl = document.getElementById('authOtpLiveCode');
 
     if (targetPhoneText) targetPhoneText.textContent = email;
-    if (phoneStep) phoneStep.classList.add('hidden');
-    if (otpStep) otpStep.classList.remove('hidden');
 
-    // Handle Resend response
-    if (result.success) {
+    // Handle Resend / Sandbox response
+    if (result && result.success) {
+      if (phoneStep) phoneStep.classList.add('hidden');
+      if (otpStep) otpStep.classList.remove('hidden');
+
       const otpCode = result.data && result.data.devOtp;
       if (otpCode) {
         if (liveCodeEl) liveCodeEl.textContent = otpCode;
         if (liveHint) liveHint.classList.remove('hidden');
-        showToast(`Verification code: ${otpCode} (Email dispatched)`, 'success');
+
+        if (result.data && result.data.delivered === false) {
+          showToast(`Verification code: ${otpCode} (Sandbox test mode auto-filled)`, 'info');
+        } else {
+          showToast(`Verification code sent to ${email} (Code: ${otpCode})`, 'success');
+        }
 
         const otpBoxes = document.querySelectorAll('.otp-box');
         if (otpBoxes && otpBoxes.length >= 6) {
@@ -3605,21 +3611,25 @@ async function handleSendOtp() {
         }
       } else {
         if (liveHint) liveHint.classList.add('hidden');
-        showToast(`Verification code sent to ${email}`, 'success');
+        showToast(`Verification code sent to ${email}. Check your inbox.`, 'success');
         const otpBoxes = document.querySelectorAll('.otp-box');
         otpBoxes.forEach(b => b.value = '');
         if (otpBoxes[0]) setTimeout(() => otpBoxes[0].focus(), 150);
       }
+
+      // Start 30s countdown only on success
+      startOtpCountdown();
     } else {
+      // Stay or provide clear error feedback
+      if (phoneStep) phoneStep.classList.add('hidden');
+      if (otpStep) otpStep.classList.remove('hidden');
       if (liveHint) liveHint.classList.add('hidden');
       showToast(result.error || 'Failed to send verification code. Please check your email.', 'error');
       const otpBoxes = document.querySelectorAll('.otp-box');
       otpBoxes.forEach(b => b.value = '');
       if (otpBoxes[0]) setTimeout(() => otpBoxes[0].focus(), 150);
+      startOtpCountdown();
     }
-
-    // Start 30s countdown
-    startOtpCountdown();
 
   } catch (err) {
     console.error('Exception sending OTP:', err);
