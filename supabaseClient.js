@@ -757,6 +757,60 @@ const db = {
         console.warn('Exception deleting profile:', e);
         return { success: true };
       }
+    },
+
+    // Save & Persist Emergency Contact in Supabase & Local Cache
+    async saveEmergencyContact(profileIdOrPhone, contactObj) {
+      const client = getSupabaseClient();
+      const updateData = {
+        emergency_contact: contactObj,
+        emergency_contact_name: contactObj ? contactObj.name : null,
+        emergency_contact_phone: contactObj ? contactObj.phone : null,
+        emergency_contact_relation: contactObj ? (contactObj.relation || 'Parent') : null,
+        emergency_contact_updated_at: new Date().toISOString()
+      };
+
+      // Always save to localStorage backup
+      try {
+        if (contactObj) {
+          localStorage.setItem('routemate_emergency_contact', JSON.stringify(contactObj));
+        } else {
+          localStorage.removeItem('routemate_emergency_contact');
+        }
+      } catch (e) {}
+
+      if (!client) return { success: true, localOnly: true };
+
+      try {
+        let query = client.from('profiles').update(updateData);
+        if (typeof profileIdOrPhone === 'string' && (profileIdOrPhone.startsWith('+') || /^\d{10,}$/.test(profileIdOrPhone.replace(/[\s+-]/g, '')))) {
+          query = query.eq('phone', profileIdOrPhone);
+        } else if (typeof profileIdOrPhone === 'string' && profileIdOrPhone.includes('@')) {
+          query = query.eq('email', profileIdOrPhone);
+        } else {
+          query = query.eq('id', profileIdOrPhone);
+        }
+
+        const { data, error } = await query.select();
+        if (error) {
+          // Fallback if specific columns don't exist
+          try {
+            let fallbackQuery = client.from('profiles').update({ emergency_contact: contactObj });
+            if (typeof profileIdOrPhone === 'string' && (profileIdOrPhone.startsWith('+') || /^\d{10,}$/.test(profileIdOrPhone.replace(/[\s+-]/g, '')))) {
+              fallbackQuery = fallbackQuery.eq('phone', profileIdOrPhone);
+            } else {
+              fallbackQuery = fallbackQuery.eq('id', profileIdOrPhone);
+            }
+            const { data: fbData } = await fallbackQuery.select();
+            return { success: true, data: fbData };
+          } catch (fbErr) {}
+          console.warn('Supabase emergency contact update notice:', error.message);
+        }
+        return { success: !error, data };
+      } catch (e) {
+        console.warn('Exception saving emergency contact to Supabase:', e);
+        return { success: true, localOnly: true };
+      }
     }
   },
 
@@ -1098,6 +1152,190 @@ const db = {
       }
 
       return { success: true, identifier: profileIdOrPhone, updateData };
+    },
+
+    // Administrative Moderation: Flag / Unflag Review as Safety Infraction
+    async flagFeedback(feedbackId, isFlagged = true, reason = 'Flagged by supervisor for safety review') {
+      const client = getSupabaseClient();
+      const flaggedAt = isFlagged ? new Date().toISOString() : null;
+
+      // 1. Update in local storage feedbacks
+      let targetFeedback = null;
+      try {
+        let stored = JSON.parse(localStorage.getItem('routemate_feedbacks') || '[]');
+        const fb = stored.find(f => f.id === feedbackId);
+        if (fb) {
+          fb.is_flagged = isFlagged;
+          fb.flagged_at = flaggedAt;
+          fb.flag_reason = reason;
+          targetFeedback = fb;
+          localStorage.setItem('routemate_feedbacks', JSON.stringify(stored));
+        }
+      } catch (e) {}
+
+      // 2. Call server endpoint
+      try {
+        await fetch('/api/feedbacks/flag', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ feedbackId, isFlagged, reason })
+        });
+      } catch (e) {}
+
+      // 3. Update Supabase feedbacks table
+      if (client) {
+        try {
+          await client.from('feedbacks').update({
+            is_flagged: isFlagged,
+            flagged_at: flaggedAt,
+            flag_reason: reason
+          }).eq('id', feedbackId);
+        } catch (e) {
+          console.warn('Supabase flagFeedback note:', e.message);
+        }
+      }
+
+      // 4. Broadcast via local BroadcastChannel
+      try {
+        const ch = new BroadcastChannel('routemate_admin_channel');
+        ch.postMessage({ type: 'FEEDBACK_FLAGGED', feedbackId, isFlagged, reason });
+        ch.close();
+      } catch (e) {}
+
+      return { success: true, feedbackId, isFlagged, feedback: targetFeedback };
+    },
+
+    // Administrative Moderation: Adjust / Lower Driver Rating
+    async adjustFeedbackRating(feedbackId, newRating, reason = 'Rating adjusted by administrator') {
+      const client = getSupabaseClient();
+      const numRating = parseFloat(newRating);
+      let targetFeedback = null;
+
+      // 1. Update in local storage feedbacks
+      try {
+        let stored = JSON.parse(localStorage.getItem('routemate_feedbacks') || '[]');
+        const fb = stored.find(f => f.id === feedbackId);
+        if (fb) {
+          fb.original_rating = fb.rating;
+          fb.rating = numRating;
+          fb.is_moderated = true;
+          fb.moderated_at = new Date().toISOString();
+          fb.moderation_reason = reason;
+          targetFeedback = fb;
+          localStorage.setItem('routemate_feedbacks', JSON.stringify(stored));
+
+          // Recalculate driver composite rating
+          if (fb.driver_name || fb.driver_phone) {
+            db.feedbacks.recalculateDriverRating(fb.driver_name, fb.driver_phone, numRating);
+          }
+        }
+      } catch (e) {}
+
+      // 2. Call server endpoint
+      try {
+        await fetch('/api/feedbacks/adjust-rating', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ feedbackId, newRating: numRating, reason })
+        });
+      } catch (e) {}
+
+      // 3. Update Supabase feedbacks table
+      if (client) {
+        try {
+          await client.from('feedbacks').update({
+            rating: numRating,
+            is_moderated: true,
+            moderated_at: new Date().toISOString(),
+            moderation_reason: reason
+          }).eq('id', feedbackId);
+
+          if (targetFeedback && targetFeedback.driver_phone) {
+            const composite = db.feedbacks.getDriverRating(targetFeedback.driver_name, targetFeedback.driver_phone);
+            if (composite) {
+              await client.from('profiles').update({ rating: composite.average }).eq('phone', targetFeedback.driver_phone);
+            }
+          }
+        } catch (e) {
+          console.warn('Supabase adjustFeedbackRating note:', e.message);
+        }
+      }
+
+      // 4. Broadcast via local BroadcastChannel
+      try {
+        const ch = new BroadcastChannel('routemate_admin_channel');
+        ch.postMessage({ type: 'FEEDBACK_RATING_ADJUSTED', feedbackId, newRating: numRating, reason });
+        ch.close();
+      } catch (e) {}
+
+      return { success: true, feedbackId, newRating: numRating, feedback: targetFeedback };
+    },
+
+    // Real-Time Admin Synchronization Channel Subscription
+    subscribeRealtime(onEventCallback) {
+      const client = getSupabaseClient();
+      let supabaseChannel = null;
+
+      // 1. Supabase WebSockets Realtime Channel
+      if (client) {
+        try {
+          supabaseChannel = client.channel('routemate_admin_realtime')
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, (payload) => {
+              console.log('⚡ Realtime Admin: profile change', payload);
+              if (typeof onEventCallback === 'function') onEventCallback('profiles', payload);
+            })
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'feedbacks' }, (payload) => {
+              console.log('⚡ Realtime Admin: feedback change', payload);
+              if (typeof onEventCallback === 'function') onEventCallback('feedbacks', payload);
+            })
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'safety_alerts' }, (payload) => {
+              console.log('⚡ Realtime Admin: safety alert', payload);
+              if (typeof onEventCallback === 'function') onEventCallback('safety_alerts', payload);
+            })
+            .subscribe((status) => {
+              console.log('🛡️ Admin Realtime Supabase Channel status:', status);
+            });
+        } catch (err) {
+          console.warn('Error creating Supabase admin realtime channel:', err);
+        }
+      }
+
+      // 2. Cross-tab BroadcastChannel for zero-latency local tab synchronization
+      let broadcastCh = null;
+      try {
+        broadcastCh = new BroadcastChannel('routemate_admin_channel');
+        broadcastCh.onmessage = (event) => {
+          if (event && event.data && typeof onEventCallback === 'function') {
+            onEventCallback('local_broadcast', event.data);
+          }
+        };
+      } catch (e) {}
+
+      // 3. Server SSE connection for live updates
+      let sseSource = null;
+      try {
+        sseSource = new EventSource('/api/events');
+        sseSource.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data);
+            if (typeof onEventCallback === 'function') onEventCallback('sse_event', data);
+          } catch (e) {}
+        };
+      } catch (e) {}
+
+      return {
+        unsubscribe: () => {
+          if (supabaseChannel && client) {
+            try { client.removeChannel(supabaseChannel); } catch (e) {}
+          }
+          if (broadcastCh) {
+            try { broadcastCh.close(); } catch (e) {}
+          }
+          if (sseSource) {
+            try { sseSource.close(); } catch (e) {}
+          }
+        }
+      };
     }
   },
 
@@ -1874,6 +2112,89 @@ const db = {
       } catch (e) {}
 
       return [];
+    }
+  },
+
+  // ==========================================
+  // SAFETY & SOS DISPATCH MODULE
+  // ==========================================
+  safety: {
+    async reportAlert(alertData) {
+      const payload = {
+        id: alertData.id || ('SOS-' + Date.now().toString(36).toUpperCase() + '-' + Math.floor(100 + Math.random() * 900)),
+        user_id: alertData.userId || alertData.user_id || 'USR-COMMUTER',
+        user_name: alertData.userName || alertData.user_name || 'Commuter',
+        user_phone: alertData.userPhone || alertData.user_phone || '+91 98480 23145',
+        emergency_contact_name: alertData.emergencyContactName || alertData.emergency_contact_name || null,
+        emergency_contact_phone: alertData.emergencyContactPhone || alertData.emergency_contact_phone || null,
+        latitude: alertData.latitude || null,
+        longitude: alertData.longitude || null,
+        google_maps_url: alertData.googleMapsUrl || alertData.google_maps_url || null,
+        route: alertData.route || 'Uppal ➔ Jangaon',
+        driver_info: alertData.driverInfo || alertData.driver_info || 'Commuter Vehicle',
+        status: 'ACTIVE_EMERGENCY',
+        created_at: new Date().toISOString()
+      };
+
+      // 1. Post to local server endpoint
+      try {
+        await fetch('/api/safety-alerts', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+      } catch (e) {}
+
+      // 2. Insert to Supabase safety_alerts table if available
+      const client = getSupabaseClient();
+      if (client) {
+        try {
+          await client.from('safety_alerts').insert([payload]);
+        } catch (e) {
+          console.warn('Supabase safety_alerts insert note:', e.message);
+        }
+      }
+
+      // 3. Store locally in localStorage
+      try {
+        let stored = JSON.parse(localStorage.getItem('routemate_safety_alerts') || '[]');
+        stored.unshift(payload);
+        localStorage.setItem('routemate_safety_alerts', JSON.stringify(stored));
+      } catch (e) {}
+
+      // 4. Broadcast via local BroadcastChannel
+      try {
+        const ch = new BroadcastChannel('routemate_admin_channel');
+        ch.postMessage({ type: 'SAFETY_ALERT_TRIGGERED', data: payload });
+        ch.close();
+      } catch (e) {}
+
+      return { success: true, alert: payload };
+    },
+
+    async getAlerts() {
+      // 1. Try local server
+      try {
+        const res = await fetch('/api/safety-alerts');
+        if (res.ok) {
+          const data = await res.json();
+          if (data && Array.isArray(data.alerts) && data.alerts.length > 0) return data.alerts;
+        }
+      } catch (e) {}
+
+      // 2. Try Supabase
+      const client = getSupabaseClient();
+      if (client) {
+        try {
+          const { data, error } = await client.from('safety_alerts').select('*').order('created_at', { ascending: false });
+          if (!error && data && data.length > 0) return data;
+        } catch (e) {}
+      }
+
+      // 3. Fallback to localStorage
+      try {
+        return JSON.parse(localStorage.getItem('routemate_safety_alerts') || '[]');
+      } catch (e) { return []; }
     }
   }
 };

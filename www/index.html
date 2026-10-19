@@ -1215,8 +1215,8 @@
         </div>
 
         <div class="mt-4 space-y-3 text-xs">
-          <!-- SOS 112 & Safety Help Dual Action Cards -->
-          <div class="bg-rose-50 border border-rose-200 rounded-2xl p-3.5 space-y-2.5">
+          <!-- SOS 112 Action Card -->
+          <div class="bg-rose-50 border border-rose-200 rounded-2xl p-3.5">
             <div class="flex items-center justify-between">
               <div>
                 <h4 class="font-bold text-rose-900 flex items-center gap-1.5">
@@ -1225,24 +1225,9 @@
                 </h4>
                 <p class="text-[10px] text-rose-700 mt-0.5">Direct connection with Police & Highway Patrol</p>
               </div>
-              <button onclick="showToast('Calling Highway Emergency Police Helpline (112)...', 'error')" class="px-3.5 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl font-bold text-xs shadow-sm active:scale-95 transition">
+              <a href="tel:112" onclick="showToast('Calling Highway Emergency Police Helpline (112)...', 'error')" class="px-3.5 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl font-bold text-xs shadow-sm active:scale-95 transition flex items-center gap-1 cursor-pointer">
                 SOS Call
-              </button>
-            </div>
-
-            <!-- Emergency Safety Help Desk -->
-            <div class="pt-2 border-t border-rose-200/70 flex items-center justify-between">
-              <div>
-                <h4 class="font-bold text-slate-800 flex items-center gap-1.5">
-                  <i data-lucide="life-buoy" class="w-4 h-4 text-blue-600"></i>
-                  Routemate 24x7 Safety Help
-                </h4>
-                <p class="text-[10px] text-slate-500 mt-0.5">Live Incident Support Desk & Ride Monitor</p>
-              </div>
-              <button onclick="triggerEmergencyHelp()" class="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold text-xs shadow-xs active:scale-95 transition flex items-center gap-1">
-                <i data-lucide="shield" class="w-3.5 h-3.5"></i>
-                <span>Get Help</span>
-              </button>
+              </a>
             </div>
           </div>
 
@@ -1478,11 +1463,12 @@
             </div>
 
             <!-- Emergency Quick Access on Map -->
-            <div class="absolute top-3 right-3 z-10 flex flex-col gap-1.5">
-              <button onclick="showToast('Calling Emergency Services 112...', 'error')" title="Emergency SOS" class="w-8 h-8 rounded-full bg-rose-600 text-white shadow-md flex items-center justify-center font-bold text-xs hover:bg-rose-700 transition">
-                SOS
+            <div class="absolute top-3 right-3 z-10 flex flex-col gap-2 items-end">
+              <button type="button" onclick="triggerLiveRideSos()" title="Instant Emergency SOS (Live GPS Broadcast)" class="h-9 px-3 rounded-full bg-rose-600 hover:bg-rose-700 text-white shadow-lg shadow-rose-600/40 flex items-center justify-center gap-1.5 font-black text-xs transition active:scale-95 animate-pulse cursor-pointer border-2 border-white">
+                <i data-lucide="shield-alert" class="w-4 h-4 text-white"></i>
+                <span>SOS</span>
               </button>
-              <button onclick="triggerEmergencyHelp()" title="Safety Help Desk" class="w-8 h-8 rounded-full bg-white text-blue-600 shadow-md border border-slate-200 flex items-center justify-center transition hover:bg-blue-50">
+              <button type="button" onclick="triggerEmergencyHelp()" title="Safety Help Desk" class="w-8 h-8 rounded-full bg-white/95 text-blue-600 shadow-md border border-slate-200 flex items-center justify-center transition hover:bg-blue-50 cursor-pointer">
                 <i data-lucide="life-buoy" class="w-4 h-4"></i>
               </button>
             </div>
@@ -1490,6 +1476,26 @@
 
           <!-- Trip Details & Actions -->
           <div class="p-4 space-y-3 overflow-y-auto flex-1">
+            <!-- Prominent Active Ride SOS Dispatch Quick Bar -->
+            <div class="p-3 bg-gradient-to-r from-rose-50 via-red-50 to-rose-100/70 border border-rose-200 rounded-2xl flex items-center justify-between gap-3 shadow-2xs">
+              <div class="flex items-center gap-2.5 min-w-0">
+                <div class="w-9 h-9 rounded-xl bg-rose-600 text-white flex items-center justify-center flex-shrink-0 animate-pulse shadow-sm">
+                  <i data-lucide="shield-alert" class="w-5 h-5"></i>
+                </div>
+                <div class="min-w-0">
+                  <div class="flex items-center gap-1.5">
+                    <h4 class="text-xs font-black text-rose-950 uppercase tracking-tight">Active Ride Safety & SOS</h4>
+                    <span class="text-[9px] font-extrabold bg-rose-200 text-rose-900 px-1.5 py-0.2 rounded-full uppercase">Live</span>
+                  </div>
+                  <p class="text-[10px] text-rose-700 font-medium truncate">1-Tap Live GPS Broadcast to Emergency Contact & 112</p>
+                </div>
+              </div>
+              <button type="button" onclick="triggerLiveRideSos()" class="py-2 px-3 bg-rose-600 hover:bg-rose-700 active:scale-95 text-white rounded-xl text-xs font-black shadow-md shadow-rose-600/30 transition flex items-center gap-1.5 cursor-pointer flex-shrink-0">
+                <i data-lucide="bell-ring" class="w-3.5 h-3.5"></i>
+                <span>SOS Alert</span>
+              </button>
+            </div>
+
             <!-- Progress Bar -->
             <div>
               <div class="flex justify-between text-[11px] font-semibold text-slate-600 mb-1">
@@ -2900,6 +2906,155 @@
         <button type="button" onclick="closeModal('accountBlockedModal')" class="w-full py-2.5 bg-slate-900 hover:bg-black text-white rounded-xl text-xs font-bold transition cursor-pointer">
           Dismiss Notice
         </button>
+      </div>
+    </div>
+
+    <!-- 7. Active Ride Emergency SOS & Live GPS Broadcast Modal -->
+    <div id="activeRideSosModal" class="modal-backdrop fixed inset-0 z-[120] flex items-center justify-center p-3 sm:p-4 hidden" style="z-index: 99999;">
+      <div class="bg-white rounded-3xl max-w-sm w-full shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200 border-2 border-rose-500">
+        <!-- SOS Modal Header -->
+        <div class="p-4 bg-gradient-to-r from-rose-600 via-rose-700 to-red-800 text-white flex items-center justify-between">
+          <div class="flex items-center gap-2.5">
+            <div class="w-10 h-10 rounded-2xl bg-white/20 backdrop-blur border border-white/30 flex items-center justify-center animate-pulse">
+              <i data-lucide="shield-alert" class="w-6 h-6 text-white"></i>
+            </div>
+            <div>
+              <div class="flex items-center gap-1.5">
+                <h3 class="text-base font-black tracking-tight text-white uppercase">Emergency SOS</h3>
+                <span class="text-[9px] font-extrabold bg-white text-rose-700 px-1.5 py-0.2 rounded-full uppercase">Live Alert</span>
+              </div>
+              <p class="text-[11px] text-rose-100 font-medium">Highway Commuter Safety & Location Dispatch</p>
+            </div>
+          </div>
+          <button type="button" onclick="closeActiveRideSosModal()" class="p-1.5 text-white/80 hover:text-white rounded-full hover:bg-white/10 transition cursor-pointer">
+            <i data-lucide="x" class="w-5 h-5"></i>
+          </button>
+        </div>
+
+        <div class="p-4 sm:p-5 space-y-3.5 text-xs">
+          <!-- Live GPS Coordinates & Location Banner -->
+          <div id="sosLiveLocationContainer" class="p-3 bg-rose-50 border border-rose-200 rounded-2xl space-y-1.5">
+            <div class="flex items-center justify-between">
+              <span class="text-[10px] font-bold uppercase tracking-wider text-rose-700 flex items-center gap-1">
+                <i data-lucide="map-pin" class="w-3.5 h-3.5 text-rose-600"></i>
+                <span>Captured Live Location</span>
+              </span>
+              <span id="sosGpsStatusBadge" class="text-[9px] font-bold bg-amber-100 text-amber-900 border border-amber-300 px-2 py-0.2 rounded-full flex items-center gap-1">
+                <i data-lucide="loader-2" class="w-3 h-3 animate-spin"></i>
+                <span>Locking GPS...</span>
+              </span>
+            </div>
+            <p id="sosCoordsText" class="font-mono font-bold text-slate-800 text-[11px]">Acquiring precise satellite GPS coordinates...</p>
+            <div class="flex items-center gap-2 pt-1">
+              <a id="sosGoogleMapsLink" href="#" target="_blank" class="text-[10px] font-bold text-blue-600 hover:underline flex items-center gap-1">
+                <i data-lucide="external-link" class="w-3 h-3"></i>
+                <span>Google Maps</span>
+              </a>
+              <span class="text-slate-300">•</span>
+              <button type="button" onclick="copySosLocationLink()" class="text-[10px] font-bold text-slate-600 hover:text-slate-900 flex items-center gap-1 cursor-pointer">
+                <i data-lucide="copy" class="w-3 h-3"></i>
+                <span>Copy Link</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Active Corridor Ride Summary -->
+          <div class="p-3 bg-slate-50 border border-slate-200 rounded-2xl text-[11px] space-y-1">
+            <div class="flex justify-between text-slate-500">
+              <span>Route:</span>
+              <strong id="sosRouteDisplay" class="text-slate-800 font-bold truncate max-w-[200px]">Uppal ➔ Jangaon</strong>
+            </div>
+            <div class="flex justify-between text-slate-500">
+              <span>Driver / Vehicle:</span>
+              <strong id="sosDriverDisplay" class="text-slate-800 font-bold truncate max-w-[200px]">Ramesh Kumar (TS 08 EK 4321)</strong>
+            </div>
+          </div>
+
+          <!-- Saved Emergency Contact Alert Card -->
+          <div id="sosEmergencyContactCard" class="p-3.5 bg-gradient-to-r from-rose-50 to-orange-50 border border-rose-200 rounded-2xl space-y-2.5">
+            <!-- Populated dynamically via renderSosEmergencyContactActions() -->
+          </div>
+
+          <!-- Direct Emergency Helplines (Police 112 & 100) -->
+          <div class="grid grid-cols-2 gap-2">
+            <a href="tel:112" class="py-3 px-3 bg-rose-600 hover:bg-rose-700 text-white rounded-2xl font-black text-xs text-center shadow-md shadow-rose-600/30 transition flex items-center justify-center gap-2 cursor-pointer active:scale-95">
+              <i data-lucide="phone-call" class="w-4 h-4"></i>
+              <span>Call 112 (Police)</span>
+            </a>
+            <a href="tel:100" class="py-3 px-3 bg-slate-900 hover:bg-black text-white rounded-2xl font-black text-xs text-center shadow-md transition flex items-center justify-center gap-2 cursor-pointer active:scale-95">
+              <i data-lucide="shield" class="w-4 h-4 text-blue-400"></i>
+              <span>Dial 100 (Telangana)</span>
+            </a>
+          </div>
+
+          <!-- Safety Desk Note -->
+          <div class="p-2.5 bg-slate-100 rounded-xl text-[10px] text-slate-600 flex items-start gap-2">
+            <i data-lucide="info" class="w-4 h-4 text-slate-500 flex-shrink-0 mt-0.5"></i>
+            <span>This emergency incident is automatically logged in the Routemate Safety Desk and Supabase database.</span>
+          </div>
+
+          <button type="button" onclick="closeActiveRideSosModal()" class="w-full py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition cursor-pointer">
+            Dismiss / I am Safe
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 8. Administrative Adjust Driver Rating Modal -->
+    <div id="adminAdjustRatingModal" class="modal-backdrop fixed inset-0 z-60 flex items-center justify-center p-4 hidden" style="z-index: 99999;">
+      <div class="bg-white rounded-3xl max-w-sm w-full shadow-2xl p-6 border border-slate-200">
+        <div class="flex items-center justify-between pb-3 border-b border-slate-100">
+          <div class="flex items-center gap-2">
+            <div class="w-8 h-8 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center">
+              <i data-lucide="edit-3" class="w-4 h-4"></i>
+            </div>
+            <div>
+              <h4 class="text-sm font-bold text-slate-900">Adjust Driver Rating</h4>
+              <p class="text-[10px] text-slate-500">Administrative Rating Moderation</p>
+            </div>
+          </div>
+          <button type="button" onclick="closeModal('adminAdjustRatingModal')" class="p-1 text-slate-400 hover:text-slate-600 rounded-full cursor-pointer">
+            <i data-lucide="x" class="w-4 h-4"></i>
+          </button>
+        </div>
+
+        <form onsubmit="handleConfirmAdminAdjustRating(event)" class="mt-4 space-y-3.5 text-xs">
+          <input type="hidden" id="adminAdjustFeedbackId" value="" />
+          <input type="hidden" id="adminAdjustDriverIdentifier" value="" />
+
+          <div>
+            <span class="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">Driver</span>
+            <p id="adminAdjustDriverName" class="font-extrabold text-slate-900 text-sm">Driver Name</p>
+            <p id="adminAdjustCurrentScore" class="text-[11px] text-slate-500 font-medium">Current Review Rating: 5.0★</p>
+          </div>
+
+          <div>
+            <label class="block font-bold text-slate-700 mb-1">New Adjusted Rating (1.0 - 5.0)</label>
+            <select id="adminAdjustNewRating" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 font-bold text-slate-900 focus:outline-none focus:border-amber-500 cursor-pointer">
+              <option value="1.0">1.0★ — Severe Infraction / Penalty</option>
+              <option value="2.0">2.0★ — Poor / Safety Concern</option>
+              <option value="3.0">3.0★ — Average / Cautionary</option>
+              <option value="4.0">4.0★ — Good</option>
+              <option value="4.8">4.8★ — Excellent Commuter</option>
+              <option value="5.0">5.0★ — Flawless Standard</option>
+            </select>
+          </div>
+
+          <div>
+            <label class="block font-bold text-slate-700 mb-1">Moderation Note / Reason</label>
+            <textarea id="adminAdjustReasonText" rows="2.5" required placeholder="State reason for rating adjustment (e.g. verified passenger safety report, dispute resolution)..." class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 font-medium text-slate-900 focus:outline-none focus:border-amber-500 text-xs"></textarea>
+          </div>
+
+          <div class="flex items-center gap-2 pt-1">
+            <button type="button" onclick="closeModal('adminAdjustRatingModal')" class="w-1/2 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-bold transition cursor-pointer">
+              Cancel
+            </button>
+            <button type="submit" class="w-1/2 py-2.5 bg-amber-500 hover:bg-amber-600 text-slate-950 rounded-xl font-bold transition shadow-md shadow-amber-500/25 flex items-center justify-center gap-1 cursor-pointer">
+              <i data-lucide="check" class="w-3.5 h-3.5"></i>
+              <span>Save Rating</span>
+            </button>
+          </div>
+        </form>
       </div>
     </div>
 

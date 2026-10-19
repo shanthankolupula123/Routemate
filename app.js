@@ -3547,6 +3547,16 @@ function updateProfileDisplay() {
     }
   }
 
+  // Sync Emergency Contact from profile if available
+  if (!state.emergencyContact && user && (user.emergency_contact || user.emergency_contact_phone)) {
+    state.emergencyContact = user.emergency_contact || {
+      name: user.emergency_contact_name || 'Emergency Contact',
+      phone: user.emergency_contact_phone,
+      relation: user.emergency_contact_relation || 'Parent'
+    };
+    try { localStorage.setItem('routemate_emergency_contact', JSON.stringify(state.emergencyContact)); } catch (e) {}
+  }
+
   renderEmergencyContact();
   renderFavouritesList();
   renderKycStatus();
@@ -5049,11 +5059,39 @@ async function openAdminPanelModal() {
   modal.classList.remove('hidden');
   switchAdminSection(state.activeAdminSection || 'kyc');
   loadAdminFeedbacks(false);
+
+  // Subscribe to real-time administrative sync (KYC submissions, customer feedback, and SOS alerts)
+  if (!state.adminRealtimeSubscribed && window.db && window.db.admin && window.db.admin.subscribeRealtime) {
+    state.adminRealtimeSubscribed = true;
+    state.adminRealtimeSubscription = window.db.admin.subscribeRealtime((eventType, payload) => {
+      console.log(`🛡️ Admin Portal Realtime Sync: [${eventType}]`, payload);
+      // Real-time KYC updates
+      if (eventType === 'profiles' || (payload && (payload.type === 'KYC_SUBMITTED' || payload.event === 'new_kyc_submission'))) {
+        loadAdminKycSubmissions();
+        showToast('🔔 Real-time: New Driver KYC submission received!', 'info');
+      }
+      // Real-time Feedback & Ratings updates
+      if (eventType === 'feedbacks' || (payload && (payload.type === 'FEEDBACK_SUBMITTED' || payload.type === 'FEEDBACK_FLAGGED' || payload.type === 'FEEDBACK_RATING_ADJUSTED' || payload.event === 'new_feedback' || payload.event === 'feedback_flagged' || payload.event === 'feedback_rating_adjusted'))) {
+        loadAdminFeedbacks(false);
+        showToast('⭐ Real-time: Customer review stream updated!', 'info');
+      }
+      // Real-time Emergency SOS alerts
+      if (eventType === 'safety_alerts' || (payload && (payload.type === 'SAFETY_ALERT_TRIGGERED' || payload.event === 'safety_alert_triggered'))) {
+        showToast('🚨 Real-time: SOS Emergency Alert broadcast triggered!', 'error');
+        playEmergencyAlarmSound();
+      }
+    });
+  }
+
   if (window.lucide) lucide.createIcons();
 }
 
 function handleAdminLogout() {
   state.isAdminAuthenticated = false;
+  if (state.adminRealtimeSubscription && typeof state.adminRealtimeSubscription.unsubscribe === 'function') {
+    try { state.adminRealtimeSubscription.unsubscribe(); } catch(e){}
+    state.adminRealtimeSubscribed = false;
+  }
   closeModal('adminPanelModal');
   showToast('Admin session signed out', 'info');
 }
@@ -5508,6 +5546,12 @@ function renderAdminFeedbacks() {
                     Active Driver
                   </span>
                 `}
+                ${fb.is_flagged ? `
+                  <span class="bg-rose-600 text-white font-extrabold uppercase text-[9px] px-2 py-0.5 rounded-full flex items-center gap-1 shadow-xs animate-pulse flex-shrink-0">
+                    <i data-lucide="flag" class="w-2.5 h-2.5 fill-white"></i>
+                    <span>FLAGGED</span>
+                  </span>
+                ` : ''}
               </div>
               <p class="text-[11px] text-slate-500 truncate flex items-center gap-1.5 mt-0.5">
                 <span class="font-mono">${driverPhone || 'No Phone'}</span>
@@ -5546,6 +5590,12 @@ function renderAdminFeedbacks() {
               <span>Safety Concern</span>
             </span>
           ` : ''}
+
+          ${fb.is_moderated ? `
+            <span class="bg-amber-100 text-amber-900 font-bold px-2 py-0.5 rounded-md border border-amber-300 ml-auto">
+              Adjusted by Admin (${fb.moderation_reason || 'Moderated'})
+            </span>
+          ` : ''}
         </div>
 
         <!-- Tags -->
@@ -5561,10 +5611,19 @@ function renderAdminFeedbacks() {
         </div>
 
         <!-- Moderation Action Controls -->
-        <div class="mt-3 pt-2.5 border-t border-slate-100 flex items-center justify-between gap-2">
-          <div class="text-[10px] text-slate-500 flex items-center gap-1">
-            <i data-lucide="shield-check" class="w-3.5 h-3.5 text-purple-600"></i>
-            <span>Admin Moderation Desk</span>
+        <div class="mt-3 pt-2.5 border-t border-slate-100 flex items-center justify-between gap-2 flex-wrap">
+          <div class="flex items-center gap-2">
+            <!-- Flag / Unflag Safety Infraction -->
+            <button type="button" onclick="handleAdminToggleFlagFeedback('${fb.id}')" class="py-1.5 px-2.5 ${fb.is_flagged ? 'bg-rose-100 hover:bg-rose-200 text-rose-800 border border-rose-300' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'} rounded-xl text-xs font-bold transition flex items-center gap-1 cursor-pointer active:scale-95" title="${fb.is_flagged ? 'Remove Safety Flag' : 'Flag as Critical Safety Infraction'}">
+              <i data-lucide="flag" class="w-3.5 h-3.5 ${fb.is_flagged ? 'text-rose-600 fill-rose-600' : 'text-slate-500'}"></i>
+              <span>${fb.is_flagged ? 'Flagged Infraction' : 'Flag Issue'}</span>
+            </button>
+
+            <!-- Adjust Driver Rating -->
+            <button type="button" onclick="openAdminAdjustRatingModal('${fb.id}', '${driverName.replace(/'/g, "\\'")}', ${ratingNum}, '${driverPhone.replace(/'/g, "\\'")}')" class="py-1.5 px-2.5 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 rounded-xl text-xs font-bold transition flex items-center gap-1 cursor-pointer active:scale-95" title="Adjust Driver Rating Score">
+              <i data-lucide="edit-3" class="w-3.5 h-3.5 text-amber-600"></i>
+              <span>Adjust Rating</span>
+            </button>
           </div>
 
           <div class="flex items-center gap-1.5">
@@ -5574,10 +5633,17 @@ function renderAdminFeedbacks() {
               </a>
             ` : ''}
 
+            ${riderPhone ? `
+              <button type="button" onclick="openAdminBlockModal('${riderPhone}', '${riderName.replace(/'/g, "\\'")}', 'Inappropriate passenger conduct', 'Administrative suspension for policy infraction during corridor commute.')" class="py-1.5 px-2.5 bg-slate-100 hover:bg-rose-100 text-slate-700 hover:text-rose-700 rounded-xl text-xs font-bold transition flex items-center gap-1 cursor-pointer" title="Suspend Rider Account for Rule Violation">
+                <i data-lucide="user-x" class="w-3.5 h-3.5"></i>
+                <span>Suspend Rider</span>
+              </button>
+            ` : ''}
+
             ${!isDriverBlocked ? `
               <button type="button" onclick="openAdminBlockFromFeedback('${driverPhone || driverName}', '${driverName.replace(/'/g, "\\'")}', '${feedbackText.replace(/'/g, "\\'").replace(/\n/g, ' ')}', ${ratingNum})" class="py-1.5 px-3 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold transition shadow-xs flex items-center gap-1.5 cursor-pointer active:scale-95" title="Suspend or Block Driver">
                 <i data-lucide="shield-alert" class="w-3.5 h-3.5"></i>
-                <span>Suspend / Block Driver</span>
+                <span>Suspend Driver</span>
               </button>
             ` : `
               <button type="button" onclick="handleAdminUnblockDriver('${driverPhone || driverName}')" class="py-1.5 px-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition shadow-xs flex items-center gap-1.5 cursor-pointer active:scale-95" title="Restore Driver Account">
@@ -5593,6 +5659,91 @@ function renderAdminFeedbacks() {
 
   container.innerHTML = html;
   if (window.lucide) lucide.createIcons();
+}
+
+// Administrative Moderation: Toggle Flag on Feedback Review
+async function handleAdminToggleFlagFeedback(feedbackId) {
+  if (!feedbackId) return;
+  const currentItem = (state.adminFeedbacks || []).find(f => f.id === feedbackId);
+  const willFlag = !currentItem?.is_flagged;
+
+  try {
+    if (window.db && window.db.admin && window.db.admin.flagFeedback) {
+      await window.db.admin.flagFeedback(feedbackId, willFlag, 'Flagged by supervisor for safety review');
+    }
+
+    if (state.adminFeedbacks) {
+      const fb = state.adminFeedbacks.find(f => f.id === feedbackId);
+      if (fb) {
+        fb.is_flagged = willFlag;
+        fb.flagged_at = willFlag ? new Date().toISOString() : null;
+      }
+    }
+
+    renderAdminFeedbacks();
+    showToast(willFlag ? '🚩 Review flagged as Safety Infraction.' : 'Review flag removed.', willFlag ? 'error' : 'info');
+  } catch (e) {
+    console.error('Error toggling review flag:', e);
+  }
+}
+
+// Administrative Moderation: Open Rating Adjustment Modal
+function openAdminAdjustRatingModal(feedbackId, driverName, currentRating, driverPhone) {
+  state.pendingAdjustFeedbackId = feedbackId;
+  const modal = document.getElementById('adminAdjustRatingModal');
+  const idInput = document.getElementById('adminAdjustFeedbackId');
+  const dIdentifier = document.getElementById('adminAdjustDriverIdentifier');
+  const dNameEl = document.getElementById('adminAdjustDriverName');
+  const curScoreEl = document.getElementById('adminAdjustCurrentScore');
+  const newRatingSelect = document.getElementById('adminAdjustNewRating');
+  const reasonText = document.getElementById('adminAdjustReasonText');
+
+  if (idInput) idInput.value = feedbackId || '';
+  if (dIdentifier) dIdentifier.value = driverPhone || driverName || '';
+  if (dNameEl) dNameEl.textContent = driverName || 'Driver';
+  if (curScoreEl) curScoreEl.textContent = `Current Review Rating: ${parseFloat(currentRating || 5.0).toFixed(1)}★`;
+  if (newRatingSelect) newRatingSelect.value = '2.0';
+  if (reasonText) reasonText.value = 'Rating adjusted following supervisor verification of safety report.';
+
+  if (modal) modal.classList.remove('hidden');
+  if (window.lucide) lucide.createIcons();
+}
+
+// Administrative Moderation: Save Adjusted Rating
+async function handleConfirmAdminAdjustRating(event) {
+  if (event && event.preventDefault) event.preventDefault();
+  const feedbackId = document.getElementById('adminAdjustFeedbackId')?.value || state.pendingAdjustFeedbackId;
+  const newRatingVal = parseFloat(document.getElementById('adminAdjustNewRating')?.value || 1.0);
+  const reasonVal = document.getElementById('adminAdjustReasonText')?.value?.trim() || 'Rating moderated by administrator';
+
+  if (!feedbackId) return;
+
+  try {
+    showToast('Updating driver rating...', 'info');
+    if (window.db && window.db.admin && window.db.admin.adjustFeedbackRating) {
+      await window.db.admin.adjustFeedbackRating(feedbackId, newRatingVal, reasonVal);
+    }
+
+    // Update in local state array
+    if (state.adminFeedbacks) {
+      const fb = state.adminFeedbacks.find(f => f.id === feedbackId);
+      if (fb) {
+        fb.original_rating = fb.rating;
+        fb.rating = newRatingVal;
+        fb.is_moderated = true;
+        fb.moderated_at = new Date().toISOString();
+        fb.moderation_reason = reasonVal;
+      }
+    }
+
+    closeModal('adminAdjustRatingModal');
+    updateAdminFeedbackMetrics();
+    renderAdminFeedbacks();
+    showToast(`✅ Driver rating adjusted to ${newRatingVal.toFixed(1)}★ across Routemate!`, 'success');
+  } catch (err) {
+    console.error('Error adjusting rating:', err);
+    showToast('Failed to adjust rating. Please retry.', 'error');
+  }
 }
 
 function openAdminBlockFromFeedback(driverPhone, driverName, feedbackText, rating) {
@@ -7121,19 +7272,273 @@ function handleSaveEmergencyContact(event) {
   state.emergencyContact = newContact;
   localStorage.setItem('routemate_emergency_contact', JSON.stringify(newContact));
 
+  if (state.currentUser) {
+    state.currentUser.emergency_contact = newContact;
+    try { localStorage.setItem('routemate_auth_user', JSON.stringify(state.currentUser)); } catch (e) {}
+  }
+
+  // Persist to Supabase Database
+  if (window.db && window.db.profiles && window.db.profiles.saveEmergencyContact) {
+    const identifier = (state.currentUser && (state.currentUser.id || state.currentUser.phone || state.currentUser.email)) || state.authPhone || state.authEmail;
+    if (identifier) {
+      window.db.profiles.saveEmergencyContact(identifier, newContact).catch(err => {
+        console.warn('Background Supabase emergency contact sync note:', err);
+      });
+    }
+  }
+
   closeModal('emergencyContactModal');
   renderEmergencyContact();
-  showToast(`🛡️ Emergency contact ${nameVal} saved securely!`, 'success');
+  showToast(`🛡️ Emergency contact ${nameVal} saved securely in database!`, 'success');
 }
 
 function handleRemoveEmergencyContact() {
   if (confirm('Are you sure you want to remove your emergency contact?')) {
     state.emergencyContact = null;
     localStorage.removeItem('routemate_emergency_contact');
+    if (state.currentUser) {
+      state.currentUser.emergency_contact = null;
+      try { localStorage.setItem('routemate_auth_user', JSON.stringify(state.currentUser)); } catch (e) {}
+    }
+
+    if (window.db && window.db.profiles && window.db.profiles.saveEmergencyContact) {
+      const identifier = (state.currentUser && (state.currentUser.id || state.currentUser.phone || state.currentUser.email)) || state.authPhone || state.authEmail;
+      if (identifier) {
+        window.db.profiles.saveEmergencyContact(identifier, null).catch(err => {
+          console.warn('Background Supabase emergency contact remove note:', err);
+        });
+      }
+    }
+
     closeModal('emergencyContactModal');
     renderEmergencyContact();
     showToast('Emergency contact removed.', 'info');
   }
+}
+
+// ==========================================
+// ACTIVE RIDE FUNCTIONAL SOS ENGINE
+// ==========================================
+
+let currentSosCoords = null;
+let currentSosMessage = '';
+
+function playEmergencyAlarmSound() {
+  try {
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) return;
+    const audioCtx = new AudioCtx();
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(880, audioCtx.currentTime); // A5
+    osc.frequency.setValueAtTime(440, audioCtx.currentTime + 0.15); // A4
+    osc.frequency.setValueAtTime(880, audioCtx.currentTime + 0.3);
+    gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.5);
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.start();
+    osc.stop(audioCtx.currentTime + 0.5);
+  } catch (e) {}
+}
+
+async function triggerLiveRideSos() {
+  playEmergencyAlarmSound();
+
+  const modal = document.getElementById('activeRideSosModal');
+  if (modal) modal.classList.remove('hidden');
+
+  // Update route & driver summary in SOS modal
+  const routeEl = document.getElementById('sosRouteDisplay');
+  const driverEl = document.getElementById('sosDriverDisplay');
+  const p = (state.pickup || 'Uppal').split(',')[0].trim();
+  const d = (state.drop || 'Jangaon').split(',')[0].trim();
+  const routeText = `${p} ➔ ${d}`;
+  if (routeEl) routeEl.textContent = routeText;
+
+  // Driver details from active trip or default
+  const driverName = (typeof currentRatingTripInfo !== 'undefined' && currentRatingTripInfo?.driverName) || 'Ramesh Kumar';
+  const driverVehicle = (typeof currentRatingTripInfo !== 'undefined' && currentRatingTripInfo?.vehicleName) || 'Bajaj Pulsar 150 (TS 08 EK 4321)';
+  const driverText = `${driverName} (${driverVehicle})`;
+  if (driverEl) driverEl.textContent = driverText;
+
+  // Render emergency contact card in modal
+  renderSosEmergencyContactActions(null);
+
+  // Instantly attempt high-accuracy GPS capture
+  const coordsEl = document.getElementById('sosCoordsText');
+  const gpsBadge = document.getElementById('sosGpsStatusBadge');
+  const mapLink = document.getElementById('sosGoogleMapsLink');
+
+  if (coordsEl) coordsEl.textContent = 'Acquiring satellite GPS coordinates...';
+  if (gpsBadge) {
+    gpsBadge.className = 'text-[9px] font-bold bg-amber-100 text-amber-900 border border-amber-300 px-2 py-0.2 rounded-full flex items-center gap-1';
+    gpsBadge.innerHTML = '<i data-lucide="loader-2" class="w-3 h-3 animate-spin"></i><span>Locking GPS...</span>';
+  }
+
+  const handlePositionSuccess = (pos) => {
+    const lat = pos.coords.latitude.toFixed(6);
+    const lng = pos.coords.longitude.toFixed(6);
+    const accuracy = Math.round(pos.coords.accuracy || 15);
+    currentSosCoords = { lat, lng, accuracy };
+
+    if (coordsEl) coordsEl.textContent = `Lat: ${lat}, Lng: ${lng} (±${accuracy}m accuracy)`;
+    if (gpsBadge) {
+      gpsBadge.className = 'text-[9px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 px-2 py-0.2 rounded-full flex items-center gap-1';
+      gpsBadge.innerHTML = '<i data-lucide="check" class="w-3 h-3 text-emerald-600 stroke-[3]"></i><span>GPS Locked</span>';
+    }
+    const mapsUrl = `https://maps.google.com/?q=${lat},${lng}`;
+    if (mapLink) mapLink.href = mapsUrl;
+
+    renderSosEmergencyContactActions(mapsUrl);
+    dispatchSafetyAlertRecord(lat, lng, mapsUrl, routeText, driverText);
+    if (window.lucide) lucide.createIcons();
+  };
+
+  const handlePositionFallback = () => {
+    // Default fallback coordinates around NH163 corridor (Hyderabad-Jangaon)
+    const lat = '17.4399';
+    const lng = '78.5583';
+    currentSosCoords = { lat, lng, accuracy: 50 };
+    if (coordsEl) coordsEl.textContent = `Lat: ${lat}, Lng: ${lng} (Corridor Approximate)`;
+    if (gpsBadge) {
+      gpsBadge.className = 'text-[9px] font-bold bg-blue-100 text-blue-800 border border-blue-300 px-2 py-0.2 rounded-full';
+      gpsBadge.textContent = 'Corridor GPS';
+    }
+    const mapsUrl = `https://maps.google.com/?q=${lat},${lng}`;
+    if (mapLink) mapLink.href = mapsUrl;
+
+    renderSosEmergencyContactActions(mapsUrl);
+    dispatchSafetyAlertRecord(lat, lng, mapsUrl, routeText, driverText);
+    if (window.lucide) lucide.createIcons();
+  };
+
+  if (navigator.geolocation) {
+    navigator.geolocation.getCurrentPosition(handlePositionSuccess, (err) => {
+      console.warn('Geolocation error during SOS:', err);
+      handlePositionFallback();
+    }, {
+      enableHighAccuracy: true,
+      timeout: 8000,
+      maximumAge: 0
+    });
+  } else {
+    handlePositionFallback();
+  }
+
+  showToast('🚨 EMERGENCY SOS ACTIVE! Live GPS captured & safety alert logged.', 'error');
+  if (window.lucide) lucide.createIcons();
+}
+
+function renderSosEmergencyContactActions(mapsUrl) {
+  const container = document.getElementById('sosEmergencyContactCard');
+  if (!container) return;
+
+  const contact = state.emergencyContact;
+  const user = state.currentUser;
+  const userName = (user && user.name) || 'Routemate Commuter';
+  const locUrl = mapsUrl || (currentSosCoords ? `https://maps.google.com/?q=${currentSosCoords.lat},${currentSosCoords.lng}` : 'https://maps.google.com');
+
+  const routeStr = `${(state.pickup || 'Uppal').split(',')[0].trim()} to ${(state.drop || 'Jangaon').split(',')[0].trim()}`;
+  const driverInfo = (typeof currentRatingTripInfo !== 'undefined' && currentRatingTripInfo?.driverName) 
+    ? `${currentRatingTripInfo.driverName} (${currentRatingTripInfo.vehicleName || 'Vehicle'})`
+    : 'Ramesh Kumar (Bajaj Pulsar TS 08 EK 4321)';
+
+  const alertMsg = `EMERGENCY ALERT from Routemate! I (${userName}) have triggered an active ride SOS. My live GPS location: ${locUrl}. Ride route: ${routeStr}. Driver: ${driverInfo}. Please contact me or emergency services immediately!`;
+  currentSosMessage = alertMsg;
+
+  if (contact && contact.phone) {
+    const waUrl = `https://wa.me/91${contact.phone}?text=${encodeURIComponent(alertMsg)}`;
+    const smsUrl = `sms:+91${contact.phone}?body=${encodeURIComponent(alertMsg)}`;
+
+    container.innerHTML = `
+      <div class="flex items-center justify-between pb-2 border-b border-rose-200/60">
+        <div>
+          <span class="text-[9px] font-extrabold uppercase tracking-wider text-rose-700 block">Saved Trusted Contact</span>
+          <h4 class="font-extrabold text-slate-900 text-xs">${contact.name} (${contact.relation || 'Contact'})</h4>
+          <p class="font-mono font-bold text-rose-800 text-[11px] mt-0.5">+91 ${contact.phone}</p>
+        </div>
+        <span class="text-[9px] font-bold uppercase bg-rose-100 text-rose-800 border border-rose-300 px-2 py-0.5 rounded-full">
+          Primary SOS
+        </span>
+      </div>
+
+      <div class="grid grid-cols-2 gap-2 pt-1">
+        <!-- 1. Direct Phone Call -->
+        <a href="tel:+91${contact.phone}" class="py-2.5 px-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-black text-xs text-center shadow-sm flex items-center justify-center gap-1.5 cursor-pointer active:scale-95 transition">
+          <i data-lucide="phone" class="w-3.5 h-3.5"></i>
+          <span>Call Contact</span>
+        </a>
+
+        <!-- 2. WhatsApp Live Dispatch -->
+        <a href="${waUrl}" target="_blank" class="py-2.5 px-3 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl font-black text-xs text-center shadow-sm flex items-center justify-center gap-1.5 cursor-pointer active:scale-95 transition">
+          <i data-lucide="message-circle" class="w-3.5 h-3.5"></i>
+          <span>Send WhatsApp</span>
+        </a>
+      </div>
+
+      <div class="pt-1 text-center">
+        <a href="${smsUrl}" class="text-[10px] font-bold text-slate-600 hover:text-slate-900 underline">
+          Or send via regular SMS
+        </a>
+      </div>
+    `;
+  } else {
+    container.innerHTML = `
+      <div class="text-center py-2 space-y-2">
+        <p class="text-[11px] font-semibold text-rose-900">No emergency contact saved yet!</p>
+        <p class="text-[10px] text-slate-500">Save your trusted family number now for automated 1-tap alerts:</p>
+        <button type="button" onclick="openEmergencyContactModal()" class="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold transition shadow-xs inline-flex items-center gap-1.5 cursor-pointer active:scale-95">
+          <i data-lucide="plus" class="w-3.5 h-3.5"></i>
+          <span>Add Emergency Contact Now</span>
+        </button>
+      </div>
+    `;
+  }
+}
+
+async function dispatchSafetyAlertRecord(lat, lng, mapsUrl, routeText, driverText) {
+  const alertRecord = {
+    userId: state.currentUser?.id || 'USR-COMMUTER',
+    userName: state.currentUser?.name || 'Verified Commuter',
+    userPhone: state.currentUser?.phone || '+91 98480 23145',
+    emergencyContactName: state.emergencyContact?.name || null,
+    emergencyContactPhone: state.emergencyContact?.phone || null,
+    latitude: lat,
+    longitude: lng,
+    googleMapsUrl: mapsUrl,
+    route: routeText,
+    driverInfo: driverText,
+    status: 'ACTIVE_EMERGENCY',
+    timestamp: new Date().toISOString()
+  };
+
+  try {
+    if (window.db && window.db.safety && window.db.safety.reportAlert) {
+      await window.db.safety.reportAlert(alertRecord);
+    }
+  } catch (e) {
+    console.warn('Safety alert dispatch note:', e);
+  }
+}
+
+function copySosLocationLink() {
+  const url = currentSosCoords ? `https://maps.google.com/?q=${currentSosCoords.lat},${currentSosCoords.lng}` : (window.location.href);
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(url).then(() => {
+      showToast('📋 Live location link copied to clipboard!', 'success');
+    }).catch(() => {
+      showToast(url, 'info');
+    });
+  } else {
+    showToast(url, 'info');
+  }
+}
+
+function closeActiveRideSosModal() {
+  const modal = document.getElementById('activeRideSosModal');
+  if (modal) modal.classList.add('hidden');
 }
 
 // ------------------------------------------
@@ -7572,6 +7977,13 @@ window.handleAdminFeedbackSearch = handleAdminFeedbackSearch;
 window.clearAdminFeedbackSearch = clearAdminFeedbackSearch;
 window.renderAdminFeedbacks = renderAdminFeedbacks;
 window.openAdminBlockFromFeedback = openAdminBlockFromFeedback;
+window.handleAdminToggleFlagFeedback = handleAdminToggleFlagFeedback;
+window.openAdminAdjustRatingModal = openAdminAdjustRatingModal;
+window.handleConfirmAdminAdjustRating = handleConfirmAdminAdjustRating;
+window.triggerLiveRideSos = triggerLiveRideSos;
+window.closeActiveRideSosModal = closeActiveRideSosModal;
+window.copySosLocationLink = copySosLocationLink;
+window.playEmergencyAlarmSound = playEmergencyAlarmSound;
 
 // Standalone test checkout helper for Razorpay Standard Web Checkout
 function testRazorpayPayment() {

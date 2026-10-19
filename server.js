@@ -99,6 +99,8 @@ let feedbacksStore = [
     createdAt: new Date(Date.now() - 3600000).toISOString()
   }
 ];
+let safetyAlertsStore = [];
+let driverKycStore = [];
 const sseClients = new Set();
 const otpStore = new Map(); // cleanPhone -> { code, expiresAt }
 const OTP_SECRET = 'routemate_unified_hmac_secret_key_2026';
@@ -506,6 +508,98 @@ const server = http.createServer(async (req, res) => {
 
     res.writeHead(200, { ...corsHeaders, 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ success: true, feedback }));
+    return;
+  }
+
+  // 10. Flag / Unflag Feedback Review (Administrative Safety Infraction)
+  if (urlPath === '/api/feedbacks/flag' && req.method === 'POST') {
+    const data = await parseJsonBody(req);
+    const feedbackId = data.feedbackId || data.id;
+    const fb = feedbacksStore.find(f => f.id === feedbackId);
+    if (fb) {
+      fb.is_flagged = data.isFlagged !== undefined ? Boolean(data.isFlagged) : !fb.is_flagged;
+      fb.flagged_at = fb.is_flagged ? new Date().toISOString() : null;
+      fb.flag_reason = data.reason || 'Flagged by supervisor for safety review';
+      broadcastToClients({ event: 'feedback_flagged', feedback: fb });
+      res.writeHead(200, { ...corsHeaders, 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: true, feedback: fb }));
+    } else {
+      res.writeHead(404, { ...corsHeaders, 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: false, error: 'Feedback not found' }));
+    }
+    return;
+  }
+
+  // 11. Adjust Driver Rating (Administrative Rating Moderation)
+  if (urlPath === '/api/feedbacks/adjust-rating' && req.method === 'POST') {
+    const data = await parseJsonBody(req);
+    const feedbackId = data.feedbackId || data.id;
+    const newRating = parseFloat(data.newRating || data.rating);
+    const reason = data.reason || 'Rating moderated by administrator';
+    const fb = feedbacksStore.find(f => f.id === feedbackId);
+    if (fb) {
+      fb.original_rating = fb.rating;
+      fb.rating = newRating;
+      fb.is_moderated = true;
+      fb.moderated_at = new Date().toISOString();
+      fb.moderation_reason = reason;
+      broadcastToClients({ event: 'feedback_rating_adjusted', feedback: fb, newRating, reason });
+      res.writeHead(200, { ...corsHeaders, 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: true, feedback: fb }));
+    } else {
+      res.writeHead(404, { ...corsHeaders, 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: false, error: 'Feedback not found' }));
+    }
+    return;
+  }
+
+  // 12. Submit & Fetch Emergency Safety Alerts (SOS)
+  if (urlPath === '/api/safety-alerts' && req.method === 'POST') {
+    const data = await parseJsonBody(req);
+    const alert = {
+      id: 'SOS-' + Date.now().toString(36).toUpperCase(),
+      userId: data.userId || data.user_id || 'USR-ANON',
+      userName: data.userName || data.user_name || 'Commuter',
+      userPhone: data.userPhone || data.user_phone || null,
+      emergencyContactPhone: data.emergencyContactPhone || data.emergency_contact_phone || null,
+      emergencyContactName: data.emergencyContactName || data.emergency_contact_name || null,
+      latitude: data.latitude || null,
+      longitude: data.longitude || null,
+      googleMapsUrl: data.googleMapsUrl || data.google_maps_url || null,
+      route: data.route || 'Uppal ➔ Jangaon',
+      driverInfo: data.driverInfo || data.driver_info || null,
+      status: 'ACTIVE_EMERGENCY',
+      timestamp: new Date().toISOString()
+    };
+    safetyAlertsStore.unshift(alert);
+    broadcastToClients({ event: 'safety_alert_triggered', alert });
+    res.writeHead(200, { ...corsHeaders, 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ success: true, alert }));
+    return;
+  }
+
+  if (urlPath === '/api/safety-alerts' && req.method === 'GET') {
+    res.writeHead(200, { ...corsHeaders, 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ success: true, alerts: safetyAlertsStore }));
+    return;
+  }
+
+  // 13. Notify Real-Time Driver KYC Submission
+  if (urlPath === '/api/kyc/notify' && req.method === 'POST') {
+    const data = await parseJsonBody(req);
+    driverKycStore.unshift(data);
+    broadcastToClients({ event: 'new_kyc_submission', kyc: data });
+    res.writeHead(200, { ...corsHeaders, 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ success: true }));
+    return;
+  }
+
+  // 14. Notify Real-Time Driver KYC Decision (Approved / Rejected)
+  if (urlPath === '/api/kyc/decision' && req.method === 'POST') {
+    const data = await parseJsonBody(req);
+    broadcastToClients({ event: 'kyc_decision_updated', decision: data });
+    res.writeHead(200, { ...corsHeaders, 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ success: true }));
     return;
   }
 
