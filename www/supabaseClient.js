@@ -818,17 +818,15 @@ const db = {
   // RESTRICTED ADMIN PORTAL HELPERS
   // ==========================================
   admin: {
-    // Authenticate restricted admin credentials (strictly whitelisted to 9494285249 or 7989031924)
-    verifyAdmin(emailOrUsername, password, userPhone = null) {
-      const cleanUser = (emailOrUsername || '').trim().toLowerCase();
+    // Authenticate restricted admin credentials (strictly whitelisted to shanthankolupula123@gmail.com)
+    verifyAdmin(emailOrUsername, password, userEmail = null) {
       const cleanPass = (password || '').trim();
+      const ADMIN_EMAIL = 'shanthankolupula123@gmail.com';
+      const checkEmail = String(userEmail || emailOrUsername || '').trim().toLowerCase();
+      const isEmailWhitelisted = checkEmail === ADMIN_EMAIL.toLowerCase();
 
-      const whitelistedAdminPhones = ['9494285249', '7989031924'];
-      const phoneDigits = String(userPhone || emailOrUsername || '').replace(/\D/g, '').slice(-10);
-      const isPhoneWhitelisted = whitelistedAdminPhones.includes(phoneDigits);
-
-      // Must be a whitelisted phone number
-      if (!isPhoneWhitelisted) {
+      // Must be the whitelisted admin email
+      if (!isEmailWhitelisted) {
         return false;
       }
 

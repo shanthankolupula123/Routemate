@@ -435,13 +435,19 @@
 
           <!-- Quick Corridor Selector Chips -->
           <div class="mt-3 pt-3 border-t border-slate-100">
-            <p class="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Popular Corridors:</p>
+            <p class="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Popular Telangana Routes:</p>
             <div class="flex items-center gap-1.5 overflow-x-auto pb-1 text-[11px] no-scrollbar">
               <button onclick="setPresetRoute('Uppal, Hyderabad', 'Jangaon')" class="flex-shrink-0 px-2.5 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 font-semibold rounded-lg border border-blue-200/60 transition">
                 Uppal ➔ Jangaon (84km)
               </button>
+              <button onclick="setPresetRoute('Uppal, Hyderabad', 'Raghunathapally')" class="flex-shrink-0 px-2.5 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 font-semibold rounded-lg border border-blue-200/60 transition">
+                Uppal ➔ Raghunathapally (104km)
+              </button>
               <button onclick="setPresetRoute('Uppal, Hyderabad', 'Bhongir')" class="flex-shrink-0 px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium rounded-lg transition">
                 Uppal ➔ Bhongir (38km)
+              </button>
+              <button onclick="setPresetRoute('Uppal, Hyderabad', 'Warangal')" class="flex-shrink-0 px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium rounded-lg transition">
+                Uppal ➔ Warangal (140km)
               </button>
               <button onclick="setPresetRoute('Hitec City', 'Warangal')" class="flex-shrink-0 px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium rounded-lg transition">
                 Hitec City ➔ Warangal
@@ -644,33 +650,33 @@
             <div class="flex items-center justify-between mb-2">
               <span class="font-bold text-slate-800 text-[11px] flex items-center gap-1.5">
                 <i data-lucide="route" class="w-3.5 h-3.5 text-blue-600"></i>
-                Highway Corridor Route Stops
+                <span id="routeTimelineHeaderTitle">Route Highlights & Key Stops</span>
               </span>
-              <span class="text-[10px] text-blue-700 font-semibold bg-blue-100/70 px-2 py-0.5 rounded-full">NH 163 Corridor</span>
+              <span id="routeTimelineHighwayBadge" class="text-[10px] text-blue-700 font-semibold bg-blue-100/70 px-2 py-0.5 rounded-full">Telangana Commuter Corridor</span>
             </div>
-            <div class="flex items-center justify-between text-[11px] font-medium text-slate-600 relative px-1">
+            <div id="routeTimelineStopsContainer" class="flex items-center justify-between text-[11px] font-medium text-slate-600 relative px-1">
               <div class="text-center">
                 <div class="w-2.5 h-2.5 rounded-full bg-emerald-500 mx-auto mb-1"></div>
-                <span class="block font-bold text-slate-900">Uppal</span>
-                <span class="text-[9px] text-slate-400">0 km</span>
+                <span id="timelineStartLabel" class="block font-bold text-slate-900">Uppal</span>
+                <span class="text-[9px] text-slate-400">Start</span>
               </div>
               <div class="flex-1 h-0.5 bg-slate-300 mx-1 mb-4"></div>
               <div class="text-center">
                 <div class="w-2 rounded-full bg-blue-400 mx-auto mb-1.5"></div>
-                <span class="block text-slate-700">Bhongir</span>
-                <span class="text-[9px] text-slate-400">38 km</span>
+                <span id="timelineMid1Label" class="block text-slate-700">Bhongir</span>
+                <span class="text-[9px] text-slate-400">Transit</span>
               </div>
               <div class="flex-1 h-0.5 bg-slate-300 mx-1 mb-4"></div>
               <div class="text-center">
                 <div class="w-2 rounded-full bg-blue-400 mx-auto mb-1.5"></div>
-                <span class="block text-slate-700">Aler</span>
-                <span class="text-[9px] text-slate-400">65 km</span>
+                <span id="timelineMid2Label" class="block text-slate-700">Aler / Enroute</span>
+                <span class="text-[9px] text-slate-400">Transit</span>
               </div>
               <div class="flex-1 h-0.5 bg-slate-300 mx-1 mb-4"></div>
               <div class="text-center">
                 <div class="w-2.5 h-2.5 rounded-full bg-blue-600 mx-auto mb-1"></div>
-                <span class="block font-bold text-slate-900">Jangaon</span>
-                <span class="text-[9px] text-slate-400">84 km</span>
+                <span id="timelineEndLabel" class="block font-bold text-slate-900">Jangaon</span>
+                <span id="timelineEndDist" class="text-[9px] text-slate-400">84 km</span>
               </div>
             </div>
           </div>
@@ -1026,24 +1032,6 @@
                 </div>
               </div>
               <i data-lucide="chevron-right" class="w-4 h-4 text-slate-400 group-hover:translate-x-0.5 transition"></i>
-            </button>
-
-            <!-- App Shortcuts Option -->
-            <button type="button" onclick="openAppShortcutsModal()" class="w-full py-3 flex items-center justify-between text-left hover:bg-slate-50/80 px-1 rounded-xl transition cursor-pointer group">
-              <div class="flex items-center gap-3">
-                <div class="w-8 h-8 rounded-xl bg-sky-50 text-sky-600 flex items-center justify-center flex-shrink-0 group-hover:scale-105 transition">
-                  <i data-lucide="smartphone" class="w-4 h-4"></i>
-                </div>
-                <div>
-                  <p class="text-xs font-bold text-slate-900">App Shortcuts</p>
-                  <p class="text-[10px] text-slate-500">Quick launcher shortcuts on your home screen</p>
-                </div>
-              </div>
-              <div class="flex items-center gap-1.5 text-slate-400">
-                <span class="text-[10px] font-bold bg-sky-50 text-sky-700 px-2 py-0.5 rounded-full border border-sky-200">Launcher</span>
-                <i data-lucide="chevron-right" class="w-4 h-4 text-slate-400 group-hover:translate-x-0.5 transition"></i>
-              </div>
-            </button>
           </div>
         </div>
 
@@ -1056,7 +1044,7 @@
               </div>
               <div>
                 <h3 class="font-bold text-slate-900 text-sm">Settings — Others</h3>
-                <p class="text-[10px] text-slate-500">Version info, beta access & account actions</p>
+                <p class="text-[10px] text-slate-500">Version info, legal policy & platform preferences</p>
               </div>
             </div>
             <span class="text-[10px] font-bold text-slate-700 bg-slate-100 px-2 py-0.5 rounded-full border border-slate-200">Others</span>
@@ -1075,30 +1063,10 @@
                 </div>
               </div>
               <div class="flex items-center gap-1.5 text-slate-400">
-                <span class="text-[10px] font-mono font-bold bg-slate-100 text-slate-700 px-2 py-0.5 rounded-full border border-slate-200">v8.104.0</span>
+                <span class="text-[10px] font-mono font-bold bg-blue-50 text-blue-700 px-2 py-0.5 rounded-full border border-blue-200">v1.0.0</span>
                 <i data-lucide="chevron-right" class="w-4 h-4 text-slate-400 group-hover:translate-x-0.5 transition"></i>
               </div>
             </button>
-
-            <!-- Subscribe to Beta Option -->
-            <div class="py-3 flex items-center justify-between px-1">
-              <div class="flex items-center gap-3">
-                <div class="w-8 h-8 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center flex-shrink-0">
-                  <i data-lucide="sparkles" class="w-4 h-4"></i>
-                </div>
-                <div>
-                  <div class="flex items-center gap-1.5">
-                    <p class="text-xs font-bold text-slate-900">Subscribe to Beta</p>
-                    <span id="betaBadge" class="text-[9px] font-extrabold uppercase px-1.5 py-0.2 rounded bg-amber-100 text-amber-800 border border-amber-300 hidden">Active</span>
-                  </div>
-                  <p class="text-[10px] text-slate-500">Early access to AI routing & UPI AutoPay</p>
-                </div>
-              </div>
-              <label class="relative inline-flex items-center cursor-pointer">
-                <input type="checkbox" id="betaSubscriberToggle" onchange="handleBetaToggleChange(this.checked)" class="sr-only peer" />
-                <div class="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
-              </label>
-            </div>
 
             <!-- Test Razorpay Payment Option -->
             <button type="button" onclick="testRazorpayPayment()" class="w-full py-3 flex items-center justify-between text-left hover:bg-blue-50/60 px-1 rounded-xl transition cursor-pointer group">
@@ -1444,7 +1412,7 @@
               Broadcasting to Drivers
             </span>
             <h4 class="text-base font-extrabold text-slate-900 mt-2">Connecting to Verified Drivers</h4>
-            <p class="text-xs text-slate-500 mt-1 max-w-xs mx-auto">Sending your ride request to active verified drivers along the Uppal ➔ Jangaon corridor...</p>
+            <p id="searchingDriversSubtitle" class="text-xs text-slate-500 mt-1 max-w-xs mx-auto">Sending your ride request to active verified drivers along your route across Telangana...</p>
           </div>
 
           <!-- Corridor Ride Summary -->
@@ -2190,79 +2158,7 @@
       </div>
     </div>
 
-    <!-- 4. App Shortcuts Modal -->
-    <div id="appShortcutsModal" class="modal-backdrop fixed inset-0 z-50 flex items-center justify-center p-4 hidden">
-      <div class="bg-white rounded-3xl max-w-sm w-full shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200 p-6">
-        <div class="flex items-center justify-between pb-3 border-b border-slate-100">
-          <div class="flex items-center gap-2">
-            <div class="w-8 h-8 rounded-xl bg-sky-100 text-sky-700 flex items-center justify-center">
-              <i data-lucide="smartphone" class="w-4 h-4"></i>
-            </div>
-            <div>
-              <h3 class="text-base font-bold text-slate-900">App Shortcuts</h3>
-              <p class="text-[10px] text-slate-500">Home screen quick actions & PWA</p>
-            </div>
-          </div>
-          <button onclick="closeModal('appShortcutsModal')" class="p-1.5 text-slate-400 hover:text-slate-600 rounded-full hover:bg-slate-100">
-            <i data-lucide="x" class="w-5 h-5"></i>
-          </button>
-        </div>
-
-        <div class="my-4 space-y-3 text-xs">
-          <div class="bg-sky-50 border border-sky-200 rounded-2xl p-3.5 text-sky-950 space-y-2">
-            <div class="flex items-center gap-2">
-              <i data-lucide="download" class="w-4 h-4 text-sky-600"></i>
-              <span class="font-bold text-xs">Add Routemate to Home Screen</span>
-            </div>
-            <p class="text-[11px] text-sky-800 leading-relaxed">
-              Install Routemate directly on your Android / iOS home screen for instant 1-tap launcher access without opening the browser.
-            </p>
-            <button type="button" onclick="triggerPwaInstall()" class="w-full py-2 bg-sky-600 hover:bg-sky-700 text-white font-bold rounded-xl text-xs transition shadow-xs active:scale-95">
-              + Install to Home Screen
-            </button>
-          </div>
-
-          <h4 class="font-extrabold uppercase tracking-wider text-[10px] text-slate-400 pt-1">Launcher Shortcuts Preview</h4>
-
-          <div class="space-y-2">
-            <button type="button" onclick="launchShortcut('offer')" class="w-full p-2.5 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl flex items-center justify-between text-left transition">
-              <div class="flex items-center gap-2.5">
-                <span class="w-6 h-6 rounded-lg bg-emerald-100 text-emerald-700 flex items-center justify-center text-xs font-bold">🚗</span>
-                <div>
-                  <p class="text-xs font-bold text-slate-900">Offer Highway Ride</p>
-                  <p class="text-[10px] text-slate-500">Jump straight into driver publishing</p>
-                </div>
-              </div>
-              <i data-lucide="arrow-right" class="w-4 h-4 text-slate-400"></i>
-            </button>
-
-            <button type="button" onclick="launchShortcut('find')" class="w-full p-2.5 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl flex items-center justify-between text-left transition">
-              <div class="flex items-center gap-2.5">
-                <span class="w-6 h-6 rounded-lg bg-blue-100 text-blue-700 flex items-center justify-center text-xs font-bold">🔍</span>
-                <div>
-                  <p class="text-xs font-bold text-slate-900">Find Corridor Ride</p>
-                  <p class="text-[10px] text-slate-500">Search instant commuter rides</p>
-                </div>
-              </div>
-              <i data-lucide="arrow-right" class="w-4 h-4 text-slate-400"></i>
-            </button>
-
-            <button type="button" onclick="launchShortcut('sos')" class="w-full p-2.5 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl flex items-center justify-between text-left transition">
-              <div class="flex items-center gap-2.5">
-                <span class="w-6 h-6 rounded-lg bg-rose-100 text-rose-700 flex items-center justify-center text-xs font-bold">🚨</span>
-                <div>
-                  <p class="text-xs font-bold text-slate-900">Emergency SOS 112</p>
-                  <p class="text-[10px] text-slate-500">Instant safety shield dispatch</p>
-                </div>
-              </div>
-              <i data-lucide="arrow-right" class="w-4 h-4 text-slate-400"></i>
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- 5. About Modal -->
+    <!-- 4. About Modal -->
     <div id="aboutModal" class="modal-backdrop fixed inset-0 z-50 flex items-center justify-center p-4 hidden">
       <div class="bg-white rounded-3xl max-w-sm w-full shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200 p-6">
         <div class="flex items-center justify-between pb-3 border-b border-slate-100">
@@ -2272,7 +2168,7 @@
             </div>
             <div>
               <h3 class="text-base font-bold text-slate-900">About Routemate</h3>
-              <p class="text-[10px] text-slate-500">P2P Highway Commuter Network</p>
+              <p class="text-[10px] text-slate-500">P2P Commuter Network — Telangana</p>
             </div>
           </div>
           <button onclick="closeModal('aboutModal')" class="p-1.5 text-slate-400 hover:text-slate-600 rounded-full hover:bg-slate-100">
@@ -2284,7 +2180,7 @@
           <div class="p-3 bg-blue-50 border border-blue-200 rounded-2xl flex items-center justify-between">
             <div>
               <p class="text-[10px] text-blue-600 font-bold uppercase tracking-wider">Release Version</p>
-              <p class="text-sm font-extrabold text-blue-950 font-mono">v8.104.0</p>
+              <p class="text-sm font-extrabold text-blue-950 font-mono">v1.0.0 (Production Release)</p>
             </div>
             <span class="text-[10px] font-bold bg-blue-600 text-white px-2 py-0.5 rounded-full">Official</span>
           </div>
@@ -2924,16 +2820,16 @@
 
   <!-- Scripts -->
   <!-- Google Maps JavaScript API with Places and Geometry libraries -->
-  <script src="maps.js"></script>
+  <script src="maps.js?v=20261019_live_v10"></script>
   <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCpZp3uUEEPF5ZJeVuuQRSGZxBDIgPuMqA&libraries=places,geometry&callback=initGoogleMap" async defer></script>
   <!-- Razorpay Standard Checkout SDK -->
   <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
-  <script src="payment.js"></script>
+  <script src="payment.js?v=20261019_live_v10"></script>
   <!-- Tesseract.js Pure Client-Side WebAssembly OCR Engine v5 -->
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
   <!-- Supabase JS Client SDK v2 -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="supabaseClient.js?v=20261019_live_v9"></script>
-  <script src="app.js?v=20261019_live_v9"></script>
+  <script src="supabaseClient.js?v=20261019_live_v10"></script>
+  <script src="app.js?v=20261019_live_v10"></script>
 </body>
 </html>

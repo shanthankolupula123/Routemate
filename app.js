@@ -5,6 +5,14 @@
 const ROUTE_DISTANCES = {
   'uppal-jangaon': 84,
   'jangaon-uppal': 84,
+  'uppal-raghunathapally': 104,
+  'raghunathapally-uppal': 104,
+  'jangaon-raghunathapally': 20,
+  'raghunathapally-jangaon': 20,
+  'raghunathapally-warangal': 36,
+  'warangal-raghunathapally': 36,
+  'uppal-stationghanpur': 112,
+  'stationghanpur-uppal': 112,
   'uppal-bhongir': 38,
   'bhongir-uppal': 38,
   'uppal-aler': 65,
@@ -20,6 +28,50 @@ const ROUTE_DISTANCES = {
   'kphb-sangareddy': 44,
   'sangareddy-kphb': 44
 };
+
+// Major Telangana nodes coordinates [lat, lng] for dynamic Haversine distance
+const TELANGANA_NODES = {
+  uppal: [17.4018, 78.5602],
+  secunderabad: [17.4399, 78.4983],
+  hiteccity: [17.4474, 78.3762],
+  gachibowli: [17.4401, 78.3489],
+  lbnagar: [17.3457, 78.5522],
+  kphb: [17.4932, 78.3995],
+  ghatkesar: [17.4455, 78.6835],
+  bibinagar: [17.4722, 78.7903],
+  bhongir: [17.5108, 78.8889],
+  yadagirigutta: [17.5857, 78.9392],
+  aler: [17.6475, 79.0494],
+  jangaon: [17.7275, 79.1836],
+  raghunathapally: [17.8286, 79.3094],
+  stationghanpur: [17.8542, 79.3703],
+  ghanpur: [17.8542, 79.3703],
+  kazipet: [17.9784, 79.5204],
+  hanamkonda: [18.0138, 79.5519],
+  warangal: [17.9689, 79.5941],
+  siddipet: [18.1018, 78.8520],
+  karimnagar: [18.4386, 79.1288],
+  suryapet: [17.1439, 79.6239],
+  nalgonda: [17.0577, 79.2684],
+  khammam: [17.2473, 80.1514],
+  mahbubnagar: [16.7488, 77.9856],
+  nizamabad: [18.6725, 78.0941],
+  sangareddy: [17.6190, 78.0814],
+  medchal: [17.6297, 78.4814],
+  shamshabad: [17.2403, 78.4294]
+};
+
+function calculateHaversineKm(lat1, lon1, lat2, lon2) {
+  const R = 6371; // Earth radius in km
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = 
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * 
+    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return Math.max(5, Math.round(R * c * 1.28)); // 1.28 highway/road winding factor
+}
 
 // Application State
 const state = {
@@ -273,11 +325,12 @@ function calculateFuelShare(distanceKm, type) {
   }
 }
 
-// Estimate distance between pickup and drop
+// Estimate distance between pickup and drop across Telangana
 function estimateDistance(pickup, drop) {
-  const cleanPick = pickup.toLowerCase().replace(/[^a-z]/g, '');
-  const cleanDrop = drop.toLowerCase().replace(/[^a-z]/g, '');
+  const cleanPick = (pickup || '').toLowerCase().replace(/[^a-z]/g, '');
+  const cleanDrop = (drop || '').toLowerCase().replace(/[^a-z]/g, '');
 
+  // 1. Direct dictionary lookup
   for (const [key, dist] of Object.entries(ROUTE_DISTANCES)) {
     const [p, d] = key.split('-');
     if (cleanPick.includes(p) && cleanDrop.includes(d)) {
@@ -285,8 +338,20 @@ function estimateDistance(pickup, drop) {
     }
   }
 
-  // Fallback distance based on string seed / default 60 km
+  // 2. Node coordinates lookup with Haversine formula
+  let pickCoord = null;
+  let dropCoord = null;
+  for (const [node, coord] of Object.entries(TELANGANA_NODES)) {
+    if (cleanPick.includes(node)) pickCoord = coord;
+    if (cleanDrop.includes(node)) dropCoord = coord;
+  }
+  if (pickCoord && dropCoord) {
+    return calculateHaversineKm(pickCoord[0], pickCoord[1], dropCoord[0], dropCoord[1]);
+  }
+
+  // 3. Fallbacks
   if (cleanPick.includes('uppal') && cleanDrop.includes('jangaon')) return 84;
+  if (cleanPick.includes('uppal') && cleanDrop.includes('raghunathapally')) return 104;
   if (cleanPick.includes('uppal') && cleanDrop.includes('warangal')) return 138;
   return 75;
 }
@@ -349,6 +414,16 @@ function updateUI() {
   if (driverLiveDist) {
     driverLiveDist.textContent = `${state.distance} km`;
   }
+
+  // Dynamic timeline labels
+  const pName = (state.pickup || 'Uppal').split(',')[0].trim();
+  const dName = (state.drop || 'Jangaon').split(',')[0].trim();
+  const timelineStart = document.getElementById('timelineStartLabel');
+  const timelineEnd = document.getElementById('timelineEndLabel');
+  const timelineEndDist = document.getElementById('timelineEndDist');
+  if (timelineStart) timelineStart.textContent = pName;
+  if (timelineEnd) timelineEnd.textContent = dName;
+  if (timelineEndDist) timelineEndDist.textContent = `${state.distance} km`;
 
   // Re-render Ride Listings
   renderRideListings();
@@ -1131,7 +1206,11 @@ function toggleDriverOnline() {
       statusPill.textContent = 'Broadcasting';
       statusPill.className = 'text-[10px] font-extrabold uppercase tracking-wider bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full';
     }
-    if (subtitle) subtitle.textContent = 'Uppal ➔ Jangaon corridor • Ready for passenger requests';
+    if (subtitle) {
+      const p = (state.pickup || 'Pickup').split(',')[0].trim();
+      const d = (state.drop || 'Destination').split(',')[0].trim();
+      subtitle.textContent = `${p} ➔ ${d} • Ready for passenger requests`;
+    }
     if (badgeIcon) {
       badgeIcon.className = 'relative z-10 w-12 h-12 rounded-2xl bg-emerald-500 text-white flex items-center justify-center shadow-md shadow-emerald-500/25 transition-all';
     }
@@ -2956,7 +3035,9 @@ function openSafetyModal() {
 
 // Simulated WhatsApp Share Trip
 function shareTripWithFamily() {
-  const msg = `Hey! I am sharing my live Routemate commuter trip on Uppal ➔ Jangaon corridor (${state.distance} km). Plate: TS 08 HG 8421. Live GPS tracking active.`;
+  const p = (state.pickup || 'Pickup').split(',')[0].trim();
+  const d = (state.drop || 'Destination').split(',')[0].trim();
+  const msg = `Hey! I am sharing my live Routemate commuter trip from ${p} to ${d} (${state.distance} km). Plate: TS 08 HG 8421. Live GPS tracking active.`;
   const url = `https://api.whatsapp.com/send?text=${encodeURIComponent(msg)}`;
   showToast('Trip itinerary copied & sharing via WhatsApp...', 'success');
   window.open(url, '_blank');
@@ -3409,16 +3490,7 @@ function updateProfileDisplay() {
     dobDisplayBadge.textContent = formatDobReadable(user && user.dob);
   }
 
-  // Beta status toggle & badge
-  const betaToggle = document.getElementById('betaSubscriberToggle');
-  const betaBadge = document.getElementById('betaBadge');
-  if (betaToggle) betaToggle.checked = Boolean(state.isBetaSubscriber);
-  if (betaBadge) {
-    if (state.isBetaSubscriber) betaBadge.classList.remove('hidden');
-    else betaBadge.classList.add('hidden');
-  }
-
-  // Whitelisted Admin Access: Strictly visible ONLY to 9494285249 or 7989031924
+  // Whitelisted Admin Access: Strictly visible ONLY to shanthankolupula123@gmail.com
   const isWhitelisted = isUserAdminWhitelisted(user);
   const adminOptionBtn = document.getElementById('adminPortalOptionItem');
   if (adminOptionBtn) {
@@ -4848,35 +4920,33 @@ async function resetDriverKyc() {
 // RESTRICTED ADMIN PORTAL ENGINE & WORKFLOW
 // ==========================================
 
-const ADMIN_WHITELISTED_PHONES = ['9494285249', '7989031924'];
+const ADMIN_EMAIL = 'shanthankolupula123@gmail.com';
 
 function isUserAdminWhitelisted(user) {
-  let phone = null;
-  if (user && user.phone) {
-    phone = user.phone;
-  } else if (state.currentUser && state.currentUser.phone) {
-    phone = state.currentUser.phone;
-  } else if (state.authPhone) {
-    phone = state.authPhone;
+  let email = null;
+  if (user && user.email) {
+    email = user.email;
+  } else if (state.currentUser && state.currentUser.email) {
+    email = state.currentUser.email;
+  } else if (state.authEmail) {
+    email = state.authEmail;
   } else {
     try {
       const cached = JSON.parse(localStorage.getItem('routemate_auth_user') || '{}');
-      if (cached && cached.phone) phone = cached.phone;
+      if (cached && cached.email) email = cached.email;
     } catch (e) {}
   }
 
-  if (!phone) return false;
-  const digits = String(phone).replace(/\D/g, '');
-  const last10 = digits.slice(-10);
-  return ADMIN_WHITELISTED_PHONES.includes(last10);
+  if (!email) return false;
+  return String(email).trim().toLowerCase() === ADMIN_EMAIL.toLowerCase();
 }
 
-// Open Admin Portal directly for authorized whitelisted numbers
+// Open Admin Portal directly for authorized administrator (shanthankolupula123@gmail.com)
 function openAdminPortal() {
   const user = state.currentUser;
-  // Strictly enforce phone number whitelist: ONLY 9494285249 or 7989031924
+  // Strictly enforce email whitelist: ONLY shanthankolupula123@gmail.com
   if (!isUserAdminWhitelisted(user)) {
-    showToast('⛔ Access Denied: Admin portal is restricted to authorized mobile numbers (9494285249, 7989031924).', 'error');
+    showToast('⛔ Access Denied: Admin portal is restricted strictly to authorized administrator (shanthankolupula123@gmail.com).', 'error');
     return;
   }
 
@@ -4894,7 +4964,7 @@ function handleAdminLogin(event) {
   const user = state.currentUser;
   // Double-check whitelist
   if (!isUserAdminWhitelisted(user)) {
-    showToast('⛔ Access Denied: Admin portal is restricted to authorized mobile numbers.', 'error');
+    showToast('⛔ Access Denied: Admin portal is restricted strictly to authorized administrator (shanthankolupula123@gmail.com).', 'error');
     closeModal('adminAuthModal');
     return;
   }
@@ -4909,7 +4979,7 @@ function handleAdminLogin(event) {
 
   let isValid = false;
   if (window.db && window.db.admin && window.db.admin.verifyAdmin) {
-    isValid = window.db.admin.verifyAdmin(userVal, passVal, (user && user.phone));
+    isValid = window.db.admin.verifyAdmin(userVal, passVal, (user && user.email));
   } else {
     isValid = isUserAdminWhitelisted(user) && (passVal === 'admin@2026' || passVal === 'routemate2026');
   }
@@ -4929,7 +4999,7 @@ function handleAdminLogin(event) {
 async function openAdminPanelModal() {
   const user = state.currentUser;
   if (!isUserAdminWhitelisted(user)) {
-    showToast('⛔ Access Denied: Admin portal is restricted to authorized mobile numbers (9494285249, 7989031924).', 'error');
+    showToast('⛔ Access Denied: Admin portal is restricted strictly to authorized administrator (shanthankolupula123@gmail.com).', 'error');
     return;
   }
 
