@@ -3449,6 +3449,13 @@ function updateProfileDisplay() {
 function setupOtpInputs() {
   const otpBoxes = document.querySelectorAll('.otp-box');
   if (otpBoxes && otpBoxes.length > 0) {
+    const checkAndAutoVerify = () => {
+      const code = Array.from(otpBoxes).map(b => b.value).join('');
+      if (code.length === 6) {
+        setTimeout(() => handleVerifyOtp(), 120);
+      }
+    };
+
     otpBoxes.forEach((box, idx) => {
       box.addEventListener('input', (e) => {
         const val = e.target.value.replace(/[^0-9]/g, '');
@@ -3457,6 +3464,7 @@ function setupOtpInputs() {
           otpBoxes[idx + 1].focus();
         }
         clearOtpError();
+        checkAndAutoVerify();
       });
 
       box.addEventListener('keydown', (e) => {
@@ -3464,6 +3472,9 @@ function setupOtpInputs() {
           if (!box.value && idx > 0) {
             otpBoxes[idx - 1].focus();
           }
+        } else if (e.key === 'Enter') {
+          e.preventDefault();
+          handleVerifyOtp();
         }
       });
 
@@ -3477,11 +3488,11 @@ function setupOtpInputs() {
           const targetIdx = Math.min(pasteData.length, otpBoxes.length - 1);
           otpBoxes[targetIdx].focus();
           clearOtpError();
+          checkAndAutoVerify();
         }
       });
     });
   }
-
 }
 
 function clearPhoneError() {
@@ -3554,8 +3565,9 @@ async function handleSendOtp() {
   const sendBtn = document.getElementById('btnSendOtp');
   const sendBtnText = document.getElementById('btnSendOtpText');
 
-  const email = state.authEmail || (emailInput ? emailInput.value.trim().toLowerCase() : '');
+  const enteredEmail = emailInput ? emailInput.value.trim().toLowerCase() : '';
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  const email = (enteredEmail && emailRegex.test(enteredEmail)) ? enteredEmail : (state.authEmail || '');
 
   if (!email || !emailRegex.test(email)) {
     if (errorText) errorText.textContent = 'Please enter a valid email address';
@@ -3567,6 +3579,9 @@ async function handleSendOtp() {
   clearPhoneError();
   state.authEmail = email;
   state.authPhone = email;
+  try {
+    sessionStorage.setItem('routemate_auth_target', email);
+  } catch (e) {}
 
   // Set button loading
   if (sendBtn) sendBtn.disabled = true;
@@ -3676,9 +3691,22 @@ async function handleVerifyOtp() {
     let verified = false;
     let authUser = null;
 
-    const authIdentifier = state.authEmail || state.authPhone || 'user@routemate.in';
+    const targetEl = document.getElementById('authTargetPhoneText');
+    const displayedEmail = (targetEl && targetEl.textContent && targetEl.textContent.includes('@')) ? targetEl.textContent.trim().toLowerCase() : '';
+    const sessionEmail = (typeof sessionStorage !== 'undefined' && sessionStorage.getItem('routemate_auth_target')) || '';
+    const authIdentifier = state.authEmail || displayedEmail || sessionEmail || state.authPhone || '';
 
-    // Verify OTP code through Resend HMAC verification or Supabase Auth
+    if (!authIdentifier || !authIdentifier.includes('@')) {
+      const msg = 'Email address not found. Please click Change Email Address and re-enter your email.';
+      if (errorText) errorText.textContent = msg;
+      if (errorEl) errorEl.classList.remove('hidden');
+      return;
+    }
+
+    state.authEmail = authIdentifier;
+    state.authPhone = authIdentifier;
+
+    // Verify OTP code through Resend HMAC verification or direct Supabase DB
     if (window.db && window.db.auth) {
       const res = await window.db.auth.verifyOtp(authIdentifier, code);
       if (res && res.success && res.data) {

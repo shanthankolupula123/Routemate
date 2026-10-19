@@ -609,8 +609,15 @@ const server = http.createServer(async (req, res) => {
             const rows = await dbRes.json();
             if (rows && rows.length > 0 && rows[0].avatar_url && rows[0].avatar_url.startsWith('OTP:')) {
               const parts = rows[0].avatar_url.split(':');
-              if (parts[1] === cleanCode && Date.now() <= Number(parts[2])) {
+              const storedCode = String(parts[1] || '').trim();
+              const storedExp = Number(parts[2] || 0);
+              if (storedCode === cleanCode && Date.now() <= storedExp) {
                 isVerified = true;
+                fetch(`${supabaseUrl}/rest/v1/profiles?id=eq.${rows[0].id}`, {
+                  method: 'PATCH',
+                  headers: { 'apikey': supabaseKey, 'Authorization': `Bearer ${supabaseKey}`, 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ avatar_url: null, is_verified: true })
+                }).catch(() => {});
               }
             }
           }

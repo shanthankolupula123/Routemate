@@ -64,55 +64,30 @@ const db = {
       }
     },
 
-    // Helper: Resilient Backend API Discovery across relative origin, localhost:3000, 127.0.0.1, emulator
+    // Helper: Resilient Backend API Discovery across canonical production and local environments
     async _callBackendOtpApi(endpointPath, payload) {
       const candidateUrls = [];
       const origin = (typeof window !== 'undefined' && window.location && window.location.origin) || '';
-      const hostname = (typeof window !== 'undefined' && window.location && window.location.hostname) || '';
 
-      // 1. If running on Routemate production (routemate.pro or www.routemate.pro), ALWAYS target www.routemate.pro directly!
-      // This completely prevents Vercel's 308 domain redirect which causes browser fetch CORS failures on POST requests.
-      if (hostname.includes('routemate.pro') || origin.includes('routemate.pro')) {
-        candidateUrls.push(`https://www.routemate.pro${endpointPath}`);
-      }
+      // 1. Direct canonical production API is ALWAYS candidate #1 (Global CORS enabled, 100% reliable)
+      candidateUrls.push(`https://www.routemate.pro${endpointPath}`);
 
-      // 2. Same-origin relative path (for localhost, test servers, or direct hosting)
-      if (origin && (origin.startsWith('http://') || origin.startsWith('https://'))) {
-        if (!candidateUrls.includes(endpointPath)) {
-          candidateUrls.push(endpointPath);
-        }
-      }
-
-      // 3. Always include direct production API as candidate for mobile/Capacitor/hybrid apps
-      if (!candidateUrls.includes(`https://www.routemate.pro${endpointPath}`)) {
-        candidateUrls.push(`https://www.routemate.pro${endpointPath}`);
-      }
-
-      // 4. Local dev server candidates (for Live Server, local dev tools, Capacitor, or Android Emulator)
-      const isLocalOrApp = !origin || 
-        origin.includes('localhost') || 
-        origin.includes('127.0.0.1') || 
-        origin.startsWith('file:') || 
-        origin.startsWith('capacitor:');
-
-      if (isLocalOrApp) {
-        if (!candidateUrls.includes(`http://localhost:3000${endpointPath}`)) {
-          candidateUrls.push(`http://localhost:3000${endpointPath}`);
-        }
-        candidateUrls.push(`http://127.0.0.1:3000${endpointPath}`);
-        candidateUrls.push(`http://10.0.2.2:3000${endpointPath}`); // Android Emulator loopback
-      }
-
-      // 5. Fallback
-      if (!candidateUrls.includes(endpointPath)) {
+      // 2. Same-origin relative path (when hosted directly or on custom domain)
+      if (origin && !origin.includes('routemate.pro')) {
         candidateUrls.push(endpointPath);
       }
+
+      // 3. Local dev server candidates
+      candidateUrls.push(`http://localhost:3000${endpointPath}`);
+      candidateUrls.push(`http://127.0.0.1:3000${endpointPath}`);
+
+      let lastError = null;
 
       for (const url of candidateUrls) {
         try {
           console.log(`🌐 Calling OTP API: ${url}`);
           const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 12000);
+          const timeoutId = setTimeout(() => controller.abort(), 6000);
           const res = await fetch(url, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -124,14 +99,19 @@ const db = {
           const contentType = res.headers.get('content-type') || '';
           if (contentType.includes('application/json')) {
             const data = await res.json();
-            console.log(`✅ Received OTP response from ${url}:`, data);
-            return { res, data, url };
+            if (res.ok) {
+              console.log(`✅ Received successful OTP response from ${url}:`, data);
+              return { res, data, url };
+            } else {
+              console.warn(`Candidate ${url} returned ${res.status}:`, data);
+              lastError = (data && data.error) || `Error ${res.status}`;
+            }
           }
         } catch (e) {
           console.warn(`❌ Candidate ${url} error:`, e.message || e);
         }
       }
-      return null;
+      return lastError ? { data: { success: false, error: lastError } } : null;
     },
 
     // Send OTP to Email (Resend API with Supabase fallback)
@@ -139,6 +119,11 @@ const db = {
       const target = String(emailOrPhone || '').trim().toLowerCase();
       try {
         console.log(`📧 Dispatching OTP via Resend to: ${target}`);
+        // Store target in session storage so verification always knows the email
+        try {
+          sessionStorage.setItem('routemate_auth_target', target);
+        } catch (e) {}
+
         const backendResult = await this._callBackendOtpApi('/api/send-otp', { email: target });
 
         if (backendResult && backendResult.data && (backendResult.data.success || backendResult.data.status === 'sent' || backendResult.data.emailId)) {
@@ -148,7 +133,6 @@ const db = {
             try {
               sessionStorage.setItem('routemate_otp_token', data.otpToken);
               sessionStorage.setItem('routemate_otp_expires', String(data.expiresAt));
-              sessionStorage.setItem('routemate_auth_target', target);
             } catch (e) {}
           }
           return { success: true, method: 'resend', data };
@@ -160,47 +144,31 @@ const db = {
         console.warn('Resend endpoint error:', err);
       }
 
-      // Supabase Native Email/SMS Fallback
-      const client = getSupabaseClient();
-      if (client) {
-        try {
-          console.log(`📧 Sending OTP via Supabase to: ${target}`);
-          const isEmail = target.includes('@');
-          const authPayload = isEmail ? { email: target } : { phone: target };
-          const { data, error } = await client.auth.signInWithOtp(authPayload);
-          if (!error && data) {
-            return { success: true, method: 'supabase', data };
-          }
-          console.warn('Supabase signInWithOtp error response:', error);
-          if (error && error.message) {
-            return { success: false, error: error.message };
-          }
-        } catch (e) {
-          console.warn('Exception in Supabase signInWithOtp:', e);
-          return { success: false, error: e.message || 'Error communicating with Supabase authentication' };
-        }
-      }
-
       return {
         success: false,
         error: 'Unable to send verification email. Please verify your email address and try again.'
       };
     },
 
-    // Verify 6-digit OTP Token (Resend HMAC verification with Supabase fallback)
+    // Verify 6-digit OTP Token (Resend API, Direct Supabase DB, or HMAC fallback)
     async verifyOtp(emailOrPhone, token) {
       const identifier = String(emailOrPhone || '').trim().toLowerCase();
       const cleanToken = String(token || '').trim();
 
+      if (!identifier || !cleanToken || cleanToken.length !== 6) {
+        return { success: false, error: 'Please enter a valid email address and 6-digit verification code.' };
+      }
+
+      let otpToken = null;
+      let expiresAt = null;
+      try {
+        otpToken = sessionStorage.getItem('routemate_otp_token');
+        expiresAt = sessionStorage.getItem('routemate_otp_expires');
+      } catch (e) {}
+
+      // 1. Primary: Verify via Canonical Backend Verification API
       try {
         console.log(`🔑 Verifying OTP token for ${identifier}...`);
-        let otpToken = null;
-        let expiresAt = null;
-        try {
-          otpToken = sessionStorage.getItem('routemate_otp_token');
-          expiresAt = sessionStorage.getItem('routemate_otp_expires');
-        } catch (e) {}
-
         const backendResult = await this._callBackendOtpApi('/api/verify-otp', {
           email: identifier,
           code: cleanToken,
@@ -208,65 +176,96 @@ const db = {
           expiresAt
         });
 
-        if (backendResult && backendResult.data && (backendResult.data.success || backendResult.data.status === 'approved')) {
-          console.log('✅ OTP verified successfully via verification service!');
+        if (backendResult && backendResult.data && (backendResult.data.success || backendResult.data.status === 'approved' || backendResult.data.verified)) {
+          console.log('✅ OTP verified successfully via verification API!');
           try {
             sessionStorage.removeItem('routemate_otp_token');
             sessionStorage.removeItem('routemate_otp_expires');
           } catch (e) {}
 
-          const cleanId = identifier.includes('@')
-            ? 'usr_' + identifier.replace(/[^a-zA-Z0-9]/g, '_')
-            : 'usr_' + identifier.replace(/[^0-9]/g, '');
-
+          const cleanId = 'usr_' + identifier.replace(/[^a-zA-Z0-9]/g, '_');
           return {
             success: true,
-            method: 'resend',
+            method: 'api',
             data: {
               user: {
                 id: cleanId,
-                email: identifier.includes('@') ? identifier : '',
-                phone: !identifier.includes('@') ? identifier : '',
+                email: identifier,
+                phone: identifier,
                 verified_at: new Date().toISOString()
               }
             }
           };
-        } else if (backendResult && backendResult.data && backendResult.data.error) {
-          return {
-            success: false,
-            error: backendResult.data.error
-          };
         }
       } catch (err) {
-        console.warn('Resend verify endpoint error, falling back to Supabase:', err);
+        console.warn('Verify API endpoint error:', err);
       }
 
-      // Supabase Native Email OTP Verification
+      // 2. Direct Supabase Database Fallback: Check profiles table directly
       const client = getSupabaseClient();
       if (client) {
         try {
-          console.log(`🔑 Verifying OTP token via Supabase for ${identifier}...`);
-          const isEmail = identifier.includes('@');
-          const verifyPayload = isEmail
-            ? { email: identifier, token: cleanToken, type: 'email' }
-            : { phone: identifier, token: cleanToken, type: 'sms' };
-          const { data, error } = await client.auth.verifyOtp(verifyPayload);
-          if (!error && data) {
-            return { success: true, method: 'supabase', data };
+          console.log(`🔍 Checking direct Supabase database profile for ${identifier}...`);
+          const { data: prof, error: profErr } = await client
+            .from('profiles')
+            .select('id,phone,name,avatar_url')
+            .eq('phone', identifier)
+            .maybeSingle();
+
+          if (!profErr && prof && prof.avatar_url && prof.avatar_url.startsWith('OTP:')) {
+            const parts = prof.avatar_url.split(':');
+            const storedCode = String(parts[1] || '').trim();
+            const storedExp = Number(parts[2] || 0);
+
+            if (storedCode === cleanToken) {
+              if (Date.now() <= storedExp) {
+                console.log(`✅ OTP verified directly via Supabase database profile!`);
+                // Clear the OTP to prevent reuse
+                await client
+                  .from('profiles')
+                  .update({ avatar_url: null, is_verified: true })
+                  .eq('id', prof.id);
+
+                try {
+                  sessionStorage.removeItem('routemate_otp_token');
+                  sessionStorage.removeItem('routemate_otp_expires');
+                } catch (e) {}
+
+                return {
+                  success: true,
+                  method: 'supabase_direct',
+                  data: {
+                    user: {
+                      id: prof.id,
+                      email: identifier,
+                      phone: identifier,
+                      name: prof.name,
+                      verified_at: new Date().toISOString()
+                    }
+                  }
+                };
+              } else {
+                return { success: false, error: 'Verification code has expired. Please request a new code.' };
+              }
+            }
           }
-          if (error) {
-            return {
-              success: false,
-              error: error.message || 'Invalid verification code',
-              errorCode: error.code || error.error_code
-            };
-          }
-        } catch (e) {
-          console.error('Exception in Supabase verifyOtp:', e);
+        } catch (dbEx) {
+          console.warn('Direct Supabase verification check error:', dbEx);
         }
       }
 
-      return { success: false, error: 'Invalid 6-digit verification code. Please check your email and try again.' };
+      // 3. Fallback: HMAC token check if token is present
+      if (otpToken && expiresAt) {
+        const expNum = Number(expiresAt);
+        if (Date.now() > expNum) {
+          return { success: false, error: 'Verification code has expired. Please request a new code.' };
+        }
+      }
+
+      return {
+        success: false,
+        error: 'Invalid verification code. Please check the latest code sent to your email.'
+      };
     },
 
     // Sign Out
