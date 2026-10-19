@@ -1953,6 +1953,11 @@
                 <input id="kycRcVehicleModel" type="text" placeholder="Model (e.g. Pulsar 150)" required class="w-full bg-transparent font-medium text-slate-900 focus:outline-none placeholder-slate-400 text-xs" />
               </div>
             </div>
+
+            <!-- Vehicle Chassis Number (VIN / Chassis No.) -->
+            <div class="flex items-center bg-white border border-slate-200 rounded-xl px-2.5 py-2 focus-within:border-blue-600 transition">
+              <input id="kycRcChassisNumber" type="text" maxlength="25" placeholder="Vehicle Chassis Number (e.g. ME4MD25... or Last 5 Digits)" oninput="this.value = this.value.toUpperCase();" class="w-full bg-transparent font-mono font-bold uppercase text-slate-900 focus:outline-none placeholder-slate-400 text-xs" />
+            </div>
             <p id="kycRcError" class="text-[10px] text-red-500 font-semibold hidden">Please enter vehicle plate and model.</p>
 
             <!-- Vehicle RC Document Image Upload -->

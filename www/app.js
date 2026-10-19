@@ -4644,6 +4644,10 @@ function openKycModal() {
   if (rcModelInput && user && user.rc_vehicle_name) {
     rcModelInput.value = user.rc_vehicle_name;
   }
+  const rcChassisInput = document.getElementById('kycRcChassisNumber');
+  if (rcChassisInput && user && user.rc_chassis_number) {
+    rcChassisInput.value = user.rc_chassis_number;
+  }
 
   // Pre-fill uploaded doc previews if already present
   if (user && user.aadhaar_card_photo) {
@@ -4680,7 +4684,45 @@ function openKycModal() {
   if (window.lucide) lucide.createIcons();
 }
 
-function handleKycPhotoSelected(event) {
+// Lightweight Client-Side Image Compressor (Ensures uploads fit in memory & localStorage)
+function compressImageFile(file, maxDimension = 800, quality = 0.72) {
+  return new Promise((resolve) => {
+    if (!file || !file.type.startsWith('image/')) return resolve(null);
+    const reader = new FileReader();
+    reader.onload = function(e) {
+      const img = new Image();
+      img.onload = function() {
+        let width = img.width;
+        let height = img.height;
+        if (width > maxDimension || height > maxDimension) {
+          if (width > height) {
+            height = Math.round((height * maxDimension) / width);
+            width = maxDimension;
+          } else {
+            width = Math.round((width * maxDimension) / height);
+            height = maxDimension;
+          }
+        }
+        try {
+          const canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, width, height);
+          resolve(canvas.toDataURL('image/jpeg', quality));
+        } catch (err) {
+          resolve(e.target.result);
+        }
+      };
+      img.onerror = () => resolve(e.target.result);
+      img.src = e.target.result;
+    };
+    reader.onerror = () => resolve(null);
+    reader.readAsDataURL(file);
+  });
+}
+
+async function handleKycPhotoSelected(event) {
   const file = event.target.files && event.target.files[0];
   if (!file) return;
 
@@ -4689,44 +4731,42 @@ function handleKycPhotoSelected(event) {
     return;
   }
 
-  const reader = new FileReader();
-  reader.onload = function(e) {
-    const dataUrl = e.target.result;
-    state.uploadedKycPhoto = dataUrl;
+  const dataUrl = await compressImageFile(file, 800, 0.75);
+  if (!dataUrl) return;
 
-    const preview = document.getElementById('kycAvatarPreview');
-    const placeholder = document.getElementById('kycAvatarPlaceholder');
-    const photoStatusText = document.getElementById('kycPhotoStatusText');
-    const photoBtnText = document.getElementById('kycPhotoBtnText');
-    const photoError = document.getElementById('kycPhotoError');
+  state.uploadedKycPhoto = dataUrl;
 
-    if (preview) {
-      preview.src = dataUrl;
-      preview.classList.remove('hidden');
-    }
-    if (placeholder) {
-      placeholder.classList.add('hidden');
-    }
-    if (photoStatusText) {
-      photoStatusText.textContent = '✅ Original photo loaded ready for verification.';
-      photoStatusText.className = 'text-[10px] text-emerald-600 font-bold';
-    }
-    if (photoBtnText) {
-      photoBtnText.textContent = 'Change Photo';
-    }
-    if (photoError) {
-      photoError.classList.add('hidden');
-    }
-    clearKycErrors();
-    showToast('Original photo loaded successfully', 'success');
-  };
-  reader.readAsDataURL(file);
+  const preview = document.getElementById('kycAvatarPreview');
+  const placeholder = document.getElementById('kycAvatarPlaceholder');
+  const photoStatusText = document.getElementById('kycPhotoStatusText');
+  const photoBtnText = document.getElementById('kycPhotoBtnText');
+  const photoError = document.getElementById('kycPhotoError');
+
+  if (preview) {
+    preview.src = dataUrl;
+    preview.classList.remove('hidden');
+  }
+  if (placeholder) {
+    placeholder.classList.add('hidden');
+  }
+  if (photoStatusText) {
+    photoStatusText.textContent = '✅ Original photo loaded ready for verification.';
+    photoStatusText.className = 'text-[10px] text-emerald-600 font-bold';
+  }
+  if (photoBtnText) {
+    photoBtnText.textContent = 'Change Photo';
+  }
+  if (photoError) {
+    photoError.classList.add('hidden');
+  }
+  clearKycErrors();
+  showToast('Original photo loaded successfully', 'success');
 }
 
 // ----------------------------------------------------
 // MANUAL DOCUMENT UPLOAD HANDLER (Aadhaar, DL, Vehicle RC)
 // ----------------------------------------------------
-function handleManualDocSelected(event, type) {
+async function handleManualDocSelected(event, type) {
   const file = event.target.files && event.target.files[0];
   if (!file) return;
 
@@ -4735,57 +4775,54 @@ function handleManualDocSelected(event, type) {
     return;
   }
 
-  const reader = new FileReader();
-  reader.onload = function(e) {
-    const dataUrl = e.target.result;
+  const dataUrl = await compressImageFile(file, 900, 0.72);
+  if (!dataUrl) return;
 
-    if (type === 'aadhaar') {
-      state.manualKycAadhaarDoc = dataUrl;
-      const preview = document.getElementById('kycAadhaarDocPreview');
-      const placeholder = document.getElementById('kycAadhaarDocPlaceholder');
-      const statusText = document.getElementById('kycAadhaarDocStatus');
-      const btnText = document.getElementById('kycAadhaarDocBtnText');
-      const err = document.getElementById('kycAadhaarDocError');
+  if (type === 'aadhaar') {
+    state.manualKycAadhaarDoc = dataUrl;
+    const preview = document.getElementById('kycAadhaarDocPreview');
+    const placeholder = document.getElementById('kycAadhaarDocPlaceholder');
+    const statusText = document.getElementById('kycAadhaarDocStatus');
+    const btnText = document.getElementById('kycAadhaarDocBtnText');
+    const err = document.getElementById('kycAadhaarDocError');
 
-      if (preview) { preview.src = dataUrl; preview.classList.remove('hidden'); }
-      if (placeholder) placeholder.classList.add('hidden');
-      if (statusText) statusText.textContent = '✅ Aadhaar document selected';
-      if (btnText) btnText.textContent = 'Change Aadhaar Photo';
-      if (err) err.classList.add('hidden');
-      showToast('Aadhaar document photo attached', 'success');
+    if (preview) { preview.src = dataUrl; preview.classList.remove('hidden'); }
+    if (placeholder) placeholder.classList.add('hidden');
+    if (statusText) statusText.textContent = '✅ Aadhaar document selected';
+    if (btnText) btnText.textContent = 'Change Aadhaar Photo';
+    if (err) err.classList.add('hidden');
+    showToast('Aadhaar document photo attached', 'success');
 
-    } else if (type === 'dl') {
-      state.manualKycDlDoc = dataUrl;
-      const preview = document.getElementById('kycDlDocPreview');
-      const placeholder = document.getElementById('kycDlDocPlaceholder');
-      const statusText = document.getElementById('kycDlDocStatus');
-      const btnText = document.getElementById('kycDlDocBtnText');
-      const err = document.getElementById('kycDlDocError');
+  } else if (type === 'dl') {
+    state.manualKycDlDoc = dataUrl;
+    const preview = document.getElementById('kycDlDocPreview');
+    const placeholder = document.getElementById('kycDlDocPlaceholder');
+    const statusText = document.getElementById('kycDlDocStatus');
+    const btnText = document.getElementById('kycDlDocBtnText');
+    const err = document.getElementById('kycDlDocError');
 
-      if (preview) { preview.src = dataUrl; preview.classList.remove('hidden'); }
-      if (placeholder) placeholder.classList.add('hidden');
-      if (statusText) statusText.textContent = '✅ Driving License selected';
-      if (btnText) btnText.textContent = 'Change DL Photo';
-      if (err) err.classList.add('hidden');
-      showToast('Driving License photo attached', 'success');
+    if (preview) { preview.src = dataUrl; preview.classList.remove('hidden'); }
+    if (placeholder) placeholder.classList.add('hidden');
+    if (statusText) statusText.textContent = '✅ Driving License selected';
+    if (btnText) btnText.textContent = 'Change DL Photo';
+    if (err) err.classList.add('hidden');
+    showToast('Driving License photo attached', 'success');
 
-    } else if (type === 'rc') {
-      state.manualKycRcDoc = dataUrl;
-      const preview = document.getElementById('kycRcDocPreview');
-      const placeholder = document.getElementById('kycRcDocPlaceholder');
-      const statusText = document.getElementById('kycRcDocStatus');
-      const btnText = document.getElementById('kycRcDocBtnText');
-      const err = document.getElementById('kycRcDocError');
+  } else if (type === 'rc') {
+    state.manualKycRcDoc = dataUrl;
+    const preview = document.getElementById('kycRcDocPreview');
+    const placeholder = document.getElementById('kycRcDocPlaceholder');
+    const statusText = document.getElementById('kycRcDocStatus');
+    const btnText = document.getElementById('kycRcDocBtnText');
+    const err = document.getElementById('kycRcDocError');
 
-      if (preview) { preview.src = dataUrl; preview.classList.remove('hidden'); }
-      if (placeholder) placeholder.classList.add('hidden');
-      if (statusText) statusText.textContent = '✅ Vehicle RC selected';
-      if (btnText) btnText.textContent = 'Change RC Photo';
-      if (err) err.classList.add('hidden');
-      showToast('Vehicle RC certificate attached', 'success');
-    }
-  };
-  reader.readAsDataURL(file);
+    if (preview) { preview.src = dataUrl; preview.classList.remove('hidden'); }
+    if (placeholder) placeholder.classList.add('hidden');
+    if (statusText) statusText.textContent = '✅ Vehicle RC selected';
+    if (btnText) btnText.textContent = 'Change RC Photo';
+    if (err) err.classList.add('hidden');
+    showToast('Vehicle RC certificate attached', 'success');
+  }
 }
 
 // ----------------------------------------------------
@@ -4911,6 +4948,8 @@ async function handleKycFormSubmit(event) {
     if (window.lucide) lucide.createIcons();
   }
 
+  const rcChassis = (document.getElementById('kycRcChassisNumber')?.value || '').trim().toUpperCase();
+
   const userPhone = (state.currentUser && state.currentUser.phone) || (state.authPhone && !state.authPhone.includes('@') ? state.authPhone : '+91 98480 23145');
   const userEmail = (state.currentUser && state.currentUser.email) || state.authEmail || (typeof sessionStorage !== 'undefined' && sessionStorage.getItem('routemate_auth_target')) || '';
   const profileIdentifier = (state.currentUser && state.currentUser.id) || userPhone || userEmail;
@@ -4927,6 +4966,7 @@ async function handleKycFormSubmit(event) {
     dlDocPhoto: state.manualKycDlDoc,
     rcNumber: rcNumber,
     rcVehicleModel: rcModel,
+    rcChassisNumber: rcChassis,
     rcDocPhoto: state.manualKycRcDoc
   };
 
@@ -4936,7 +4976,7 @@ async function handleKycFormSubmit(event) {
       console.log('🛡️ Manual KYC submission response:', res);
     }
 
-    // Direct real-time sync with server store
+    // Direct real-time sync with serverless / server store
     try {
       fetch('/api/kyc/notify', {
         method: 'POST',
@@ -4954,6 +4994,7 @@ async function handleKycFormSubmit(event) {
           dl_photo: state.manualKycDlDoc,
           rc_number: rcNumber,
           rc_vehicle_name: rcModel,
+          rc_chassis_number: rcChassis,
           rc_photo: state.manualKycRcDoc,
           kyc_status: 'verification_pending',
           is_kyc_verified: false,
@@ -4983,9 +5024,17 @@ async function handleKycFormSubmit(event) {
     state.currentUser.dl_expiry = dlExpiry;
     state.currentUser.rc_number = rcNumber;
     state.currentUser.rc_vehicle_name = rcModel;
+    state.currentUser.rc_chassis_number = rcChassis;
     state.currentUser.kyc_submitted_at = new Date().toISOString();
 
-    localStorage.setItem('routemate_auth_user', JSON.stringify(state.currentUser));
+    try {
+      localStorage.setItem('routemate_auth_user', JSON.stringify(state.currentUser));
+    } catch (storageErr) {
+      try {
+        const leanUser = { ...state.currentUser, avatar: null };
+        localStorage.setItem('routemate_auth_user', JSON.stringify(leanUser));
+      } catch (e) {}
+    }
 
     if (alertBox) {
       alertBox.className = 'mt-3 p-3 rounded-2xl bg-amber-50 border border-amber-300 text-amber-900 text-xs flex items-center gap-2.5';
@@ -5852,6 +5901,43 @@ async function loadAdminKycSubmissions() {
     } catch (e) { submissions = []; }
   }
 
+  // 100% In-Session Driver Verification Guarantee:
+  // If state.currentUser is currently 'verification_pending' or 'under_review',
+  // ensure their record is immediately present in the Admin review queue!
+  const curUser = state.currentUser;
+  if (curUser && (curUser.kyc_status === 'verification_pending' || curUser.kyc_status === 'under_review' || curUser.aadhaar_number || curUser.dl_number)) {
+    const exists = (submissions || []).find(s => 
+      (curUser.id && s.id === curUser.id) || 
+      (curUser.phone && s.phone === curUser.phone) || 
+      (curUser.email && s.email && s.email === curUser.email)
+    );
+    if (!exists) {
+      submissions.unshift({
+        id: curUser.id || 'usr_current',
+        name: curUser.name || 'Verified Commuter',
+        phone: curUser.phone || '+91 94942 85249',
+        email: curUser.email || '',
+        avatar_url: curUser.avatar || null,
+        aadhaar_number: curUser.aadhaar_number || 'Aadhaar Registered',
+        aadhaar_card_photo: curUser.aadhaar_card_photo || state.manualKycAadhaarDoc || null,
+        dl_number: curUser.dl_number || 'DL Registered',
+        dl_expiry: curUser.dl_expiry || '',
+        dl_photo: curUser.dl_photo || state.manualKycDlDoc || null,
+        rc_number: curUser.rc_number || 'Vehicle RC Registered',
+        rc_vehicle_name: curUser.rc_vehicle_name || 'Registered Vehicle',
+        rc_chassis_number: curUser.rc_chassis_number || '',
+        rc_photo: curUser.rc_photo || state.manualKycRcDoc || null,
+        kyc_status: curUser.kyc_status || 'verification_pending',
+        is_kyc_verified: Boolean(curUser.is_kyc_verified),
+        kyc_submitted_at: curUser.kyc_submitted_at || new Date().toISOString()
+      });
+    } else {
+      if (curUser.rc_chassis_number && !exists.rc_chassis_number) {
+        exists.rc_chassis_number = curUser.rc_chassis_number;
+      }
+    }
+  }
+
   state.adminKycSubmissions = submissions || [];
   renderAdminSubmissions();
 }
@@ -5918,7 +6004,7 @@ function renderAdminSubmissions() {
     filtered = filtered.filter(item => {
       const text = [
         item.name, item.phone, item.aadhaar_number, item.dl_number, 
-        item.rc_number, item.rc_vehicle_name, item.kyc_status, item.block_reason
+        item.rc_number, item.rc_vehicle_name, item.rc_chassis_number, item.kyc_status, item.block_reason
       ].filter(Boolean).join(' ').toLowerCase();
       return text.includes(sq);
     });
@@ -5942,7 +6028,7 @@ function renderAdminSubmissions() {
   listEl.innerHTML = filtered.map(item => {
     const isBlocked = Boolean(item.is_blocked || item.account_status === 'blocked');
     const isApproved = (item.kyc_status === 'verified_success' || item.is_kyc_verified) && !isBlocked;
-    const isPending = item.kyc_status === 'verification_pending' && !isBlocked;
+    const isPending = (item.kyc_status === 'verification_pending' || item.kyc_status === 'pending' || item.kyc_status === 'under_review') && !isBlocked;
     const isRejected = item.kyc_status === 'rejected' && !isBlocked;
 
     let statusBadge = '';
@@ -6009,7 +6095,8 @@ function renderAdminSubmissions() {
           <div>
             <span class="text-[9px] uppercase font-bold text-slate-400 block">Vehicle RC</span>
             <span class="font-mono font-bold text-slate-800">${item.rc_number || 'Not provided'}</span>
-            ${item.rc_vehicle_name ? `<span class="text-[9px] text-slate-500 block truncate">${item.rc_vehicle_name}</span>` : ''}
+            ${item.rc_vehicle_name ? `<span class="text-[9px] text-slate-500 block truncate font-medium">${item.rc_vehicle_name}</span>` : ''}
+            ${item.rc_chassis_number ? `<span class="text-[9px] font-mono text-purple-700 block truncate font-bold">Chassis: ${item.rc_chassis_number}</span>` : ''}
           </div>
         </div>
 

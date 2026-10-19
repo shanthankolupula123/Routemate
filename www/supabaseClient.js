@@ -644,11 +644,12 @@ const db = {
         dl_photo: kycData.dlDocPhoto,
         rc_number: kycData.rcNumber,
         rc_vehicle_name: kycData.rcVehicleModel,
+        rc_chassis_number: kycData.rcChassisNumber || null,
         rc_photo: kycData.rcDocPhoto,
         kyc_submitted_at: new Date().toISOString()
       };
 
-      // Always save locally in localStorage as robust backup
+      // Always save locally in localStorage as robust backup (with safe quota handling)
       const submissionsKey = 'routemate_kyc_submissions';
       let localSubmissions = [];
       try {
@@ -664,9 +665,22 @@ const db = {
       } else {
         localSubmissions.unshift(subItem);
       }
-      localStorage.setItem(submissionsKey, JSON.stringify(localSubmissions));
+      try {
+        localStorage.setItem(submissionsKey, JSON.stringify(localSubmissions));
+      } catch (quotaErr) {
+        try {
+          // If storage quota exceeded due to large photos, strip raw photos and store metadata
+          const leanList = localSubmissions.map(s => ({
+            ...s,
+            aadhaar_card_photo: null,
+            dl_photo: null,
+            rc_photo: null
+          }));
+          localStorage.setItem(submissionsKey, JSON.stringify(leanList));
+        } catch (e) {}
+      }
 
-      // Notify Node.js server store in real time
+      // Notify Node.js & Vercel serverless store in real time
       try {
         fetch('/api/kyc/notify', {
           method: 'POST',
@@ -988,6 +1002,7 @@ const db = {
               dl_expiry: currentUser.dl_expiry || '',
               rc_number: currentUser.rc_number || '',
               rc_vehicle_name: currentUser.rc_vehicle_name || '',
+              rc_chassis_number: currentUser.rc_chassis_number || '',
               kyc_status: currentUser.kyc_status || 'verification_pending',
               is_kyc_verified: currentUser.is_kyc_verified || false,
               kyc_submitted_at: currentUser.kyc_submitted_at || new Date().toISOString()
