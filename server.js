@@ -235,16 +235,18 @@ const server = http.createServer(async (req, res) => {
   const corsHeaders = {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization, apikey'
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization, apikey',
+    'Access-Control-Allow-Private-Network': 'true'
   };
+
+  const urlPath = req.url.split('?')[0];
+  console.log(`[${new Date().toLocaleTimeString()}] ${req.method} ${urlPath} (Origin: ${req.headers.origin || 'direct'})`);
 
   if (req.method === 'OPTIONS') {
     res.writeHead(204, corsHeaders);
     res.end();
     return;
   }
-
-  const urlPath = req.url.split('?')[0];
 
   // ==========================================
   // REAL-TIME RIDE MATCHING API ENDPOINTS
