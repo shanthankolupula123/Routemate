@@ -36,6 +36,10 @@
   <!-- Lucide Icons -->
   <script src="https://unpkg.com/lucide@latest"></script>
 
+  <!-- Leaflet Interactive Maps CSS & JS (OpenStreetMap / CartoDB) -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
   <!-- Custom Styles -->
   <link rel="stylesheet" href="styles.css" />
 </head>
@@ -404,7 +408,7 @@
               </div>
               <div class="flex-1 pr-16">
                 <label class="block text-[10px] font-semibold text-slate-400 uppercase tracking-wider leading-tight">Pickup Location (Area / LandMark)</label>
-                <input id="inputPickup" type="text" value="Uppal Ring Road Metro, Hyderabad" class="w-full bg-transparent text-sm font-bold text-slate-900 focus:outline-none placeholder-slate-400" placeholder="e.g. 5-4, Raghunathapally, Ibrahimpur" />
+                <input id="inputPickup" type="text" value="" class="w-full bg-transparent text-sm font-bold text-slate-900 focus:outline-none placeholder-slate-400" placeholder="Enter pickup location" />
               </div>
               <div class="flex items-center gap-1 absolute right-2.5 top-1/2 -translate-y-1/2 z-10">
                 <button id="btnPickupMapSelect" type="button" onclick="openSelectOnMapModal(true)" title="Select pickup on map" class="p-1.5 rounded-xl bg-white hover:bg-blue-50 text-blue-600 border border-slate-200 shadow-xs hover:border-blue-300 transition active:scale-95 flex items-center justify-center">
@@ -430,7 +434,7 @@
               </div>
               <div class="flex-1 pr-16">
                 <label class="block text-[10px] font-semibold text-slate-400 uppercase tracking-wider leading-tight">Destination (Area / Town / Station)</label>
-                <input id="inputDrop" type="text" value="Jangaon Bus Depot / Chowrasta" class="w-full bg-transparent text-sm font-bold text-slate-900 focus:outline-none placeholder-slate-400" placeholder="e.g. Jangaon Chowrasta, Bhongir Fort, Hanamkonda" />
+                <input id="inputDrop" type="text" value="" class="w-full bg-transparent text-sm font-bold text-slate-900 focus:outline-none placeholder-slate-400" placeholder="Enter destination location" />
               </div>
               <div class="flex items-center gap-1 absolute right-2.5 top-1/2 -translate-y-1/2 z-10">
                 <button id="btnDropMapSelect" type="button" onclick="openSelectOnMapModal(false)" title="Select destination on map" class="p-1.5 rounded-xl bg-white hover:bg-blue-50 text-blue-600 border border-slate-200 shadow-xs hover:border-blue-300 transition active:scale-95 flex items-center justify-center">
@@ -653,7 +657,7 @@
               <div id="mapRouteInfoPill" class="absolute top-2.5 left-2.5 z-10 bg-white/95 backdrop-blur-md px-3 py-1.5 rounded-full border border-slate-200 shadow-sm text-xs font-semibold">
                 <div class="flex items-center gap-1.5 text-slate-500">
                   <span class="w-2 h-2 rounded-full bg-blue-600 animate-ping"></span>
-                  <span>Loading NH 163 Corridor...</span>
+                  <span>Interactive Live Map</span>
                 </div>
               </div>
             </div>
@@ -671,26 +675,26 @@
             <div id="routeTimelineStopsContainer" class="flex items-center justify-between text-[11px] font-medium text-slate-600 relative px-1">
               <div class="text-center">
                 <div class="w-2.5 h-2.5 rounded-full bg-emerald-500 mx-auto mb-1"></div>
-                <span id="timelineStartLabel" class="block font-bold text-slate-900">Uppal</span>
+                <span id="timelineStartLabel" class="block font-bold text-slate-900">Pickup</span>
                 <span class="text-[9px] text-slate-400">Start</span>
               </div>
               <div class="flex-1 h-0.5 bg-slate-300 mx-1 mb-4"></div>
               <div class="text-center">
                 <div class="w-2 rounded-full bg-blue-400 mx-auto mb-1.5"></div>
-                <span id="timelineMid1Label" class="block text-slate-700">Bhongir</span>
+                <span id="timelineMid1Label" class="block text-slate-700">Enroute</span>
                 <span class="text-[9px] text-slate-400">Transit</span>
               </div>
               <div class="flex-1 h-0.5 bg-slate-300 mx-1 mb-4"></div>
               <div class="text-center">
                 <div class="w-2 rounded-full bg-blue-400 mx-auto mb-1.5"></div>
-                <span id="timelineMid2Label" class="block text-slate-700">Aler / Enroute</span>
+                <span id="timelineMid2Label" class="block text-slate-700">Highway</span>
                 <span class="text-[9px] text-slate-400">Transit</span>
               </div>
               <div class="flex-1 h-0.5 bg-slate-300 mx-1 mb-4"></div>
               <div class="text-center">
                 <div class="w-2.5 h-2.5 rounded-full bg-blue-600 mx-auto mb-1"></div>
-                <span id="timelineEndLabel" class="block font-bold text-slate-900">Jangaon</span>
-                <span id="timelineEndDist" class="text-[9px] text-slate-400">84 km</span>
+                <span id="timelineEndLabel" class="block font-bold text-slate-900">Destination</span>
+                <span id="timelineEndDist" class="text-[9px] text-slate-400">-- km</span>
               </div>
             </div>
           </div>
@@ -2910,8 +2914,15 @@
   </div>
 
   <!-- Scripts -->
-  <!-- Google Maps JavaScript API with Places and Geometry libraries -->
-  <script src="maps.js?v=20261019_live_v10"></script>
+  <script>
+    // Silently suppress Google Maps authentication / project error popups & alerts
+    window.gm_authFailure = function() {
+      console.warn('Google Maps API key not activated. Using OpenStreetMap & Leaflet engine.');
+      if (typeof initLeafletMap === 'function') initLeafletMap();
+    };
+  </script>
+  <!-- Interactive Maps Engine (Leaflet + OSM with Google Maps fallback) -->
+  <script src="maps.js?v=20261019_live_v12"></script>
   <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCpZp3uUEEPF5ZJeVuuQRSGZxBDIgPuMqA&libraries=places,geometry&callback=initGoogleMap" async defer></script>
   <!-- Razorpay Standard Checkout SDK -->
   <script src="https://checkout.razorpay.com/v1/checkout.js"></script>

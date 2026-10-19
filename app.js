@@ -83,9 +83,9 @@ const state = {
   mode: 'rider', // 'rider' | 'driver'
   activeTab: 'explore', // 'explore' | 'myrides' | 'profile'
   vehicleType: 'any', // 'bike' | 'auto' | 'car' | 'any' (flexible match)
-  pickup: 'Uppal Ring Road Metro, Hyderabad',
-  drop: 'Jangaon Bus Depot / Chowrasta',
-  distance: 84, // km
+  pickup: '',
+  drop: '',
+  distance: 0, // km
   fuelPrice: 105.5, // INR per Litre
   myBookings: [
     {
@@ -425,8 +425,8 @@ function updateUI() {
     }
     return parts[0];
   }
-  const pName = formatStopLabel(state.pickup, 'Uppal');
-  const dName = formatStopLabel(state.drop, 'Jangaon');
+  const pName = formatStopLabel(state.pickup, 'Pickup');
+  const dName = formatStopLabel(state.drop, 'Destination');
   const timelineStart = document.getElementById('timelineStartLabel');
   const timelineEnd = document.getElementById('timelineEndLabel');
   const timelineEndDist = document.getElementById('timelineEndDist');
@@ -438,7 +438,7 @@ function updateUI() {
     timelineEnd.textContent = dName;
     timelineEnd.title = state.drop || dName;
   }
-  if (timelineEndDist) timelineEndDist.textContent = `${state.distance} km`;
+  if (timelineEndDist) timelineEndDist.textContent = state.distance > 0 ? `${state.distance} km` : '-- km';
 
   // Re-render Ride Listings
   renderRideListings();
@@ -2787,6 +2787,11 @@ function updateDriverRatingAcrossApp(driverName, driverPhone, newRating) {
 // Tab navigation handler
 function switchTab(tabName) {
   state.activeTab = tabName;
+
+  // Clean up any lingering Google autocomplete containers
+  try {
+    document.querySelectorAll('.pac-container').forEach(el => el.remove());
+  } catch(e) {}
 
   document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
   const activeNav = document.getElementById(`nav-${tabName}`);

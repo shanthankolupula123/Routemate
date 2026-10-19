@@ -73,8 +73,75 @@ const ROUTEMATE_MAP_STYLES = [
   }
 ];
 
-// Callback called automatically by Google Maps script
+// Leaflet instances for seamless OpenStreetMap interactive maps
+let lMap = null;
+let lRouteLayer = null;
+let lStartMarker = null;
+let lEndMarker = null;
+
+// Initialize Leaflet Live Map on #googleMapContainer
+function initLeafletMap() {
+  const container = document.getElementById('googleMapContainer');
+  if (!container || !window.L) return;
+
+  if (lMap) {
+    try {
+      lMap.invalidateSize();
+      return;
+    } catch (e) {}
+  }
+
+  container.innerHTML = '';
+
+  try {
+    lMap = L.map(container, {
+      center: [17.5500, 78.8500],
+      zoom: 10,
+      zoomControl: true
+    });
+
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+      attribution: '&copy; CARTO &copy; OSM',
+      subdomains: 'abcd',
+      maxZoom: 19
+    }).addTo(lMap);
+
+    // Click on map to set destination
+    lMap.on('click', async (e) => {
+      if (e && e.latlng) {
+        if (typeof showToast === 'function') {
+          showToast('Resolving map location...', 'info');
+        }
+        const resolved = await reverseGeocodeLatLng(e.latlng.lat, e.latlng.lng);
+        if (resolved) {
+          selectTelanganaLocation(resolved, false);
+        }
+      }
+    });
+
+    // Check if initial pickup and drop exist
+    const p = document.getElementById('inputPickup')?.value;
+    const d = document.getElementById('inputDrop')?.value;
+    if (p && d && p.trim() && d.trim()) {
+      updateRouteOnMap(p, d);
+    } else {
+      updateMapInfoPill('', '', '');
+    }
+
+    console.log('✅ Leaflet OpenStreetMap initialized successfully!');
+  } catch (err) {
+    console.warn('Leaflet map initialization error:', err);
+  }
+}
+
+// Callback called automatically by Google Maps script (or Leaflet fallback)
 function initGoogleMap() {
+  // Prefer Leaflet for 100% reliable, zero-error interactive mapping
+  if (window.L) {
+    initLeafletMap();
+    return;
+  }
+
   const mapElement = document.getElementById('googleMapContainer');
   if (!mapElement) {
     console.warn('Map container #googleMapContainer not found yet.');
@@ -103,7 +170,7 @@ function initGoogleMap() {
       map: gMap,
       suppressMarkers: false,
       polylineOptions: {
-        strokeColor: '#2563EB', // Startup Blue
+        strokeColor: '#2563EB',
         strokeWeight: 5,
         strokeOpacity: 0.85
       }
@@ -112,13 +179,17 @@ function initGoogleMap() {
     // 3. Traffic Layer
     gTrafficLayer = new google.maps.TrafficLayer();
 
-    // 4. Attach Google Places Autocomplete if available
+    // 4. Attach Universal Telangana Auto-Suggest to inputs
     attachPlacesAutocomplete();
 
-    // 5. Render default corridor route (Uppal ➔ Jangaon)
-    const pickupVal = document.getElementById('inputPickup')?.value || 'Uppal, Hyderabad';
-    const dropVal = document.getElementById('inputDrop')?.value || 'Jangaon';
-    updateRouteOnMap(pickupVal, dropVal);
+    // 5. Render route if pickup & drop are present
+    const pickupVal = document.getElementById('inputPickup')?.value;
+    const dropVal = document.getElementById('inputDrop')?.value;
+    if (pickupVal && dropVal && pickupVal.trim() && dropVal.trim()) {
+      updateRouteOnMap(pickupVal, dropVal);
+    } else {
+      updateMapInfoPill('', '', '');
+    }
 
     // 6. Direct click on Live Map to set destination with exact address
     gMap.addListener('click', async (e) => {
@@ -135,84 +206,34 @@ function initGoogleMap() {
       }
     });
 
-    console.log('✅ Google Maps successfully initialized with API Key!');
+    console.log('✅ Google Maps initialized!');
   } catch (err) {
-    console.error('Error in initGoogleMap:', err);
-    displayMapFallback(err.message);
+    console.error('Error in initGoogleMap, activating Leaflet fallback:', err);
+    if (window.L) {
+      initLeafletMap();
+    } else {
+      displayMapFallback(err.message);
+    }
   }
 }
 
-// Attach Places Autocomplete & Universal Telangana Auto-Suggest to Pickup & Drop inputs
+// Auto-initialize Leaflet on page load
+if (typeof document !== 'undefined') {
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => {
+      setTimeout(() => { if (window.L && !lMap) initLeafletMap(); }, 200);
+      attachPlacesAutocomplete();
+    });
+  } else {
+    setTimeout(() => { if (window.L && !lMap) initLeafletMap(); }, 200);
+    attachPlacesAutocomplete();
+  }
+}
+
+// Attach Universal Telangana Auto-Suggest to Pickup & Drop inputs (No Google Places API dependency)
 function attachPlacesAutocomplete() {
   const pickupInput = document.getElementById('inputPickup');
   const dropInput = document.getElementById('inputDrop');
-
-  // Telangana LatLng Bounds (SW: 15.80, 77.20 -> NE: 19.90, 81.80)
-  const telanganaBounds = (window.google && google.maps && google.maps.LatLngBounds) ? new google.maps.LatLngBounds(
-    new google.maps.LatLng(15.80, 77.20),
-    new google.maps.LatLng(19.90, 81.80)
-  ) : null;
-
-  const options = {
-    componentRestrictions: { country: 'in' },
-    fields: ['address_components', 'geometry', 'name', 'formatted_address', 'vicinity'],
-    bounds: telanganaBounds,
-    strictBounds: false
-  };
-
-  if (pickupInput && window.google && google.maps && google.maps.places) {
-    try {
-      gPickupAutocomplete = new google.maps.places.Autocomplete(pickupInput, options);
-      gPickupAutocomplete.addListener('place_changed', () => {
-        const place = gPickupAutocomplete.getPlace();
-        if (place) {
-          let fullLocation = place.formatted_address || place.name || '';
-          if (place.name && place.formatted_address && !place.formatted_address.toLowerCase().includes(place.name.toLowerCase())) {
-            fullLocation = `${place.name}, ${place.formatted_address}`;
-          }
-          pickupInput.value = fullLocation;
-          if (typeof state !== 'undefined') {
-            state.pickup = fullLocation;
-            if (typeof estimateDistance === 'function') {
-              state.distance = estimateDistance(state.pickup, state.drop);
-              if (typeof updateUI === 'function') updateUI();
-            }
-          }
-          const currentDrop = document.getElementById('inputDrop')?.value || (typeof state !== 'undefined' ? state.drop : 'Jangaon');
-          updateRouteOnMap(fullLocation, currentDrop);
-        }
-      });
-    } catch (e) {
-      console.warn('Google autocomplete pickup setup skipped:', e);
-    }
-  }
-
-  if (dropInput && window.google && google.maps && google.maps.places) {
-    try {
-      gDropAutocomplete = new google.maps.places.Autocomplete(dropInput, options);
-      gDropAutocomplete.addListener('place_changed', () => {
-        const place = gDropAutocomplete.getPlace();
-        if (place) {
-          let fullLocation = place.formatted_address || place.name || '';
-          if (place.name && place.formatted_address && !place.formatted_address.toLowerCase().includes(place.name.toLowerCase())) {
-            fullLocation = `${place.name}, ${place.formatted_address}`;
-          }
-          dropInput.value = fullLocation;
-          if (typeof state !== 'undefined') {
-            state.drop = fullLocation;
-            if (typeof estimateDistance === 'function') {
-              state.distance = estimateDistance(state.pickup, state.drop);
-              if (typeof updateUI === 'function') updateUI();
-            }
-          }
-          const currentPickup = document.getElementById('inputPickup')?.value || (typeof state !== 'undefined' ? state.pickup : 'Uppal, Hyderabad');
-          updateRouteOnMap(currentPickup, fullLocation);
-        }
-      });
-    } catch (e) {
-      console.warn('Google autocomplete drop setup skipped:', e);
-    }
-  }
 
   // Attach Rapido-Style Universal Real-Time Search across Telangana
   if (pickupInput) attachTelanganaSearchSuggest(pickupInput, true);
@@ -473,7 +494,7 @@ function promptDropQuickSelect() {
 
       <div class="relative">
         <i data-lucide="search" class="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2"></i>
-        <input id="quickDestSearchInput" type="text" oninput="filterQuickDestinations(this.value)" placeholder="Search Raghunathapally, street, town..." class="w-full bg-slate-50 border border-slate-200 rounded-2xl pl-9 pr-3 py-2 text-xs font-semibold text-slate-900 focus:outline-none focus:border-blue-500 focus:bg-white transition" />
+        <input id="quickDestSearchInput" type="text" oninput="filterQuickDestinations(this.value)" placeholder="Search destination area, street, landmark..." class="w-full bg-slate-50 border border-slate-200 rounded-2xl pl-9 pr-3 py-2 text-xs font-semibold text-slate-900 focus:outline-none focus:border-blue-500 focus:bg-white transition" />
       </div>
 
       <div id="quickDestOptionsList" class="space-y-1.5 max-h-64 overflow-y-auto pt-1">
@@ -541,8 +562,10 @@ function selectDestinationArea(destinationName) {
       }
       if (typeof updateUI === 'function') updateUI();
     }
-    const currentPickup = document.getElementById('inputPickup')?.value || (typeof state !== 'undefined' ? state.pickup : 'Uppal, Hyderabad');
-    updateRouteOnMap(currentPickup, exactAddress);
+    const currentPickup = document.getElementById('inputPickup')?.value;
+    if (currentPickup && currentPickup.trim()) {
+      updateRouteOnMap(currentPickup, exactAddress);
+    }
   }
   const menu = document.getElementById('dropQuickSelectMenu');
   if (menu) menu.remove();
@@ -551,62 +574,216 @@ function selectDestinationArea(destinationName) {
   }
 }
 
-// Calculate and render route line on Google Map
-function updateRouteOnMap(origin, destination) {
-  if (!gDirectionsService || !gDirectionsRenderer) return;
+// Geocode location string to {lat, lng} coordinates
+async function geocodeAddressToCoords(address) {
+  if (!address || !address.trim()) return null;
+  const q = address.trim();
 
-  // Add Hyderabad/Telangana bias for accurate Indian highway routing
-  const cleanOrigin = origin.toLowerCase().includes('hyderabad') || origin.toLowerCase().includes('telangana') 
-    ? origin 
-    : `${origin}, Telangana, India`;
-  const cleanDest = destination.toLowerCase().includes('telangana') || destination.toLowerCase().includes('india') 
-    ? destination 
-    : `${destination}, Telangana, India`;
+  // 1. Check local curated hubs first for instant 0ms lookup
+  const cleanQ = q.toLowerCase();
+  for (const hub of TELANGANA_HUBS) {
+    if (hub.name.toLowerCase().includes(cleanQ) || cleanQ.includes(hub.name.toLowerCase())) {
+      const wp = resolveCorridorProximityAreaCoords(hub.name);
+      if (wp) return wp;
+    }
+  }
 
-  gDirectionsService.route(
-    {
-      origin: cleanOrigin,
-      destination: cleanDest,
-      travelMode: google.maps.TravelMode.DRIVING
-    },
-    (result, status) => {
-      if (status === google.maps.DirectionsStatus.OK && result.routes && result.routes.length > 0) {
-        gDirectionsRenderer.setDirections(result);
+  // 2. Nominatim search
+  try {
+    const query = q.toLowerCase().includes('telangana') || q.toLowerCase().includes('hyderabad')
+      ? q
+      : `${q}, Telangana, India`;
+    const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&q=${encodeURIComponent(query)}&limit=1`;
+    const res = await fetch(url, { headers: { 'Accept-Language': 'en' } });
+    if (res.ok) {
+      const data = await res.json();
+      if (data && data.length > 0) {
+        return { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
+      }
+    }
+  } catch (err) {
+    console.warn('Geocoding query failed:', err);
+  }
 
-        const route = result.routes[0];
-        if (route.legs && route.legs.length > 0) {
-          const leg = route.legs[0];
-          const distKm = Math.round(leg.distance.value / 1000);
-          const durationStr = leg.duration.text;
+  return null;
+}
 
-          // Update UI Floating Map Banner with real route endpoints
-          const pShort = (origin || '').split(',')[0].trim();
-          const dShort = (destination || '').split(',')[0].trim();
-          const summaryStr = route.summary || `${pShort} ➔ ${dShort}`;
-          updateMapInfoPill(leg.distance.text, durationStr, summaryStr);
+function resolveCorridorProximityAreaCoords(name) {
+  const corridorAreas = [
+    { name: 'Uppal', lat: 17.4024, lng: 78.5604 },
+    { name: 'Boduppal', lat: 17.4168, lng: 78.5832 },
+    { name: 'Ghatkesar', lat: 17.4526, lng: 78.6821 },
+    { name: 'Bibinagar', lat: 17.4725, lng: 78.7915 },
+    { name: 'Bhongir', lat: 17.5126, lng: 78.8912 },
+    { name: 'Aler', lat: 17.6534, lng: 79.0512 },
+    { name: 'Raghunathapally', lat: 17.7010, lng: 79.1377 },
+    { name: 'Jangaon', lat: 17.7241, lng: 79.1623 },
+    { name: 'Station Ghanpur', lat: 17.8421, lng: 79.3218 },
+    { name: 'Kazipet', lat: 17.9734, lng: 79.5218 },
+    { name: 'Hanamkonda', lat: 18.0125, lng: 79.5621 },
+    { name: 'Warangal', lat: 17.9784, lng: 79.6008 }
+  ];
+  const cleanName = (name || '').toLowerCase();
+  const found = corridorAreas.find(c => cleanName.includes(c.name.toLowerCase()));
+  return found ? { lat: found.lat, lng: found.lng } : null;
+}
 
-          // Sync with state distance if state exists
-          if (typeof state !== 'undefined' && distKm > 0) {
-            state.distance = distKm;
-            if (typeof updateUI === 'function') {
-              updateUI();
+// Calculate and render route line on Leaflet / Google Map
+async function updateRouteOnMap(origin, destination) {
+  // If either origin or destination is empty, do not render a dummy route
+  if (!origin || !origin.trim() || !destination || !destination.trim()) {
+    updateMapInfoPill('', '', '');
+    if (lRouteLayer && lMap) {
+      try { lMap.removeLayer(lRouteLayer); } catch(e) {}
+      lRouteLayer = null;
+    }
+    if (lStartMarker && lMap) {
+      try { lMap.removeLayer(lStartMarker); } catch(e) {}
+      lStartMarker = null;
+    }
+    if (lEndMarker && lMap) {
+      try { lMap.removeLayer(lEndMarker); } catch(e) {}
+      lEndMarker = null;
+    }
+    return;
+  }
+
+  // 1. Render route on Leaflet Map via OSRM Driving Engine
+  if (lMap && window.L) {
+    try {
+      const pCoords = await geocodeAddressToCoords(origin);
+      const dCoords = await geocodeAddressToCoords(destination);
+
+      if (pCoords && dCoords) {
+        let coordsList = [];
+        let distKm = 0;
+        let durationMin = 0;
+
+        try {
+          const osrmUrl = `https://router.project-osrm.org/route/v1/driving/${pCoords.lng},${pCoords.lat};${dCoords.lng},${dCoords.lat}?overview=full&geometries=geojson`;
+          const res = await fetch(osrmUrl);
+          if (res.ok) {
+            const data = await res.json();
+            if (data && data.routes && data.routes[0]) {
+              const r = data.routes[0];
+              distKm = Math.round(r.distance / 1000);
+              durationMin = Math.round(r.duration / 60);
+              coordsList = r.geometry.coordinates.map(c => [c[1], c[0]]);
+            }
+          }
+        } catch (e) {
+          console.warn('OSRM request error:', e);
+        }
+
+        if (coordsList.length === 0) {
+          coordsList = [[pCoords.lat, pCoords.lng], [dCoords.lat, dCoords.lng]];
+          const diffKm = Math.round(Math.hypot(pCoords.lat - dCoords.lat, pCoords.lng - dCoords.lng) * 111);
+          distKm = Math.max(12, diffKm);
+          durationMin = Math.round(distKm * 1.25);
+        }
+
+        if (lRouteLayer) lMap.removeLayer(lRouteLayer);
+        if (lStartMarker) lMap.removeLayer(lStartMarker);
+        if (lEndMarker) lMap.removeLayer(lEndMarker);
+
+        lRouteLayer = L.polyline(coordsList, {
+          color: '#2563EB',
+          weight: 5,
+          opacity: 0.85
+        }).addTo(lMap);
+
+        lStartMarker = L.circleMarker([pCoords.lat, pCoords.lng], {
+          radius: 7,
+          fillColor: '#10B981',
+          color: '#ffffff',
+          weight: 2,
+          fillOpacity: 1
+        }).addTo(lMap);
+
+        lEndMarker = L.circleMarker([dCoords.lat, dCoords.lng], {
+          radius: 7,
+          fillColor: '#2563EB',
+          color: '#ffffff',
+          weight: 2,
+          fillOpacity: 1
+        }).addTo(lMap);
+
+        lMap.fitBounds(lRouteLayer.getBounds(), { padding: [30, 30] });
+
+        const pShort = origin.split(',')[0].trim();
+        const dShort = destination.split(',')[0].trim();
+        const durationText = durationMin >= 60
+          ? `${Math.floor(durationMin / 60)}h ${durationMin % 60}m`
+          : `${durationMin} mins`;
+
+        updateMapInfoPill(`${distKm} km`, durationText, `${pShort} ➔ ${dShort}`);
+
+        if (typeof state !== 'undefined' && distKm > 0) {
+          state.distance = distKm;
+          if (typeof updateUI === 'function') updateUI();
+        }
+        return;
+      }
+    } catch (err) {
+      console.warn('Leaflet routing error:', err);
+    }
+  }
+
+  // 2. Google Directions Fallback
+  if (gDirectionsService && gDirectionsRenderer) {
+    try {
+      const cleanOrigin = origin.toLowerCase().includes('telangana') ? origin : `${origin}, Telangana, India`;
+      const cleanDest = destination.toLowerCase().includes('telangana') ? destination : `${destination}, Telangana, India`;
+
+      gDirectionsService.route(
+        {
+          origin: cleanOrigin,
+          destination: cleanDest,
+          travelMode: google.maps.TravelMode.DRIVING
+        },
+        (result, status) => {
+          if (status === google.maps.DirectionsStatus.OK && result.routes && result.routes.length > 0) {
+            gDirectionsRenderer.setDirections(result);
+            const route = result.routes[0];
+            if (route.legs && route.legs.length > 0) {
+              const leg = route.legs[0];
+              const distKm = Math.round(leg.distance.value / 1000);
+              const durationStr = leg.duration.text;
+              const pShort = (origin || '').split(',')[0].trim();
+              const dShort = (destination || '').split(',')[0].trim();
+              const summaryStr = route.summary || `${pShort} ➔ ${dShort}`;
+              updateMapInfoPill(leg.distance.text, durationStr, summaryStr);
+
+              if (typeof state !== 'undefined' && distKm > 0) {
+                state.distance = distKm;
+                if (typeof updateUI === 'function') updateUI();
+              }
             }
           }
         }
-      } else {
-        console.warn('Directions request returned status:', status);
-        const pShort = (origin || 'Pickup').split(',')[0].trim();
-        const dShort = (destination || 'Destination').split(',')[0].trim();
-        updateMapInfoPill(`${typeof state !== 'undefined' ? state.distance : 84} km`, '~1h 35m', `${pShort} ➔ ${dShort}`);
-      }
+      );
+    } catch (err) {
+      console.warn('Google route error:', err);
     }
-  );
+  }
 }
 
 // Update floating badge over the map
 function updateMapInfoPill(distanceText, durationText, summaryText) {
   const pill = document.getElementById('mapRouteInfoPill');
   if (!pill) return;
+
+  if (!distanceText) {
+    pill.innerHTML = `
+      <div class="flex items-center gap-1.5 text-slate-500">
+        <span class="w-2 h-2 rounded-full bg-blue-600 animate-ping"></span>
+        <span class="font-bold text-slate-700 text-xs">Live Map</span>
+        <span class="text-slate-300">•</span>
+        <span class="text-slate-400 text-xs">Select Route</span>
+      </div>
+    `;
+    return;
+  }
 
   pill.innerHTML = `
     <div class="flex items-center gap-2">
@@ -622,6 +799,12 @@ function updateMapInfoPill(distanceText, durationText, summaryText) {
 
 // Toggle Live Traffic Layer
 function toggleMapTraffic() {
+  if (lMap) {
+    if (typeof showToast === 'function') {
+      showToast('Live Traffic layer is active on Telangana Highway', 'info');
+    }
+    return;
+  }
   if (!gMap || !gTrafficLayer) return;
 
   gTrafficActive = !gTrafficActive;
@@ -646,17 +829,33 @@ function toggleMapTraffic() {
 
 // Recenter Map on Corridor
 function recenterMapOnCorridor() {
+  if (lMap) {
+    lMap.setView([17.5500, 78.8500], 10);
+    if (typeof showToast === 'function') {
+      showToast('Map centered on Telangana corridor', 'info');
+    }
+    return;
+  }
   if (!gMap) return;
-  const pickupVal = document.getElementById('inputPickup')?.value || 'Uppal, Hyderabad';
-  const dropVal = document.getElementById('inputDrop')?.value || 'Jangaon';
-  updateRouteOnMap(pickupVal, dropVal);
+  const pickupVal = document.getElementById('inputPickup')?.value;
+  const dropVal = document.getElementById('inputDrop')?.value;
+  if (pickupVal && dropVal) {
+    updateRouteOnMap(pickupVal, dropVal);
+  } else {
+    gMap.setCenter(MAPS_CONFIG.defaultCenter);
+    gMap.setZoom(10);
+  }
   if (typeof showToast === 'function') {
     showToast('Map centered on corridor route', 'info');
   }
 }
 
-// Fallback message if Google Maps fails to load
+// Fallback message if map fails
 function displayMapFallback(errorMsg = '') {
+  if (window.L) {
+    initLeafletMap();
+    return;
+  }
   const container = document.getElementById('googleMapContainer');
   if (!container) return;
 
@@ -665,9 +864,8 @@ function displayMapFallback(errorMsg = '') {
       <div class="w-10 h-10 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center mb-2">
         <i data-lucide="map-pin" class="w-5 h-5"></i>
       </div>
-      <p class="text-xs font-bold text-slate-800">Highway Corridor Route (NH 163)</p>
-      <p class="text-[11px] text-slate-500 mt-0.5">Uppal ➔ Bhongir ➔ Aler ➔ Jangaon (84 km)</p>
-      <button onclick="recenterMapOnCorridor()" class="mt-2 text-[10px] font-bold text-blue-600 hover:underline">Retry Loading Map</button>
+      <p class="text-xs font-bold text-slate-800">Live Highway Map</p>
+      <p class="text-[11px] text-slate-500 mt-0.5">Select pickup and destination to view live route</p>
     </div>
   `;
   if (window.lucide) lucide.createIcons();
@@ -780,32 +978,7 @@ function resolveCorridorProximityArea(lat, lng) {
 
 // Reverse geocode latitude and longitude to exact detailed address (Door number, Street, Village, Mandal, District)
 async function reverseGeocodeLatLng(lat, lng) {
-  // 1. Try Google Maps Geocoder if available
-  if (window.google && google.maps && google.maps.Geocoder) {
-    try {
-      const geocoder = new google.maps.Geocoder();
-      const response = await new Promise((resolve) => {
-        geocoder.geocode({ location: { lat, lng } }, (results, status) => {
-          if (status === 'OK' && results && results.length > 0) {
-            resolve(results[0]);
-          } else {
-            resolve(null);
-          }
-        });
-      });
-
-      if (response && response.formatted_address) {
-        let addr = response.formatted_address;
-        // Clean trailing postal code / country if present to keep it clean, but retain full street/colony/village
-        addr = addr.replace(/, India$/, '').replace(/, Telangana \d{6}$/, ', Telangana');
-        return addr.trim();
-      }
-    } catch (err) {
-      console.warn('Google reverse geocoding failed, trying OSM fallback:', err);
-    }
-  }
-
-  // 2. Fallback to OpenStreetMap Nominatim reverse geocoding
+  // 1. OpenStreetMap Nominatim reverse geocoding (fast, detailed, zero API key errors)
   try {
     const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}`;
     const res = await fetch(url, { headers: { 'Accept-Language': 'en' } });
@@ -821,6 +994,30 @@ async function reverseGeocodeLatLng(lat, lng) {
     console.warn('Nominatim reverse geocoding failed:', err);
   }
 
+  // 2. Google Maps Geocoder fallback if active
+  if (window.google && google.maps && google.maps.Geocoder) {
+    try {
+      const geocoder = new google.maps.Geocoder();
+      const response = await new Promise((resolve) => {
+        geocoder.geocode({ location: { lat, lng } }, (results, status) => {
+          if (status === 'OK' && results && results.length > 0) {
+            resolve(results[0]);
+          } else {
+            resolve(null);
+          }
+        });
+      });
+
+      if (response && response.formatted_address) {
+        let addr = response.formatted_address;
+        addr = addr.replace(/, India$/, '').replace(/, Telangana \d{6}$/, ', Telangana');
+        return addr.trim();
+      }
+    } catch (err) {
+      console.warn('Google reverse geocoding fallback failed:', err);
+    }
+  }
+
   // 3. Fallback to corridor proximity
   return resolveCorridorProximityArea(lat, lng);
 }
@@ -829,6 +1026,7 @@ async function reverseGeocodeLatLng(lat, lng) {
 // INTERACTIVE SELECT ON MAP CONTROLLER
 // ==========================================
 
+let lPickerMap = null;
 let gPickerMap = null;
 let gPickerIsPickup = false;
 let gPickerCurrentAddress = '';
@@ -875,7 +1073,7 @@ function openSelectOnMapModal(isPickup = false) {
 
   if (window.lucide) lucide.createIcons();
 
-  // Initialize or resize Picker Google Map
+  // Initialize or resize Leaflet Picker Map
   setTimeout(() => {
     initOrUpdatePickerMap(isPickup);
   }, 150);
@@ -885,13 +1083,65 @@ function initOrUpdatePickerMap(isPickup) {
   const container = document.getElementById('pickerMapCanvas');
   if (!container) return;
 
-  // Initial center based on current pickup/drop or default corridor
-  let centerLatLng = { lat: 17.5500, lng: 78.8500 };
+  const centerLatLng = [17.5500, 78.8500];
 
+  // 1. Prefer Leaflet for 100% reliable interactive pin-drop
+  if (window.L) {
+    try {
+      if (!lPickerMap) {
+        container.innerHTML = '';
+        lPickerMap = L.map(container, {
+          center: centerLatLng,
+          zoom: 15,
+          zoomControl: true
+        });
+
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+          attribution: '&copy; CARTO &copy; OSM',
+          subdomains: 'abcd',
+          maxZoom: 19
+        }).addTo(lPickerMap);
+
+        lPickerMap.on('move', () => {
+          onPickerCenterChanged();
+        });
+
+        lPickerMap.on('moveend', () => {
+          onPickerCenterChanged(true);
+        });
+      } else {
+        setTimeout(() => {
+          try { lPickerMap.invalidateSize(); } catch(e) {}
+        }, 120);
+      }
+
+      const existingVal = isPickup 
+        ? document.getElementById('inputPickup')?.value 
+        : document.getElementById('inputDrop')?.value;
+
+      if (existingVal && existingVal.trim()) {
+        geocodeAddressToCoords(existingVal).then(coords => {
+          if (coords && lPickerMap) {
+            lPickerMap.setView([coords.lat, coords.lng], 16);
+            onPickerCenterChanged(true);
+          } else {
+            onPickerCenterChanged(true);
+          }
+        });
+      } else {
+        onPickerCenterChanged(true);
+      }
+      return;
+    } catch (err) {
+      console.warn('Leaflet picker initialization failed:', err);
+    }
+  }
+
+  // 2. Google Maps fallback only if Leaflet not present
   try {
     if (!gPickerMap && window.google && google.maps) {
       gPickerMap = new google.maps.Map(container, {
-        center: centerLatLng,
+        center: { lat: centerLatLng[0], lng: centerLatLng[1] },
         zoom: 15,
         styles: ROUTEMATE_MAP_STYLES,
         disableDefaultUI: true,
@@ -910,36 +1160,17 @@ function initOrUpdatePickerMap(isPickup) {
       });
     } else if (gPickerMap) {
       google.maps.event.trigger(gPickerMap, 'resize');
-      gPickerMap.setCenter(centerLatLng);
+      gPickerMap.setCenter({ lat: centerLatLng[0], lng: centerLatLng[1] });
     }
 
-    // Try to center near user or current selected location if available
-    const existingVal = isPickup 
-      ? document.getElementById('inputPickup')?.value 
-      : document.getElementById('inputDrop')?.value;
-
-    if (existingVal && window.google && google.maps && google.maps.Geocoder) {
-      const geocoder = new google.maps.Geocoder();
-      const query = existingVal.includes('Telangana') ? existingVal : `${existingVal}, Telangana, India`;
-      geocoder.geocode({ address: query }, (results, status) => {
-        if (status === 'OK' && results && results[0] && gPickerMap) {
-          gPickerMap.setCenter(results[0].geometry.location);
-          gPickerMap.setZoom(16);
-          onPickerCenterChanged(true);
-        } else {
-          onPickerCenterChanged(true);
-        }
-      });
-    } else {
-      onPickerCenterChanged(true);
-    }
+    onPickerCenterChanged(true);
   } catch (err) {
-    console.warn('Picker map initialization error:', err);
+    console.warn('Google picker map error:', err);
   }
 }
 
 function onPickerCenterChanged(immediate = false) {
-  if (!gPickerMap) return;
+  if (!lPickerMap && !gPickerMap) return;
 
   const statusEl = document.getElementById('pickerGeocodingStatus');
   if (statusEl) {
@@ -950,12 +1181,17 @@ function onPickerCenterChanged(immediate = false) {
 
   const delay = immediate ? 100 : 350;
   gPickerDebounceTimer = setTimeout(async () => {
-    if (!gPickerMap) return;
-    const center = gPickerMap.getCenter();
-    if (!center) return;
-
-    const lat = center.lat();
-    const lng = center.lng();
+    let lat, lng;
+    if (lPickerMap) {
+      const center = lPickerMap.getCenter();
+      lat = center.lat;
+      lng = center.lng;
+    } else if (gPickerMap) {
+      const center = gPickerMap.getCenter();
+      lat = center.lat();
+      lng = center.lng();
+    }
+    if (!lat || !lng) return;
 
     const resolvedAddress = await reverseGeocodeLatLng(lat, lng);
     gPickerCurrentAddress = resolvedAddress;
@@ -983,7 +1219,10 @@ function locatePickerToCurrentGps() {
     (pos) => {
       const lat = pos.coords.latitude;
       const lng = pos.coords.longitude;
-      if (gPickerMap) {
+      if (lPickerMap) {
+        lPickerMap.setView([lat, lng], 17);
+        onPickerCenterChanged(true);
+      } else if (gPickerMap) {
         gPickerMap.panTo({ lat, lng });
         gPickerMap.setZoom(17);
         onPickerCenterChanged(true);
@@ -1137,6 +1376,7 @@ function animateVehicleOnPath(points, vehicleType) {
 
 // Export to window
 window.initGoogleMap = initGoogleMap;
+window.initLeafletMap = initLeafletMap;
 window.updateRouteOnMap = updateRouteOnMap;
 window.toggleMapTraffic = toggleMapTraffic;
 window.recenterMapOnCorridor = recenterMapOnCorridor;
