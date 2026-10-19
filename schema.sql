@@ -220,4 +220,26 @@ create policy "Allow public read access to feedbacks" on public.feedbacks for se
 create policy "Allow public insert to feedbacks" on public.feedbacks for insert with check (true);
 create policy "Allow public update to feedbacks" on public.feedbacks for update using (true);
 
+-- ==============================================================================
+-- 6. RIDE_MESSAGES TABLE (In-App Real-Time Chat via Supabase Realtime)
+-- ==============================================================================
+create table if not exists public.ride_messages (
+  id uuid primary key default uuid_generate_v4(),
+  ride_id text not null,
+  sender_id text not null,
+  sender_name text not null,
+  sender_role text default 'rider',
+  message text not null,
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
+create index if not exists idx_ride_messages_ride_id on public.ride_messages(ride_id);
+
+alter table public.ride_messages enable row level security;
+drop policy if exists "Allow public read access to ride_messages" on public.ride_messages;
+create policy "Allow public read access to ride_messages" on public.ride_messages for select using (true);
+drop policy if exists "Allow public insert to ride_messages" on public.ride_messages;
+create policy "Allow public insert to ride_messages" on public.ride_messages for insert with check (true);
+
+
 

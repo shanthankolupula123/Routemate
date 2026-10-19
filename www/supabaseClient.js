@@ -1134,15 +1134,20 @@ const db = {
 
     // Broadcast an event across all channels
     _emit(event, request) {
-      this._activeRequest = request;
-      
-      // Update local storage
+      if (event !== 'chat_message' && event !== 'new_feedback') {
+        this._activeRequest = request;
+        
+        // Update local storage
+        try {
+          if (request && request.status !== 'cancelled') {
+            localStorage.setItem('routemate_active_ride_request', JSON.stringify(request));
+          } else {
+            localStorage.removeItem('routemate_active_ride_request');
+          }
+        } catch (e) {}
+      }
+
       try {
-        if (request && request.status !== 'cancelled') {
-          localStorage.setItem('routemate_active_ride_request', JSON.stringify(request));
-        } else {
-          localStorage.removeItem('routemate_active_ride_request');
-        }
         localStorage.setItem('routemate_realtime_event', JSON.stringify({
           event,
           request,
@@ -1174,6 +1179,21 @@ const db = {
 
     _handleIncomingEvent(event, request) {
       if (event === 'new_feedback') {
+        this._notify(event, request);
+        return;
+      }
+      if (event === 'chat_message') {
+        // Cache incoming chat message per ride
+        if (request && request.rideId) {
+          try {
+            const cacheKey = 'routemate_chat_' + request.rideId;
+            const cached = JSON.parse(localStorage.getItem(cacheKey) || '[]');
+            if (!cached.some(m => m.id === request.id)) {
+              cached.push(request);
+              localStorage.setItem(cacheKey, JSON.stringify(cached.slice(-50)));
+            }
+          } catch(e) {}
+        }
         this._notify(event, request);
         return;
       }
@@ -1549,6 +1569,16 @@ const db = {
         timestamp: new Date().toISOString()
       };
 
+      // Cache locally per ride
+      try {
+        const cacheKey = 'routemate_chat_' + msg.rideId;
+        const cached = JSON.parse(localStorage.getItem(cacheKey) || '[]');
+        if (!cached.some(m => m.id === msg.id)) {
+          cached.push(msg);
+          localStorage.setItem(cacheKey, JSON.stringify(cached.slice(-50)));
+        }
+      } catch (e) {}
+
       // Broadcast locally & to other tabs
       this._emit('chat_message', msg);
 
@@ -1568,7 +1598,7 @@ const db = {
       if (client) {
         try {
           client.from('ride_messages').insert([{
-            ride_id: msg.rideId,
+            ride_id: String(msg.rideId),
             sender_id: String(msg.senderId),
             sender_name: msg.senderName,
             sender_role: msg.senderRole,
@@ -1583,27 +1613,39 @@ const db = {
 
     // 8. Fetch Chat Messages for a Ride
     async fetchChatMessages(rideId) {
+      let messages = [];
       const client = getSupabaseClient();
-      if (!client || !rideId) return [];
-      try {
-        const { data, error } = await client
-          .from('ride_messages')
-          .select('*')
-          .eq('ride_id', rideId)
-          .order('created_at', { ascending: true });
-        if (!error && Array.isArray(data)) {
-          return data.map(m => ({
-            id: m.id,
-            rideId: m.ride_id,
-            text: m.message,
-            senderId: m.sender_id,
-            senderName: m.sender_name,
-            senderRole: m.sender_role,
-            timestamp: m.created_at
-          }));
-        }
-      } catch (e) {}
-      return [];
+      if (client && rideId) {
+        try {
+          const { data, error } = await client
+            .from('ride_messages')
+            .select('*')
+            .eq('ride_id', String(rideId))
+            .order('created_at', { ascending: true });
+          if (!error && Array.isArray(data)) {
+            messages = data.map(m => ({
+              id: m.id,
+              rideId: m.ride_id,
+              text: m.message,
+              senderId: m.sender_id,
+              senderName: m.sender_name,
+              senderRole: m.sender_role,
+              timestamp: m.created_at
+            }));
+          }
+        } catch (e) {}
+      }
+
+      // If database is empty or table not yet created, load from localStorage
+      if (messages.length === 0 && rideId) {
+        try {
+          const cached = JSON.parse(localStorage.getItem('routemate_chat_' + rideId) || '[]');
+          if (Array.isArray(cached) && cached.length > 0) {
+            messages = cached;
+          }
+        } catch (e) {}
+      }
+      return messages;
     }
   },
 

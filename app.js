@@ -1663,11 +1663,16 @@ function handleRealtimeMatchingEvent(event, request) {
 // IN-APP REALTIME CHAT (SUPABASE WEBSOCKETS)
 // ==========================================
 
-function openInAppChatModal() {
+async function openInAppChatModal() {
   const trip = state.currentActiveRide || state.activeDriverTrip || (window.db?.matching?._activeRequest);
   if (!trip) {
     showToast('No active ride in progress for chat.', 'info');
     return;
+  }
+
+  // Ensure Supabase Realtime channel is initialized
+  if (window.db && window.db.matching && typeof window.db.matching.init === 'function') {
+    window.db.matching.init();
   }
 
   const isDriver = state.activeRideRole === 'driver';
@@ -1681,6 +1686,7 @@ function openInAppChatModal() {
   const roleEl = document.getElementById('chatRecipientRolePill');
   const avatarEl = document.getElementById('chatRecipientAvatar');
   const unreadDot = document.getElementById('chatUnreadDot');
+  const bannerUnreadDot = document.getElementById('bannerChatUnreadDot');
 
   if (nameEl) nameEl.textContent = otherName;
   if (roleEl) {
@@ -1691,6 +1697,7 @@ function openInAppChatModal() {
   }
   if (avatarEl) avatarEl.src = otherAvatar;
   if (unreadDot) unreadDot.classList.add('hidden');
+  if (bannerUnreadDot) bannerUnreadDot.classList.add('hidden');
 
   renderChatMessagesList();
 
@@ -1704,6 +1711,20 @@ function openInAppChatModal() {
   if (input) setTimeout(() => input.focus(), 150);
 
   if (window.lucide) lucide.createIcons();
+
+  // Load chat history from Supabase / local storage
+  const rideId = trip.id || 'corridor-active';
+  if (window.db && window.db.matching && typeof window.db.matching.fetchChatMessages === 'function') {
+    try {
+      const messages = await window.db.matching.fetchChatMessages(rideId);
+      if (Array.isArray(messages) && messages.length > 0) {
+        state.chatMessages = messages;
+        renderChatMessagesList();
+      }
+    } catch (e) {
+      console.warn('Error fetching chat messages:', e);
+    }
+  }
 }
 
 function renderChatMessagesList() {
@@ -1754,7 +1775,7 @@ async function sendInAppChatMessage() {
   if (!text) return;
 
   const trip = state.currentActiveRide || state.activeDriverTrip || (window.db?.matching?._activeRequest);
-  const rideId = trip ? trip.id : 'corridor-active';
+  const rideId = trip ? (trip.id || 'corridor-active') : 'corridor-active';
   const sender = {
     id: state.currentUser ? state.currentUser.id : 'usr_anon',
     name: state.currentUser ? (state.currentUser.name || 'Commuter') : 'Commuter',
@@ -1763,6 +1784,21 @@ async function sendInAppChatMessage() {
   };
 
   input.value = '';
+
+  // Optimistic instant local update
+  const localMsg = {
+    id: 'msg_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
+    rideId,
+    text,
+    senderId: sender.id,
+    senderName: sender.name,
+    senderRole: sender.role,
+    timestamp: new Date().toISOString()
+  };
+
+  if (!state.chatMessages) state.chatMessages = [];
+  state.chatMessages.push(localMsg);
+  renderChatMessagesList();
 
   if (window.db && window.db.matching && window.db.matching.sendChatMessage) {
     await window.db.matching.sendChatMessage(rideId, text, sender);
@@ -1791,6 +1827,8 @@ function handleIncomingChatMessage(msg) {
   } else {
     const unreadDot = document.getElementById('chatUnreadDot');
     if (unreadDot) unreadDot.classList.remove('hidden');
+    const bannerUnreadDot = document.getElementById('bannerChatUnreadDot');
+    if (bannerUnreadDot) bannerUnreadDot.classList.remove('hidden');
 
     const currentRole = state.activeRideRole || 'rider';
     const isMe = msg.senderRole === currentRole;
@@ -2187,21 +2225,33 @@ function renderLiveTrackingStage(request, role = 'rider') {
     const pinEl = document.getElementById('trackingPartyPin');
     const hudTitle = document.getElementById('trackingHudTitle');
     const callBtnLabel = document.getElementById('trackingCallBtnLabel');
+    const phoneSub = document.getElementById('callButtonPhoneSub');
+    const roleBadge = document.getElementById('trackingPartyRoleBadge');
+    const rideAcceptedActionsContainer = document.getElementById('rideAcceptedActionsContainer');
 
     if (origEl) origEl.textContent = request.pickup;
     if (destEl) destEl.textContent = request.drop_location || request.drop;
     if (pinEl) pinEl.textContent = request.pin || '4821';
+
+    const targetPhone = isDriver 
+      ? (request.rider_phone || request.phone || '+91 98480 23145')
+      : (request.driver_phone || request.phone || '+91 94942 85249');
+
+    if (phoneSub) phoneSub.textContent = targetPhone;
+    if (rideAcceptedActionsContainer) rideAcceptedActionsContainer.classList.remove('hidden');
 
     if (isDriver) {
       if (nameEl) nameEl.textContent = request.rider_name || 'Passenger';
       if (vehEl) vehEl.textContent = `Passenger • ${request.seats || 1} Seat (${request.payment_method === 'cash' ? 'Cash' : 'UPI'})`;
       if (avatarEl) avatarEl.src = request.rider_avatar || 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=120&h=120&q=80';
       if (callBtnLabel) callBtnLabel.textContent = 'Call Passenger';
+      if (roleBadge) roleBadge.textContent = 'Passenger Ready';
     } else {
       if (nameEl) nameEl.textContent = request.driver_name || 'Verified Driver';
       if (vehEl) vehEl.textContent = `${request.driver_vehicle_name || 'Commuter Vehicle'} • ${request.driver_vehicle_number || 'TS 08 EK 4321'}`;
       if (avatarEl) avatarEl.src = request.driver_avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=120&h=120&q=80';
       if (callBtnLabel) callBtnLabel.textContent = 'Call Driver';
+      if (roleBadge) roleBadge.textContent = stage === 'driver_accepted' ? 'Driver Assigned' : 'In Transit';
     }
 
     const driverHeadingActions = document.getElementById('trackingDriverHeadingActionContainer');
@@ -2270,6 +2320,8 @@ function updateActiveRideBanner() {
   const roleEl = document.getElementById('activeRideBannerRole');
   const subEl = document.getElementById('activeRideBannerSub');
   const pulseEl = document.getElementById('activeRideBannerPulse');
+  const bannerCallBtn = document.getElementById('bannerCallBtn');
+  const bannerChatBtn = document.getElementById('bannerChatBtn');
 
   if (roleEl) roleEl.textContent = isDriver ? 'Driver' : 'Rider';
 
@@ -2277,14 +2329,20 @@ function updateActiveRideBanner() {
     if (statusEl) statusEl.textContent = 'Connecting to Verified Drivers...';
     if (subEl) subEl.textContent = `${req.pickup} ➔ ${req.drop_location || req.drop} • ₹${req.fare}`;
     if (pulseEl) pulseEl.className = 'w-3 h-3 rounded-full bg-amber-400 live-pulse flex-shrink-0';
+    if (bannerCallBtn) bannerCallBtn.classList.add('hidden');
+    if (bannerChatBtn) bannerChatBtn.classList.add('hidden');
   } else if (req.status === 'driver_accepted') {
     if (statusEl) statusEl.textContent = isDriver ? 'Heading to Passenger Pickup' : 'Driver Assigned • En Route';
     if (subEl) subEl.textContent = isDriver ? `Passenger: ${req.rider_name || 'Commuter'} • PIN: ${req.pin}` : `Driver: ${req.driver_name || 'Verified Driver'} (${req.driver_vehicle_number || 'TS 08'})`;
     if (pulseEl) pulseEl.className = 'w-3 h-3 rounded-full bg-emerald-400 live-pulse flex-shrink-0';
+    if (bannerCallBtn) bannerCallBtn.classList.remove('hidden');
+    if (bannerChatBtn) bannerChatBtn.classList.remove('hidden');
   } else if (req.status === 'ride_started') {
     if (statusEl) statusEl.textContent = 'Ride In Progress • In Transit';
     if (subEl) subEl.textContent = `${req.pickup} ➔ ${req.drop_location || req.drop}`;
     if (pulseEl) pulseEl.className = 'w-3 h-3 rounded-full bg-blue-400 live-pulse flex-shrink-0';
+    if (bannerCallBtn) bannerCallBtn.classList.remove('hidden');
+    if (bannerChatBtn) bannerChatBtn.classList.remove('hidden');
   }
 
   banner.classList.remove('hidden');
@@ -2299,10 +2357,27 @@ function openActiveRideModal() {
   }
 }
 
+// Open native phone dialer directly with the other party's phone number pre-filled
+function callOtherParty() {
+  const trip = state.currentActiveRide || state.activeDriverTrip || (window.db?.matching?._activeRequest);
+  const isDriver = state.activeRideRole === 'driver';
+  const targetPhone = isDriver 
+    ? (trip?.rider_phone || trip?.phone || '+91 98480 23145')
+    : (trip?.driver_phone || trip?.phone || '+91 94942 85249');
+  const targetName = isDriver ? (trip?.rider_name || 'Passenger') : (trip?.driver_name || 'Driver');
+  
+  // Format clean telephone string preserving + and digits
+  const cleanNumber = String(targetPhone).trim().replace(/[^\d+]/g, '');
+  if (!cleanNumber) {
+    showToast('Phone number not available for this contact.', 'warning');
+    return;
+  }
+  showToast(`📞 Opening phone dialer for ${targetName} (${cleanNumber})...`, 'info');
+  window.location.href = `tel:${cleanNumber}`;
+}
+
 function callPassenger() {
-  const trip = state.activeDriverTrip || state.currentActiveRide;
-  const phone = (trip && (trip.rider_phone || trip.phone)) || '+91 98480 23145';
-  showToast(`Calling passenger at ${phone}...`, 'info');
+  callOtherParty();
 }
 
 function chatPassengerWhatsApp() {
@@ -2313,9 +2388,7 @@ function chatPassengerWhatsApp() {
 }
 
 function callCurrentDriver() {
-  const trip = state.currentActiveRide || state.activeDriverTrip;
-  const phone = (trip && (trip.driver_phone || trip.phone)) || '+91 98480 23145';
-  showToast(`Calling verified driver (${phone})...`, 'info');
+  callOtherParty();
 }
 
 function openLiveTrackingForRide(rideOrId, pin = '4821') {
@@ -7188,6 +7261,7 @@ window.openActiveRideModal = openActiveRideModal;
 window.callPassenger = callPassenger;
 window.chatPassengerWhatsApp = chatPassengerWhatsApp;
 window.callCurrentDriver = callCurrentDriver;
+window.callOtherParty = callOtherParty;
 window.openLiveTrackingForRide = openLiveTrackingForRide;
 window.openLiveTrackingForDriver = openLiveTrackingForDriver;
 window.openLiveTrackingModal = openLiveTrackingModal;
