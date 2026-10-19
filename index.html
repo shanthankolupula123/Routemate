@@ -3,6 +3,11 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <script>
+    if (window.location.hostname === 'routemate.pro') {
+      window.location.replace('https://www.routemate.pro' + window.location.pathname + window.location.search + window.location.hash);
+    }
+  </script>
   <title>Routemate - Peer-to-Peer Ride Sharing | Split the Cost</title>
   
   <!-- Tailwind CSS CDN -->
@@ -96,6 +101,13 @@
             <span id="btnSendOtpText">Send Verification Code</span>
             <i data-lucide="arrow-right" class="w-4 h-4"></i>
           </button>
+
+          <!-- Quick link to enter code if already received in email -->
+          <div class="text-center pt-1">
+            <button type="button" onclick="goToOtpStep()" class="text-xs text-blue-600 font-semibold hover:text-blue-800 hover:underline">
+              Already received a code in your email? Enter it here &rarr;
+            </button>
+          </div>
         </div>
 
         <!-- STEP 2: Verify 6-Digit Email OTP -->
@@ -2928,7 +2940,7 @@
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
   <!-- Supabase JS Client SDK v2 -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="supabaseClient.js?v=20261019_realtime_otp2"></script>
-  <script src="app.js?v=20261019_realtime_otp2"></script>
+  <script src="supabaseClient.js?v=20261019_live_fix4"></script>
+  <script src="app.js?v=20261019_live_fix4"></script>
 </body>
 </html>

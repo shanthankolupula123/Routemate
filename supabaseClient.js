@@ -68,20 +68,27 @@ const db = {
     async _callBackendOtpApi(endpointPath, payload) {
       const candidateUrls = [];
       const origin = (typeof window !== 'undefined' && window.location && window.location.origin) || '';
+      const hostname = (typeof window !== 'undefined' && window.location && window.location.hostname) || '';
 
-      // 1. If currently served over HTTP or HTTPS on the web, ALWAYS prioritize same-origin relative path
-      // This eliminates Mixed Content blocks and CORS issues on deployed production domains (e.g. https://routemate.pro)
+      // 1. If running on Routemate production (routemate.pro or www.routemate.pro), ALWAYS target www.routemate.pro directly!
+      // This completely prevents Vercel's 308 domain redirect which causes browser fetch CORS failures on POST requests.
+      if (hostname.includes('routemate.pro') || origin.includes('routemate.pro')) {
+        candidateUrls.push(`https://www.routemate.pro${endpointPath}`);
+      }
+
+      // 2. Same-origin relative path (for localhost, test servers, or direct hosting)
       if (origin && (origin.startsWith('http://') || origin.startsWith('https://'))) {
-        candidateUrls.push(endpointPath);
+        if (!candidateUrls.includes(endpointPath)) {
+          candidateUrls.push(endpointPath);
+        }
       }
 
-      // 2. Direct production domain candidate (handles routemate.pro -> www.routemate.pro redirect, Capacitor apps, and Android)
-      const prodUrl = `https://www.routemate.pro${endpointPath}`;
-      if (!candidateUrls.includes(prodUrl)) {
-        candidateUrls.push(prodUrl);
+      // 3. Always include direct production API as candidate for mobile/Capacitor/hybrid apps
+      if (!candidateUrls.includes(`https://www.routemate.pro${endpointPath}`)) {
+        candidateUrls.push(`https://www.routemate.pro${endpointPath}`);
       }
 
-      // 3. Local dev server candidates (for Live Server, local dev tools, Capacitor, or Android Emulator)
+      // 4. Local dev server candidates (for Live Server, local dev tools, Capacitor, or Android Emulator)
       const isLocalOrApp = !origin || 
         origin.includes('localhost') || 
         origin.includes('127.0.0.1') || 
@@ -96,31 +103,32 @@ const db = {
         candidateUrls.push(`http://10.0.2.2:3000${endpointPath}`); // Android Emulator loopback
       }
 
-      // 4. Fallback
+      // 5. Fallback
       if (!candidateUrls.includes(endpointPath)) {
         candidateUrls.push(endpointPath);
       }
 
       for (const url of candidateUrls) {
         try {
+          console.log(`🌐 Calling OTP API: ${url}`);
           const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 6000);
+          const timeoutId = setTimeout(() => controller.abort(), 12000);
           const res = await fetch(url, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload),
-            signal: controller.signal,
-            redirect: 'follow'
+            signal: controller.signal
           });
           clearTimeout(timeoutId);
 
           const contentType = res.headers.get('content-type') || '';
           if (contentType.includes('application/json')) {
             const data = await res.json();
+            console.log(`✅ Received OTP response from ${url}:`, data);
             return { res, data, url };
           }
         } catch (e) {
-          // Continue to next candidate URL silently
+          console.warn(`❌ Candidate ${url} error:`, e.message || e);
         }
       }
       return null;
@@ -133,7 +141,7 @@ const db = {
         console.log(`📧 Dispatching OTP via Resend to: ${target}`);
         const backendResult = await this._callBackendOtpApi('/api/send-otp', { email: target });
 
-        if (backendResult && backendResult.res.ok && backendResult.data && backendResult.data.success) {
+        if (backendResult && backendResult.data && (backendResult.data.success || backendResult.data.status === 'sent' || backendResult.data.emailId)) {
           const data = backendResult.data;
           console.log(`✅ Resend Email OTP dispatched successfully via ${backendResult.url}:`, data);
           if (data.otpToken && data.expiresAt) {
@@ -149,7 +157,7 @@ const db = {
           return { success: false, error: backendResult.data.error };
         }
       } catch (err) {
-        console.warn('Resend endpoint error, checking Supabase auth fallback:', err);
+        console.warn('Resend endpoint error:', err);
       }
 
       // Supabase Native Email/SMS Fallback

@@ -3579,11 +3579,16 @@ async function handleSendOtp() {
     }
 
     if (!result || !result.success) {
-      const errMsg = (result && result.error) || 'Failed to send verification code. Please verify your email address.';
-      if (errorText) errorText.textContent = errMsg;
-      if (errorEl) errorEl.classList.remove('hidden');
-      showToast(errMsg, 'error');
-      return;
+      // If the email was actually dispatched to recipient
+      if (result && result.data && (result.data.emailId || result.data.status === 'sent')) {
+        console.log('✅ OTP dispatched, advancing to OTP verification step.');
+      } else {
+        const errMsg = (result && result.error) || 'Failed to send verification code. Please verify your email address.';
+        if (errorText) errorText.textContent = errMsg;
+        if (errorEl) errorEl.classList.remove('hidden');
+        showToast(errMsg, 'error');
+        return;
+      }
     }
 
     // Switch to OTP step
@@ -3616,6 +3621,28 @@ async function handleSendOtp() {
     if (sendBtnText) sendBtnText.textContent = 'Send Verification Code';
     if (window.lucide) lucide.createIcons();
   }
+}
+
+// Allows user to directly proceed to the OTP boxes if code was already received in Gmail
+function goToOtpStep() {
+  const emailInput = document.getElementById('authEmailInput') || document.getElementById('authPhoneInput');
+  const email = state.authEmail || (emailInput ? emailInput.value.trim().toLowerCase() : '');
+  if (email) {
+    state.authEmail = email;
+    state.authPhone = email;
+  }
+  const phoneStep = document.getElementById('authStepPhone');
+  const otpStep = document.getElementById('authStepOtp');
+  const targetPhoneText = document.getElementById('authTargetPhoneText');
+
+  if (targetPhoneText && email) targetPhoneText.textContent = email;
+  if (phoneStep) phoneStep.classList.add('hidden');
+  if (otpStep) otpStep.classList.remove('hidden');
+
+  const otpBoxes = document.querySelectorAll('.otp-box');
+  otpBoxes.forEach(b => { b.value = ''; });
+  if (otpBoxes[0]) setTimeout(() => otpBoxes[0].focus(), 150);
+  startOtpCountdown();
 }
 
 function startOtpCountdown() {
@@ -7167,6 +7194,7 @@ window.handleManualDocSelected = handleManualDocSelected;
 window.handleSendOtp = handleSendOtp;
 window.handleVerifyOtp = handleVerifyOtp;
 window.backToPhoneStep = backToPhoneStep;
+window.goToOtpStep = goToOtpStep;
 window.handleResendOtp = handleResendOtp;
 window.openInAppChatModal = openInAppChatModal;
 window.sendInAppChatMessage = sendInAppChatMessage;
