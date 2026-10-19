@@ -3558,6 +3558,161 @@ async function handlePhoneSubmit() {
   return handleAuthSubmit();
 }
 
+// ----------------------------------------------------
+// Resilient Direct API Helpers for OTP Delivery & Verification
+// ----------------------------------------------------
+async function sendOtpApi(email) {
+  const target = String(email || '').trim().toLowerCase();
+  try {
+    sessionStorage.setItem('routemate_auth_target', target);
+  } catch (e) {}
+
+  const candidates = [
+    'https://www.routemate.pro/api/send-otp',
+    '/api/send-otp',
+    'http://localhost:3000/api/send-otp'
+  ];
+
+  let lastError = null;
+  for (const url of candidates) {
+    try {
+      console.log('📧 Dispatching OTP via:', url);
+      const controller = new AbortController();
+      const tid = setTimeout(() => controller.abort(), 7000);
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: target }),
+        signal: controller.signal
+      });
+      clearTimeout(tid);
+
+      const contentType = res.headers.get('content-type') || '';
+      if (contentType.includes('application/json')) {
+        const data = await res.json();
+        if (res.ok && (data.success || data.status === 'sent' || data.emailId)) {
+          if (data.otpToken && data.expiresAt) {
+            try {
+              sessionStorage.setItem('routemate_otp_token', data.otpToken);
+              sessionStorage.setItem('routemate_otp_expires', String(data.expiresAt));
+            } catch (e) {}
+          }
+          return { success: true, data };
+        } else {
+          lastError = (data && data.error) || `Status ${res.status}`;
+        }
+      }
+    } catch (e) {
+      console.warn('Candidate error:', url, e.message);
+    }
+  }
+
+  return {
+    success: false,
+    error: lastError || 'Unable to send verification email. Please check your network and try again.'
+  };
+}
+
+async function verifyOtpApi(email, code) {
+  const target = String(email || '').trim().toLowerCase();
+  const cleanCode = String(code || '').replace(/\D/g, '').trim();
+
+  let otpToken = null;
+  let expiresAt = null;
+  try {
+    otpToken = sessionStorage.getItem('routemate_otp_token');
+    expiresAt = sessionStorage.getItem('routemate_otp_expires');
+  } catch (e) {}
+
+  const candidates = [
+    'https://www.routemate.pro/api/verify-otp',
+    '/api/verify-otp',
+    'http://localhost:3000/api/verify-otp'
+  ];
+
+  let lastError = null;
+  for (const url of candidates) {
+    try {
+      console.log('🔑 Verifying OTP via:', url);
+      const controller = new AbortController();
+      const tid = setTimeout(() => controller.abort(), 7000);
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: target, code: cleanCode, otpToken, expiresAt }),
+        signal: controller.signal
+      });
+      clearTimeout(tid);
+
+      const contentType = res.headers.get('content-type') || '';
+      if (contentType.includes('application/json')) {
+        const data = await res.json();
+        if (res.ok && (data.success || data.verified || data.status === 'approved')) {
+          try {
+            sessionStorage.removeItem('routemate_otp_token');
+            sessionStorage.removeItem('routemate_otp_expires');
+          } catch (e) {}
+          const cleanId = 'usr_' + target.replace(/[^a-zA-Z0-9]/g, '_');
+          return {
+            success: true,
+            data: {
+              user: {
+                id: cleanId,
+                email: target,
+                phone: target,
+                verified_at: new Date().toISOString()
+              }
+            }
+          };
+        } else {
+          lastError = (data && data.error) || `Status ${res.status}`;
+        }
+      }
+    } catch (e) {
+      console.warn('Verify candidate error:', url, e.message);
+    }
+  }
+
+  // Direct Supabase database fallback if available
+  if (window.db && window.db.client) {
+    try {
+      const { data: prof } = await window.db.client
+        .from('profiles')
+        .select('id,phone,name,avatar_url')
+        .eq('phone', target)
+        .maybeSingle();
+
+      if (prof && prof.avatar_url && prof.avatar_url.startsWith('OTP:')) {
+        const parts = prof.avatar_url.split(':');
+        if (String(parts[1]).trim() === cleanCode && Date.now() <= Number(parts[2])) {
+          await window.db.client.from('profiles').update({ avatar_url: null, is_verified: true }).eq('id', prof.id);
+          try {
+            sessionStorage.removeItem('routemate_otp_token');
+            sessionStorage.removeItem('routemate_otp_expires');
+          } catch (e) {}
+          return {
+            success: true,
+            data: {
+              user: {
+                id: prof.id,
+                email: target,
+                phone: target,
+                name: prof.name,
+                verified_at: new Date().toISOString()
+              }
+            }
+          };
+        }
+      }
+    } catch (e) {}
+  }
+
+  return {
+    success: false,
+    error: lastError || 'Invalid or expired verification code. Please check your email and try again.'
+  };
+}
+
 async function handleSendOtp() {
   const emailInput = document.getElementById('authEmailInput') || document.getElementById('authPhoneInput');
   const errorEl = document.getElementById('authPhoneError');
@@ -3588,22 +3743,19 @@ async function handleSendOtp() {
   if (sendBtnText) sendBtnText.textContent = 'Sending Code...';
 
   try {
-    let result = { success: false };
-    if (window.db && window.db.auth) {
-      result = await window.db.auth.signInWithOtp(email);
+    let result = await sendOtpApi(email);
+    if (!result || !result.success) {
+      if (window.db && window.db.auth) {
+        result = await window.db.auth.signInWithOtp(email);
+      }
     }
 
     if (!result || !result.success) {
-      // If the email was actually dispatched to recipient
-      if (result && result.data && (result.data.emailId || result.data.status === 'sent')) {
-        console.log('✅ OTP dispatched, advancing to OTP verification step.');
-      } else {
-        const errMsg = (result && result.error) || 'Failed to send verification code. Please verify your email address.';
-        if (errorText) errorText.textContent = errMsg;
-        if (errorEl) errorEl.classList.remove('hidden');
-        showToast(errMsg, 'error');
-        return;
-      }
+      const errMsg = (result && result.error) || 'Failed to send verification code. Please check your email address.';
+      if (errorText) errorText.textContent = errMsg;
+      if (errorEl) errorEl.classList.remove('hidden');
+      showToast(errMsg, 'error');
+      return;
     }
 
     // Switch to OTP step
@@ -3706,25 +3858,21 @@ async function handleVerifyOtp() {
     state.authEmail = authIdentifier;
     state.authPhone = authIdentifier;
 
-    // Verify OTP code through Resend HMAC verification or direct Supabase DB
-    if (window.db && window.db.auth) {
-      const res = await window.db.auth.verifyOtp(authIdentifier, code);
-      if (res && res.success && res.data) {
-        verified = true;
-        authUser = res.data.user;
-      } else if (res && res.error) {
-        if (errorText) errorText.textContent = res.error;
-        if (errorEl) errorEl.classList.remove('hidden');
-        showToast(res.error, 'error');
-        return;
+    let result = await verifyOtpApi(authIdentifier, code);
+    if (!result || !result.success) {
+      if (window.db && window.db.auth) {
+        result = await window.db.auth.verifyOtp(authIdentifier, code);
       }
     }
 
-    if (!verified) {
-      const msg = 'Invalid or expired verification code. Please check your email.';
-      if (errorText) errorText.textContent = msg;
+    if (result && result.success && result.data) {
+      verified = true;
+      authUser = result.data.user;
+    } else {
+      const errMsg = (result && result.error) || 'Invalid or expired verification code. Please check your email.';
+      if (errorText) errorText.textContent = errMsg;
       if (errorEl) errorEl.classList.remove('hidden');
-      showToast(msg, 'error');
+      showToast(errMsg, 'error');
       return;
     }
 
