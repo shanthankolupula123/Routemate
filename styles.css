@@ -215,6 +215,20 @@ body {
   font-family: inherit !important;
 }
 
+.leaflet-control-attribution {
+  font-size: 9px !important;
+  background: rgba(255, 255, 255, 0.75) !important;
+  backdrop-filter: blur(4px) !important;
+  border-radius: 6px 0 0 0 !important;
+  padding: 1px 6px !important;
+  color: #64748b !important;
+}
+
+.leaflet-control-attribution a {
+  color: #3b82f6 !important;
+  text-decoration: none !important;
+}
+
 /* 6-Digit OTP Box Styling */
 .otp-box {
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);

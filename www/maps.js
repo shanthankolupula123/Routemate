@@ -100,9 +100,8 @@ function initLeafletMap() {
       zoomControl: true
     });
 
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
-      attribution: '&copy; CARTO &copy; OSM',
-      subdomains: 'abcd',
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
       maxZoom: 19
     }).addTo(lMap);
 
@@ -1096,9 +1095,8 @@ function initOrUpdatePickerMap(isPickup) {
           zoomControl: true
         });
 
-        L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
-          attribution: '&copy; CARTO &copy; OSM',
-          subdomains: 'abcd',
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+          attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
           maxZoom: 19
         }).addTo(lPickerMap);
 
