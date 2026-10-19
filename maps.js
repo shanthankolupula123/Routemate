@@ -120,6 +120,21 @@ function initGoogleMap() {
     const dropVal = document.getElementById('inputDrop')?.value || 'Jangaon';
     updateRouteOnMap(pickupVal, dropVal);
 
+    // 6. Direct click on Live Map to set destination with exact address
+    gMap.addListener('click', async (e) => {
+      if (e && e.latLng) {
+        const lat = e.latLng.lat();
+        const lng = e.latLng.lng();
+        if (typeof showToast === 'function') {
+          showToast('Resolving clicked map location...', 'info');
+        }
+        const resolved = await reverseGeocodeLatLng(lat, lng);
+        if (resolved) {
+          selectTelanganaLocation(resolved, false);
+        }
+      }
+    });
+
     console.log('✅ Google Maps successfully initialized with API Key!');
   } catch (err) {
     console.error('Error in initGoogleMap:', err);
@@ -298,8 +313,8 @@ async function fetchTelanganaPredictions(query, container, inputEl, isPickup) {
           const parts = (item.display_name || '').split(',').map(s => s.trim());
           const mainTitle = parts[0] || item.name || query;
           const subTitle = parts.slice(1, 4).join(', ');
-          const fullAddress = parts.slice(0, 4).join(', ');
-          if (!suggestions.some(s => s.title.toLowerCase() === mainTitle.toLowerCase())) {
+          const fullAddress = (item.display_name || '').replace(/, India$/, '').trim();
+          if (!suggestions.some(s => s.fullText.toLowerCase() === fullAddress.toLowerCase())) {
             suggestions.push({
               title: mainTitle,
               subtitle: subTitle || 'Telangana, India',
@@ -311,18 +326,33 @@ async function fetchTelanganaPredictions(query, container, inputEl, isPickup) {
     } catch (e) {}
   }
 
+  const mapOptionHtml = `
+    <button type="button" onclick="openSelectOnMapModal(${isPickup})" class="w-full text-left p-2.5 bg-blue-50/80 hover:bg-blue-100/90 border-b border-blue-100 transition flex items-center gap-2.5 text-blue-900 font-bold text-xs cursor-pointer group">
+      <div class="w-7 h-7 rounded-xl bg-blue-600 text-white flex items-center justify-center flex-shrink-0 group-hover:scale-105 transition shadow-xs">
+        <i data-lucide="map" class="w-3.5 h-3.5"></i>
+      </div>
+      <div class="flex-1 min-w-0">
+        <span class="block text-xs font-bold text-blue-700">Select on Map</span>
+        <span class="block text-[10px] text-blue-600/80 truncate">Pinpoint exact house number, street, or landmark</span>
+      </div>
+      <i data-lucide="chevron-right" class="w-4 h-4 text-blue-400"></i>
+    </button>
+  `;
+
   if (suggestions.length === 0) {
     container.innerHTML = `
+      ${mapOptionHtml}
       <div class="p-3 text-center text-xs text-slate-500">
-        <p class="font-medium">No exact area found for "${query}"</p>
+        <p class="font-medium">No direct address match for "${query}"</p>
         <button type="button" class="mt-1 text-blue-600 font-bold hover:underline" onclick="selectTelanganaLocation('${query.replace(/'/g, "\\'")}', ${isPickup})">Use "${query}" anyway</button>
       </div>
     `;
     container.classList.remove('hidden');
+    if (window.lucide) lucide.createIcons();
     return;
   }
 
-  container.innerHTML = suggestions.map(s => `
+  container.innerHTML = mapOptionHtml + suggestions.map(s => `
     <button type="button" onclick="selectTelanganaLocation('${s.fullText.replace(/'/g, "\\'")}', ${isPickup})" class="w-full text-left p-3 hover:bg-blue-50/70 transition flex items-center gap-3 group cursor-pointer">
       <div class="w-7 h-7 rounded-lg bg-blue-50 text-blue-600 group-hover:bg-blue-600 group-hover:text-white flex items-center justify-center flex-shrink-0 transition">
         <i data-lucide="map-pin" class="w-3.5 h-3.5"></i>
@@ -345,32 +375,34 @@ function selectTelanganaLocation(fullLocation, isPickup) {
   const suggestBox = document.getElementById(isPickup ? 'pickupSuggestBox' : 'dropSuggestBox');
   if (suggestBox) suggestBox.classList.add('hidden');
 
+  const exactAddress = String(fullLocation || '').trim();
+
   if (isPickup) {
-    if (pickupInput) pickupInput.value = fullLocation;
+    if (pickupInput) pickupInput.value = exactAddress;
     if (typeof state !== 'undefined') {
-      state.pickup = fullLocation;
+      state.pickup = exactAddress;
       if (typeof estimateDistance === 'function') {
         state.distance = estimateDistance(state.pickup, state.drop);
       }
       if (typeof updateUI === 'function') updateUI();
     }
     const currentDrop = (dropInput && dropInput.value) || (typeof state !== 'undefined' ? state.drop : 'Jangaon');
-    updateRouteOnMap(fullLocation, currentDrop);
+    updateRouteOnMap(exactAddress, currentDrop);
   } else {
-    if (dropInput) dropInput.value = fullLocation;
+    if (dropInput) dropInput.value = exactAddress;
     if (typeof state !== 'undefined') {
-      state.drop = fullLocation;
+      state.drop = exactAddress;
       if (typeof estimateDistance === 'function') {
         state.distance = estimateDistance(state.pickup, state.drop);
       }
       if (typeof updateUI === 'function') updateUI();
     }
     const currentPickup = (pickupInput && pickupInput.value) || (typeof state !== 'undefined' ? state.pickup : 'Uppal, Hyderabad');
-    updateRouteOnMap(currentPickup, fullLocation);
+    updateRouteOnMap(currentPickup, exactAddress);
   }
 
   if (typeof showToast === 'function') {
-    showToast(`📍 ${isPickup ? 'Pickup' : 'Destination'} set: ${fullLocation.split(',')[0]}`, 'success');
+    showToast(`📍 ${isPickup ? 'Pickup' : 'Destination'} set: ${exactAddress}`, 'success');
   }
 }
 
@@ -426,6 +458,18 @@ function promptDropQuickSelect() {
           <i data-lucide="x" class="w-5 h-5"></i>
         </button>
       </div>
+
+      <!-- Select on Map Shortcut Button -->
+      <button type="button" onclick="document.getElementById('dropQuickSelectMenu').remove(); openSelectOnMapModal(false);" class="w-full text-left p-3 bg-blue-50/90 hover:bg-blue-100 border border-blue-200 rounded-2xl transition flex items-center gap-2.5 text-blue-900 font-bold text-xs cursor-pointer group shadow-xs">
+        <div class="w-7 h-7 rounded-xl bg-blue-600 text-white flex items-center justify-center flex-shrink-0 group-hover:scale-105 transition shadow-xs">
+          <i data-lucide="map" class="w-4 h-4"></i>
+        </div>
+        <div class="flex-1 min-w-0">
+          <span class="block text-xs font-bold text-blue-700">Select Destination on Map</span>
+          <span class="block text-[10px] text-blue-600/80 truncate">Pinpoint exact house number, street, or town</span>
+        </div>
+        <i data-lucide="arrow-right" class="w-4 h-4 text-blue-400"></i>
+      </button>
 
       <div class="relative">
         <i data-lucide="search" class="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2"></i>
@@ -487,22 +531,23 @@ function filterQuickDestinations(query) {
 
 function selectDestinationArea(destinationName) {
   const dropInput = document.getElementById('inputDrop');
+  const exactAddress = String(destinationName || '').trim();
   if (dropInput) {
-    dropInput.value = destinationName;
+    dropInput.value = exactAddress;
     if (typeof state !== 'undefined') {
-      state.drop = destinationName;
+      state.drop = exactAddress;
       if (typeof estimateDistance === 'function') {
         state.distance = estimateDistance(state.pickup, state.drop);
       }
       if (typeof updateUI === 'function') updateUI();
     }
     const currentPickup = document.getElementById('inputPickup')?.value || (typeof state !== 'undefined' ? state.pickup : 'Uppal, Hyderabad');
-    updateRouteOnMap(currentPickup, destinationName);
+    updateRouteOnMap(currentPickup, exactAddress);
   }
   const menu = document.getElementById('dropQuickSelectMenu');
   if (menu) menu.remove();
   if (typeof showToast === 'function') {
-    showToast(`📍 Destination set: ${destinationName.split(',')[0]}`, 'success');
+    showToast(`📍 Destination set: ${exactAddress}`, 'success');
   }
 }
 
@@ -534,8 +579,11 @@ function updateRouteOnMap(origin, destination) {
           const distKm = Math.round(leg.distance.value / 1000);
           const durationStr = leg.duration.text;
 
-          // Update UI Floating Map Banner
-          updateMapInfoPill(leg.distance.text, durationStr, route.summary || 'NH 163 Corridor');
+          // Update UI Floating Map Banner with real route endpoints
+          const pShort = (origin || '').split(',')[0].trim();
+          const dShort = (destination || '').split(',')[0].trim();
+          const summaryStr = route.summary || `${pShort} ➔ ${dShort}`;
+          updateMapInfoPill(leg.distance.text, durationStr, summaryStr);
 
           // Sync with state distance if state exists
           if (typeof state !== 'undefined' && distKm > 0) {
@@ -547,8 +595,9 @@ function updateRouteOnMap(origin, destination) {
         }
       } else {
         console.warn('Directions request returned status:', status);
-        // Fallback info update
-        updateMapInfoPill(`${typeof state !== 'undefined' ? state.distance : 84} km`, '~1h 35m', 'NH 163 Corridor');
+        const pShort = (origin || 'Pickup').split(',')[0].trim();
+        const dShort = (destination || 'Destination').split(',')[0].trim();
+        updateMapInfoPill(`${typeof state !== 'undefined' ? state.distance : 84} km`, '~1h 35m', `${pShort} ➔ ${dShort}`);
       }
     }
   );
@@ -655,72 +704,9 @@ function detectCurrentLocation() {
       const lng = position.coords.longitude;
       const latLng = { lat, lng };
 
-      let resolvedAreaName = '';
+      const resolvedAreaName = await reverseGeocodeLatLng(lat, lng);
 
-      // Tier 1: Try Google Maps Geocoder if available
-      try {
-        if (window.google && google.maps && google.maps.Geocoder) {
-          const geocoder = new google.maps.Geocoder();
-          const googleResult = await new Promise((resolve) => {
-            geocoder.geocode({ location: latLng }, (results, status) => {
-              if (status === 'OK' && results && results.length > 0) {
-                // Use formatted address or meaningful locality/sublocality
-                const formatted = results[0].formatted_address;
-                const components = results[0].address_components || [];
-                const sublocality = components.find(c => c.types.includes('sublocality') || c.types.includes('neighborhood'))?.long_name;
-                const locality = components.find(c => c.types.includes('locality'))?.long_name;
-                
-                if (sublocality && locality) {
-                  resolve(`${sublocality}, ${locality}`);
-                } else if (formatted) {
-                  resolve(formatted);
-                } else {
-                  resolve(null);
-                }
-              } else {
-                resolve(null);
-              }
-            });
-          });
-          if (googleResult) {
-            resolvedAreaName = googleResult;
-          }
-        }
-      } catch (e) {
-        console.warn('Google geocoder lookup notice:', e);
-      }
-
-      // Tier 2: Reverse Geocode via OpenStreetMap Nominatim for exact locality & area name
-      if (!resolvedAreaName) {
-        try {
-          const response = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}`, {
-            headers: { 'Accept': 'application/json' }
-          });
-          if (response.ok) {
-            const data = await response.json();
-            if (data && data.address) {
-              const addr = data.address;
-              const placeOrColony = addr.suburb || addr.neighbourhood || addr.residential || addr.road || addr.village || addr.town || addr.hamlet || '';
-              const talukOrCity = addr.town || addr.city || addr.state_district || 'Hyderabad';
-              if (placeOrColony) {
-                resolvedAreaName = `${placeOrColony}, ${talukOrCity}`;
-              } else if (data.display_name) {
-                const parts = data.display_name.split(',').map(s => s.trim());
-                resolvedAreaName = parts.slice(0, 3).join(', ');
-              }
-            }
-          }
-        } catch (fetchErr) {
-          console.warn('Nominatim reverse geocode notice:', fetchErr);
-        }
-      }
-
-      // Tier 3: Corridor Proximity Matrix (Guarantees real landmark / area name, never raw coordinates)
-      if (!resolvedAreaName) {
-        resolvedAreaName = resolveCorridorProximityArea(lat, lng);
-      }
-
-      // Update Pickup Input and Global State
+      // Update Pickup Input and Global State with exact detailed address
       if (pickupInput) {
         pickupInput.value = resolvedAreaName;
       }
@@ -732,11 +718,11 @@ function detectCurrentLocation() {
         if (typeof updateUI === 'function') updateUI();
       }
 
-      const currentDrop = document.getElementById('inputDrop')?.value || 'Jangaon Bus Depot / Chowrasta';
+      const currentDrop = document.getElementById('inputDrop')?.value || (typeof state !== 'undefined' ? state.drop : 'Jangaon Bus Depot / Chowrasta');
       updateRouteOnMap(resolvedAreaName, currentDrop);
 
       if (typeof showToast === 'function') {
-        showToast(`Area detected: ${resolvedAreaName}`, 'success');
+        showToast(`📍 Current location detected: ${resolvedAreaName}`, 'success');
       }
 
       resetLocateBtn();
@@ -790,6 +776,240 @@ function resolveCorridorProximityArea(lat, lng) {
   });
 
   return closest.name;
+}
+
+// Reverse geocode latitude and longitude to exact detailed address (Door number, Street, Village, Mandal, District)
+async function reverseGeocodeLatLng(lat, lng) {
+  // 1. Try Google Maps Geocoder if available
+  if (window.google && google.maps && google.maps.Geocoder) {
+    try {
+      const geocoder = new google.maps.Geocoder();
+      const response = await new Promise((resolve) => {
+        geocoder.geocode({ location: { lat, lng } }, (results, status) => {
+          if (status === 'OK' && results && results.length > 0) {
+            resolve(results[0]);
+          } else {
+            resolve(null);
+          }
+        });
+      });
+
+      if (response && response.formatted_address) {
+        let addr = response.formatted_address;
+        // Clean trailing postal code / country if present to keep it clean, but retain full street/colony/village
+        addr = addr.replace(/, India$/, '').replace(/, Telangana \d{6}$/, ', Telangana');
+        return addr.trim();
+      }
+    } catch (err) {
+      console.warn('Google reverse geocoding failed, trying OSM fallback:', err);
+    }
+  }
+
+  // 2. Fallback to OpenStreetMap Nominatim reverse geocoding
+  try {
+    const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}`;
+    const res = await fetch(url, { headers: { 'Accept-Language': 'en' } });
+    if (res.ok) {
+      const data = await res.json();
+      if (data && data.display_name) {
+        let osmAddr = data.display_name;
+        osmAddr = osmAddr.replace(/, India$/, '').replace(/, \d{6}$/, '');
+        return osmAddr.trim();
+      }
+    }
+  } catch (err) {
+    console.warn('Nominatim reverse geocoding failed:', err);
+  }
+
+  // 3. Fallback to corridor proximity
+  return resolveCorridorProximityArea(lat, lng);
+}
+
+// ==========================================
+// INTERACTIVE SELECT ON MAP CONTROLLER
+// ==========================================
+
+let gPickerMap = null;
+let gPickerIsPickup = false;
+let gPickerCurrentAddress = '';
+let gPickerDebounceTimer = null;
+
+function openSelectOnMapModal(isPickup = false) {
+  gPickerIsPickup = isPickup;
+
+  const modal = document.getElementById('selectOnMapModal');
+  if (!modal) return;
+
+  const titleEl = document.getElementById('pickerModalTitle');
+  const badgeEl = document.getElementById('pickerTargetBadge');
+  const iconEl = document.getElementById('pickerHeaderIcon');
+  const addressTextEl = document.getElementById('pickerAddressText');
+  const statusEl = document.getElementById('pickerGeocodingStatus');
+
+  if (titleEl) {
+    titleEl.textContent = isPickup ? 'Select Pickup Location' : 'Select Destination Location';
+  }
+  if (badgeEl) {
+    badgeEl.textContent = isPickup ? 'Pickup Address' : 'Destination Address';
+    badgeEl.className = isPickup
+      ? 'text-[9px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800'
+      : 'text-[9px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-blue-100 text-blue-800';
+  }
+  if (iconEl) {
+    iconEl.className = isPickup
+      ? 'w-8 h-8 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center font-bold'
+      : 'w-8 h-8 rounded-xl bg-blue-100 text-blue-700 flex items-center justify-center font-bold';
+  }
+  if (addressTextEl) {
+    addressTextEl.textContent = 'Drag map to position pin on exact location...';
+  }
+  if (statusEl) {
+    statusEl.innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse"></span> Locating...`;
+  }
+
+  if (typeof openModal === 'function') {
+    openModal('selectOnMapModal');
+  } else {
+    modal.classList.remove('hidden');
+  }
+
+  if (window.lucide) lucide.createIcons();
+
+  // Initialize or resize Picker Google Map
+  setTimeout(() => {
+    initOrUpdatePickerMap(isPickup);
+  }, 150);
+}
+
+function initOrUpdatePickerMap(isPickup) {
+  const container = document.getElementById('pickerMapCanvas');
+  if (!container) return;
+
+  // Initial center based on current pickup/drop or default corridor
+  let centerLatLng = { lat: 17.5500, lng: 78.8500 };
+
+  try {
+    if (!gPickerMap && window.google && google.maps) {
+      gPickerMap = new google.maps.Map(container, {
+        center: centerLatLng,
+        zoom: 15,
+        styles: ROUTEMATE_MAP_STYLES,
+        disableDefaultUI: true,
+        zoomControl: true,
+        zoomControlOptions: {
+          position: google.maps.ControlPosition.RIGHT_CENTER
+        }
+      });
+
+      gPickerMap.addListener('center_changed', () => {
+        onPickerCenterChanged();
+      });
+
+      gPickerMap.addListener('idle', () => {
+        onPickerCenterChanged(true);
+      });
+    } else if (gPickerMap) {
+      google.maps.event.trigger(gPickerMap, 'resize');
+      gPickerMap.setCenter(centerLatLng);
+    }
+
+    // Try to center near user or current selected location if available
+    const existingVal = isPickup 
+      ? document.getElementById('inputPickup')?.value 
+      : document.getElementById('inputDrop')?.value;
+
+    if (existingVal && window.google && google.maps && google.maps.Geocoder) {
+      const geocoder = new google.maps.Geocoder();
+      const query = existingVal.includes('Telangana') ? existingVal : `${existingVal}, Telangana, India`;
+      geocoder.geocode({ address: query }, (results, status) => {
+        if (status === 'OK' && results && results[0] && gPickerMap) {
+          gPickerMap.setCenter(results[0].geometry.location);
+          gPickerMap.setZoom(16);
+          onPickerCenterChanged(true);
+        } else {
+          onPickerCenterChanged(true);
+        }
+      });
+    } else {
+      onPickerCenterChanged(true);
+    }
+  } catch (err) {
+    console.warn('Picker map initialization error:', err);
+  }
+}
+
+function onPickerCenterChanged(immediate = false) {
+  if (!gPickerMap) return;
+
+  const statusEl = document.getElementById('pickerGeocodingStatus');
+  if (statusEl) {
+    statusEl.innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse"></span> Locating...`;
+  }
+
+  if (gPickerDebounceTimer) clearTimeout(gPickerDebounceTimer);
+
+  const delay = immediate ? 100 : 350;
+  gPickerDebounceTimer = setTimeout(async () => {
+    if (!gPickerMap) return;
+    const center = gPickerMap.getCenter();
+    if (!center) return;
+
+    const lat = center.lat();
+    const lng = center.lng();
+
+    const resolvedAddress = await reverseGeocodeLatLng(lat, lng);
+    gPickerCurrentAddress = resolvedAddress;
+
+    const addressTextEl = document.getElementById('pickerAddressText');
+    if (addressTextEl) {
+      addressTextEl.textContent = resolvedAddress || 'Selected Location';
+    }
+
+    if (statusEl) {
+      statusEl.innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span> Precise Location`;
+    }
+  }, delay);
+}
+
+function locatePickerToCurrentGps() {
+  if (!navigator.geolocation) {
+    if (typeof showToast === 'function') showToast('Geolocation is not supported', 'error');
+    return;
+  }
+
+  if (typeof showToast === 'function') showToast('Moving map to current GPS position...', 'info');
+
+  navigator.geolocation.getCurrentPosition(
+    (pos) => {
+      const lat = pos.coords.latitude;
+      const lng = pos.coords.longitude;
+      if (gPickerMap) {
+        gPickerMap.panTo({ lat, lng });
+        gPickerMap.setZoom(17);
+        onPickerCenterChanged(true);
+      }
+    },
+    (err) => {
+      console.warn('Picker GPS location failed:', err);
+      if (typeof showToast === 'function') showToast('Unable to get GPS location', 'error');
+    },
+    { enableHighAccuracy: true, timeout: 8000 }
+  );
+}
+
+function confirmPickerAddress() {
+  if (!gPickerCurrentAddress) {
+    if (typeof showToast === 'function') showToast('Please select a valid location on the map', 'warning');
+    return;
+  }
+
+  selectTelanganaLocation(gPickerCurrentAddress, gPickerIsPickup);
+
+  if (typeof closeModal === 'function') {
+    closeModal('selectOnMapModal');
+  } else {
+    document.getElementById('selectOnMapModal')?.classList.add('hidden');
+  }
 }
 
 // ==========================================
@@ -922,3 +1142,11 @@ window.toggleMapTraffic = toggleMapTraffic;
 window.recenterMapOnCorridor = recenterMapOnCorridor;
 window.detectCurrentLocation = detectCurrentLocation;
 window.initTrackingMap = initTrackingMap;
+window.openSelectOnMapModal = openSelectOnMapModal;
+window.confirmPickerAddress = confirmPickerAddress;
+window.locatePickerToCurrentGps = locatePickerToCurrentGps;
+window.reverseGeocodeLatLng = reverseGeocodeLatLng;
+window.selectTelanganaLocation = selectTelanganaLocation;
+window.promptDropQuickSelect = promptDropQuickSelect;
+window.filterQuickDestinations = filterQuickDestinations;
+window.selectDestinationArea = selectDestinationArea;

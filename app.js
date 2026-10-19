@@ -415,14 +415,29 @@ function updateUI() {
     driverLiveDist.textContent = `${state.distance} km`;
   }
 
-  // Dynamic timeline labels
-  const pName = (state.pickup || 'Uppal').split(',')[0].trim();
-  const dName = (state.drop || 'Jangaon').split(',')[0].trim();
+  // Dynamic timeline labels (format friendly readable label for timeline stops)
+  function formatStopLabel(addr, defaultLabel) {
+    if (!addr) return defaultLabel;
+    const parts = addr.split(',').map(s => s.trim()).filter(Boolean);
+    if (parts.length === 0) return defaultLabel;
+    if (parts[0].length <= 5 || /^(\d|h\.?no|plot|flat|door)/i.test(parts[0])) {
+      return parts.slice(0, 2).join(', ');
+    }
+    return parts[0];
+  }
+  const pName = formatStopLabel(state.pickup, 'Uppal');
+  const dName = formatStopLabel(state.drop, 'Jangaon');
   const timelineStart = document.getElementById('timelineStartLabel');
   const timelineEnd = document.getElementById('timelineEndLabel');
   const timelineEndDist = document.getElementById('timelineEndDist');
-  if (timelineStart) timelineStart.textContent = pName;
-  if (timelineEnd) timelineEnd.textContent = dName;
+  if (timelineStart) {
+    timelineStart.textContent = pName;
+    timelineStart.title = state.pickup || pName;
+  }
+  if (timelineEnd) {
+    timelineEnd.textContent = dName;
+    timelineEnd.title = state.drop || dName;
+  }
   if (timelineEndDist) timelineEndDist.textContent = `${state.distance} km`;
 
   // Re-render Ride Listings
@@ -469,6 +484,9 @@ function renderRideListings() {
     return;
   }
 
+  const activePickup = (state.pickup && state.pickup.trim()) || 'Uppal Ring Road Metro, Hyderabad';
+  const activeDrop = (state.drop && state.drop.trim()) || 'Jangaon Bus Depot / Chowrasta';
+
   container.innerHTML = filtered.map(ride => `
     <div class="interactive-card bg-white rounded-2xl p-4.5 border border-slate-200/80 shadow-sm transition-all relative overflow-hidden">
       <!-- Top info: Driver & Badges -->
@@ -506,15 +524,15 @@ function renderRideListings() {
         </div>
       </div>
 
-      <!-- Route & Time Box -->
+      <!-- Route & Time Box (Displays exact selected address) -->
       <div class="mt-3.5 bg-slate-50 rounded-xl p-3 border border-slate-100 text-xs space-y-2">
-        <div class="flex items-center gap-2">
-          <span class="w-2.5 h-2.5 rounded-full bg-emerald-500 flex-shrink-0"></span>
-          <span class="font-medium text-slate-700 truncate"><strong class="text-slate-900">Pickup:</strong> ${ride.pickup}</span>
+        <div class="flex items-start gap-2">
+          <span class="w-2.5 h-2.5 rounded-full bg-emerald-500 flex-shrink-0 mt-0.5"></span>
+          <span class="font-medium text-slate-700 break-words leading-tight" title="${activePickup}"><strong class="text-slate-900">Pickup:</strong> ${activePickup}</span>
         </div>
-        <div class="flex items-center gap-2">
-          <span class="w-2.5 h-2.5 rounded-full bg-blue-600 flex-shrink-0"></span>
-          <span class="font-medium text-slate-700 truncate"><strong class="text-slate-900">Drop:</strong> ${ride.drop}</span>
+        <div class="flex items-start gap-2">
+          <span class="w-2.5 h-2.5 rounded-full bg-blue-600 flex-shrink-0 mt-0.5"></span>
+          <span class="font-medium text-slate-700 break-words leading-tight" title="${activeDrop}"><strong class="text-slate-900">Drop:</strong> ${activeDrop}</span>
         </div>
         <div class="pt-1.5 border-t border-slate-200/60 flex items-center justify-between text-slate-600 text-[11px]">
           <span class="flex items-center gap-1 font-semibold text-slate-800">
@@ -742,6 +760,9 @@ function openBookingModal(rideId) {
   const ride = availableRides.find(r => r.id === rideId);
   if (!ride) return;
 
+  const activePickup = (state.pickup && state.pickup.trim()) || ride.pickup || 'Uppal Ring Road Metro, Hyderabad';
+  const activeDrop = (state.drop && state.drop.trim()) || ride.drop || 'Jangaon Bus Depot / Chowrasta';
+
   const modal = document.getElementById('bookingModal');
   const modalContent = document.getElementById('bookingModalContent');
 
@@ -779,17 +800,17 @@ function openBookingModal(rideId) {
 
         <div class="pt-2 border-t border-slate-200/70 text-xs space-y-2">
           <div class="flex items-start gap-2">
-            <span class="w-2 h-2 rounded-full bg-emerald-500 mt-1"></span>
+            <span class="w-2.5 h-2.5 rounded-full bg-emerald-500 mt-1 flex-shrink-0"></span>
             <div>
               <p class="text-[10px] text-slate-400 uppercase font-semibold">Pickup</p>
-              <p class="font-medium text-slate-800">${ride.pickup}</p>
+              <p class="font-medium text-slate-800 break-words">${activePickup}</p>
             </div>
           </div>
           <div class="flex items-start gap-2">
-            <span class="w-2 h-2 rounded-full bg-blue-600 mt-1"></span>
+            <span class="w-2.5 h-2.5 rounded-full bg-blue-600 mt-1 flex-shrink-0"></span>
             <div>
               <p class="text-[10px] text-slate-400 uppercase font-semibold">Drop-off</p>
-              <p class="font-medium text-slate-800">${ride.drop}</p>
+              <p class="font-medium text-slate-800 break-words">${activeDrop}</p>
             </div>
           </div>
           <div class="flex items-center justify-between pt-1 text-slate-600 font-medium">
@@ -999,12 +1020,15 @@ function processSuccessfulBooking(ride, paymentInfo, seatsBooked = 1, totalFare 
   const bookingPin = Math.floor(1000 + Math.random() * 9000).toString();
   const bookingId = `RM-${Math.floor(1000 + Math.random() * 9000)}`;
 
+  const activePickup = (state.pickup && state.pickup.trim()) || ride.pickup || 'Uppal Ring Road Metro, Hyderabad';
+  const activeDrop = (state.drop && state.drop.trim()) || ride.drop || ride.drop_location || 'Jangaon Bus Depot / Chowrasta';
+
   // Add to user bookings state
   state.myBookings.unshift({
     id: bookingId,
     driver: ride.driverName,
     vehicle: `${ride.vehicleName} (${ride.vehicleNumber})`,
-    route: `${ride.pickup} ➔ ${ride.drop || ride.drop_location}`,
+    route: `${activePickup} ➔ ${activeDrop}`,
     time: ride.departureTime,
     seats: actualSeats,
     fare: fare,
@@ -1046,6 +1070,8 @@ function openTicketModal(ride, paymentInfo = {}, bookingId = null, pin = null, s
   const ticketPin = pin || '4821';
   const isRazorpay = paymentInfo.method === 'razorpay';
   const fare = totalFare || ((ride.perSeatPrice || 108) * (seats || 1));
+  const activePickup = (state.pickup && state.pickup.trim()) || ride.pickup || 'Uppal Ring Road Metro, Hyderabad';
+  const activeDrop = (state.drop && state.drop.trim()) || ride.drop || 'Jangaon Bus Depot / Chowrasta';
 
   content.innerHTML = `
     <div class="p-6 text-center">
@@ -1068,9 +1094,13 @@ function openTicketModal(ride, paymentInfo = {}, bookingId = null, pin = null, s
           <span class="text-slate-500">Seats Reserved</span>
           <span class="font-bold text-slate-900">${seats} Seat${seats > 1 ? 's' : ''}</span>
         </div>
-        <div class="flex justify-between items-center pb-2 border-b border-slate-200">
-          <span class="text-slate-500">Pickup</span>
-          <span class="font-semibold text-slate-800">${ride.pickup}</span>
+        <div class="flex justify-between items-start pb-2 border-b border-slate-200 gap-2">
+          <span class="text-slate-500 flex-shrink-0">Pickup</span>
+          <span class="font-semibold text-slate-800 text-right break-words">${activePickup}</span>
+        </div>
+        <div class="flex justify-between items-start pb-2 border-b border-slate-200 gap-2">
+          <span class="text-slate-500 flex-shrink-0">Destination</span>
+          <span class="font-semibold text-slate-800 text-right break-words">${activeDrop}</span>
         </div>
         <div class="flex justify-between items-center pb-2 border-b border-slate-200">
           <span class="text-slate-500">Departure</span>
@@ -2477,8 +2507,8 @@ function openLiveTrackingForRide(rideOrId, pin = '4821') {
   }
 
   const trackingData = {
-    pickup: ride.pickup || 'Uppal Ring Road Metro',
-    drop: ride.drop || 'Jangaon Chowrasta',
+    pickup: (state.pickup && state.pickup.trim()) || ride.pickup || 'Uppal Ring Road Metro',
+    drop: (state.drop && state.drop.trim()) || ride.drop || 'Jangaon Chowrasta',
     driver_name: ride.driverName || 'Verified Commuter',
     driver_vehicle_name: ride.vehicleName || 'Commuter Vehicle',
     driver_vehicle_number: ride.vehicleNumber || 'TS 08 EK 4321',
