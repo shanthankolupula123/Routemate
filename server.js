@@ -138,7 +138,7 @@ async function sendResendEmailOtp(email, otp) {
     return { success: false, error: 'Please enter a valid email address' };
   }
 
-  const fromEmail = process.env.RESEND_FROM_EMAIL || 'Routemate <onboarding@resend.dev>';
+  const fromEmail = process.env.RESEND_FROM_EMAIL || 'Routemate <auth@routemate.pro>';
   const htmlContent = `
     <!DOCTYPE html>
     <html>
