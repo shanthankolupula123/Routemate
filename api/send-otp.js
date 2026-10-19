@@ -1,4 +1,4 @@
-// Serverless Function: POST /api/send-otp (Resend Email OTP API)
+// Serverless Function: POST /api/send-otp (Optimized Resend Email OTP API)
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
@@ -29,12 +29,8 @@ function signOtp(email, code, expiresAt) {
 }
 
 /**
- * Resend Email OTP Integration
- * Sends 6-digit verification code directly to user's email address.
- * 
- * @param {string} email - Recipient email address
- * @param {string} otp - 6-digit OTP code
- * @returns {Promise<{success: boolean, data?: any, error?: string}>}
+ * High-Speed Resend Email OTP Integration
+ * Optimized for instant inbox delivery with high-priority headers
  */
 async function sendResendEmailOtp(email, otp) {
   if (process.platform === 'win32' && !process.env.NODE_TLS_REJECT_UNAUTHORIZED) {
@@ -62,14 +58,14 @@ async function sendResendEmailOtp(email, otp) {
       <title>Routemate Verification Code</title>
     </head>
     <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f8fafc; margin: 0; padding: 24px; color: #1e293b;">
-      <div style="max-width: 520px; margin: 0 auto; background: #ffffff; border-radius: 20px; border: 1px solid #e2e8f0; padding: 32px; box-shadow: 0 4px 12px rgba(0,0,0,0.05);">
+      <div style="max-width: 500px; margin: 0 auto; background: #ffffff; border-radius: 20px; border: 1px solid #e2e8f0; padding: 32px; box-shadow: 0 4px 12px rgba(0,0,0,0.05);">
         <div style="display: flex; align-items: center; margin-bottom: 20px;">
           <h2 style="margin: 0; color: #0f172a; font-size: 24px; font-weight: 800; letter-spacing: -0.5px;">Routemate</h2>
           <span style="margin-left: 8px; font-size: 11px; font-weight: 700; text-transform: uppercase; background-color: #eff6ff; color: #1d4ed8; padding: 2px 8px; border-radius: 9999px;">P2P Commute</span>
         </div>
         <h3 style="margin-top: 0; color: #0f172a; font-size: 18px; font-weight: 700;">Verify Your Email Address</h3>
         <p style="font-size: 14px; color: #64748b; line-height: 1.6; margin-bottom: 24px;">
-          Use the 6-digit verification code below to securely log in or complete your registration on Routemate.
+          Use the 6-digit verification code below to complete your login on Routemate.
         </p>
         <div style="background-color: #eff6ff; border: 2px dashed #93c5fd; border-radius: 16px; padding: 24px; text-align: center; margin-bottom: 24px;">
           <div style="font-family: ui-monospace, Menlo, Monaco, Consolas, monospace; font-size: 38px; font-weight: 900; letter-spacing: 8px; color: #1d4ed8;">
@@ -95,28 +91,82 @@ async function sendResendEmailOtp(email, otp) {
       body: JSON.stringify({
         from: fromEmail,
         to: [cleanEmail],
-        subject: `Your Routemate Verification Code: ${otp}`,
+        subject: `${otp} is your Routemate verification code`,
         text: `Your Routemate verification code is: ${otp}\n\nThis 6-digit code is valid for 10 minutes.\nIf you did not request this code, please safely ignore this email.`,
-        html: htmlContent
+        html: htmlContent,
+        headers: {
+          'X-Entity-Ref-ID': `${Date.now()}`,
+          'X-Priority': '1 (Highest)',
+          'X-MSMail-Priority': 'High',
+          'Importance': 'High'
+        }
       })
     });
 
     const data = await response.json().catch(() => ({}));
 
     if (response.ok && data.id) {
-      console.log(`[Resend] Email OTP sent to ${cleanEmail} (ID: ${data.id})`);
+      console.log(`[Resend] Email OTP sent instantly to ${cleanEmail} (ID: ${data.id})`);
       return { success: true, data };
     } else {
       console.warn('[Resend] Dispatch returned error:', data);
       return {
         success: false,
-        error: (data && (data.message || data.error)) || 'Failed to send email via Resend',
+        error: (data && (data.message || data.error)) || 'Failed to dispatch email via Resend',
         data
       };
     }
   } catch (error) {
     console.error('[Resend] Network error:', error);
     return { success: false, error: error.message };
+  }
+}
+
+/**
+ * Persists active OTP in Supabase database for rock-solid cross-device / refresh verification
+ */
+async function storeOtpInDb(email, code, expiresAt) {
+  try {
+    const supabaseUrl = process.env.SUPABASE_URL || 'https://hjieeilzfbvubkhmlmdg.supabase.co';
+    const supabaseKey = process.env.SUPABASE_ANON_KEY || 'sb_publishable_FD8-opedLq151SNuBbWp9g_bLI5hB_a';
+    const otpVal = `OTP:${code}:${expiresAt}`;
+
+    // 1. Try PATCH on existing profile
+    const patchRes = await fetch(`${supabaseUrl}/rest/v1/profiles?phone=eq.${encodeURIComponent(email)}`, {
+      method: 'PATCH',
+      headers: {
+        'apikey': supabaseKey,
+        'Authorization': `Bearer ${supabaseKey}`,
+        'Content-Type': 'application/json',
+        'Prefer': 'return=representation'
+      },
+      body: JSON.stringify({ avatar_url: otpVal })
+    });
+
+    if (patchRes.ok) {
+      const updated = await patchRes.json().catch(() => []);
+      if (updated && updated.length > 0) return true;
+    }
+
+    // 2. If profile did not exist, insert row with valid default name
+    await fetch(`${supabaseUrl}/rest/v1/profiles`, {
+      method: 'POST',
+      headers: {
+        'apikey': supabaseKey,
+        'Authorization': `Bearer ${supabaseKey}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        phone: email,
+        name: email.split('@')[0],
+        avatar_url: otpVal,
+        is_verified: false
+      })
+    });
+    return true;
+  } catch (err) {
+    console.warn('[DB OTP] Error storing OTP in Supabase:', err.message);
+    return false;
   }
 }
 
@@ -146,40 +196,23 @@ module.exports = async (req, res) => {
       return res.status(400).json({ success: false, error: 'Please provide a valid email address' });
     }
 
-    // Generate secure 6-digit OTP and HMAC signature for stateless serverless verification
+    // Generate secure 6-digit OTP and HMAC signature
     const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
     const expiresAt = Date.now() + 10 * 60 * 1000; // 10 minutes validity
     const otpToken = signOtp(cleanEmail, otpCode, expiresAt);
 
-    // Dispatch Email via Resend API
-    const emailResult = await sendResendEmailOtp(cleanEmail, otpCode);
+    // Parallel execution: Dispatch email and store in DB concurrently for minimum latency
+    const [emailResult] = await Promise.all([
+      sendResendEmailOtp(cleanEmail, otpCode),
+      storeOtpInDb(cleanEmail, otpCode, expiresAt)
+    ]);
+
     if (!emailResult.success) {
       console.error('[Resend] Email dispatch failed:', emailResult.error);
       return res.status(400).json({
         success: false,
         error: emailResult.error || 'Failed to dispatch verification email. Please check your email address.'
       });
-    }
-
-    // Persist OTP in Supabase database for 100% reliable multi-device / tab verification
-    try {
-      const supabaseUrl = process.env.SUPABASE_URL || 'https://hjieeilzfbvubkhmlmdg.supabase.co';
-      const supabaseKey = process.env.SUPABASE_ANON_KEY || 'sb_publishable_FD8-opedLq151SNuBbWp9g_bLI5hB_a';
-      await fetch(supabaseUrl + '/rest/v1/profiles', {
-        method: 'POST',
-        headers: {
-          'apikey': supabaseKey,
-          'Authorization': 'Bearer ' + supabaseKey,
-          'Content-Type': 'application/json',
-          'Prefer': 'resolution=merge-duplicates'
-        },
-        body: JSON.stringify({
-          phone: cleanEmail,
-          avatar_url: `OTP:${otpCode}:${expiresAt}`
-        })
-      });
-    } catch (dbErr) {
-      console.warn('[OTP Store] Notice persisting OTP in database:', dbErr.message);
     }
 
     return res.status(200).json({

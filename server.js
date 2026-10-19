@@ -209,6 +209,49 @@ async function sendResendEmailOtp(email, otp) {
   }
 }
 
+async function storeOtpInDb(email, code, expiresAt) {
+  try {
+    const supabaseUrl = process.env.SUPABASE_URL || 'https://hjieeilzfbvubkhmlmdg.supabase.co';
+    const supabaseKey = process.env.SUPABASE_ANON_KEY || 'sb_publishable_FD8-opedLq151SNuBbWp9g_bLI5hB_a';
+    const otpVal = `OTP:${code}:${expiresAt}`;
+
+    const patchRes = await fetch(`${supabaseUrl}/rest/v1/profiles?phone=eq.${encodeURIComponent(email)}`, {
+      method: 'PATCH',
+      headers: {
+        'apikey': supabaseKey,
+        'Authorization': `Bearer ${supabaseKey}`,
+        'Content-Type': 'application/json',
+        'Prefer': 'return=representation'
+      },
+      body: JSON.stringify({ avatar_url: otpVal })
+    });
+
+    if (patchRes.ok) {
+      const updated = await patchRes.json().catch(() => []);
+      if (updated && updated.length > 0) return true;
+    }
+
+    await fetch(`${supabaseUrl}/rest/v1/profiles`, {
+      method: 'POST',
+      headers: {
+        'apikey': supabaseKey,
+        'Authorization': `Bearer ${supabaseKey}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        phone: email,
+        name: email.split('@')[0],
+        avatar_url: otpVal,
+        is_verified: false
+      })
+    });
+    return true;
+  } catch (err) {
+    console.warn('[DB OTP] Error storing OTP in Supabase:', err.message);
+    return false;
+  }
+}
+
 function broadcastToClients(eventData) {
   const payload = `data: ${JSON.stringify(eventData)}\n\n`;
   for (const client of sseClients) {
@@ -495,8 +538,12 @@ const server = http.createServer(async (req, res) => {
       const otpToken = signOtp(cleanEmail, otpCode, expiresAt);
       otpStore.set(cleanEmail, { code: otpCode, expiresAt });
 
-      // Dispatch Email using Resend API
-      const emailResult = await sendResendEmailOtp(cleanEmail, otpCode);
+      // Parallel execution: Dispatch email and store in DB concurrently
+      const [emailResult] = await Promise.all([
+        sendResendEmailOtp(cleanEmail, otpCode),
+        storeOtpInDb(cleanEmail, otpCode, expiresAt)
+      ]);
+
       if (!emailResult.success) {
         console.error('[Resend] Email dispatch error:', emailResult.error);
         res.writeHead(400, { ...corsHeaders, 'Content-Type': 'application/json' });
@@ -536,12 +583,12 @@ const server = http.createServer(async (req, res) => {
 
       if (!identifier || !code) {
         res.writeHead(400, { ...corsHeaders, 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: false, error: 'Email address and OTP code are required' }));
+        res.end(JSON.stringify({ success: false, error: 'Email address and verification code are required' }));
         return;
       }
 
       const cleanIdentifier = String(identifier).trim().toLowerCase();
-      const cleanCode = String(code).trim();
+      const cleanCode = String(code).replace(/\D/g, '').trim();
       let isVerified = false;
 
       // 1. Check in-memory store
@@ -550,14 +597,29 @@ const server = http.createServer(async (req, res) => {
         isVerified = true;
         otpStore.delete(cleanIdentifier);
       }
-      // 2. Check stateless HMAC signature
-      else if (otpToken && expiresAt && verifyOtpSignature(cleanIdentifier, cleanCode, expiresAt, otpToken)) {
+      // 2. Check Supabase DB
+      if (!isVerified) {
+        try {
+          const supabaseUrl = process.env.SUPABASE_URL || 'https://hjieeilzfbvubkhmlmdg.supabase.co';
+          const supabaseKey = process.env.SUPABASE_ANON_KEY || 'sb_publishable_FD8-opedLq151SNuBbWp9g_bLI5hB_a';
+          const dbRes = await fetch(`${supabaseUrl}/rest/v1/profiles?phone=eq.${encodeURIComponent(cleanIdentifier)}&select=id,avatar_url`, {
+            headers: { 'apikey': supabaseKey, 'Authorization': `Bearer ${supabaseKey}` }
+          });
+          if (dbRes.ok) {
+            const rows = await dbRes.json();
+            if (rows && rows.length > 0 && rows[0].avatar_url && rows[0].avatar_url.startsWith('OTP:')) {
+              const parts = rows[0].avatar_url.split(':');
+              if (parts[1] === cleanCode && Date.now() <= Number(parts[2])) {
+                isVerified = true;
+              }
+            }
+          }
+        } catch (e) {}
+      }
+      // 3. Check stateless HMAC signature
+      if (!isVerified && otpToken && expiresAt && verifyOtpSignature(cleanIdentifier, cleanCode, expiresAt, otpToken)) {
         isVerified = true;
         otpStore.delete(cleanIdentifier);
-      }
-      // 3. Sandbox / testing fallback
-      else if (cleanCode === '123456' || cleanCode === '4821') {
-        isVerified = true;
       }
 
       if (isVerified) {

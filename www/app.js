@@ -3623,27 +3623,7 @@ async function handleSendOtp() {
   }
 }
 
-// Allows user to directly proceed to the OTP boxes if code was already received in Gmail
-function goToOtpStep() {
-  const emailInput = document.getElementById('authEmailInput') || document.getElementById('authPhoneInput');
-  const email = state.authEmail || (emailInput ? emailInput.value.trim().toLowerCase() : '');
-  if (email) {
-    state.authEmail = email;
-    state.authPhone = email;
-  }
-  const phoneStep = document.getElementById('authStepPhone');
-  const otpStep = document.getElementById('authStepOtp');
-  const targetPhoneText = document.getElementById('authTargetPhoneText');
 
-  if (targetPhoneText && email) targetPhoneText.textContent = email;
-  if (phoneStep) phoneStep.classList.add('hidden');
-  if (otpStep) otpStep.classList.remove('hidden');
-
-  const otpBoxes = document.querySelectorAll('.otp-box');
-  otpBoxes.forEach(b => { b.value = ''; });
-  if (otpBoxes[0]) setTimeout(() => otpBoxes[0].focus(), 150);
-  startOtpCountdown();
-}
 
 function startOtpCountdown() {
   if (state.authCountdownTimer) clearInterval(state.authCountdownTimer);
@@ -7194,7 +7174,6 @@ window.handleManualDocSelected = handleManualDocSelected;
 window.handleSendOtp = handleSendOtp;
 window.handleVerifyOtp = handleVerifyOtp;
 window.backToPhoneStep = backToPhoneStep;
-window.goToOtpStep = goToOtpStep;
 window.handleResendOtp = handleResendOtp;
 window.openInAppChatModal = openInAppChatModal;
 window.sendInAppChatMessage = sendInAppChatMessage;
