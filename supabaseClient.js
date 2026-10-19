@@ -635,6 +635,7 @@ const db = {
         kyc_status: 'verification_pending',
         is_kyc_verified: false,
         name: kycData.name,
+        email: kycData.email || null,
         avatar_url: kycData.avatarUrl,
         aadhaar_number: kycData.aadhaarNumber,
         aadhaar_card_photo: kycData.aadhaarDocPhoto,
@@ -654,15 +655,25 @@ const db = {
         localSubmissions = JSON.parse(localStorage.getItem(submissionsKey) || '[]');
       } catch (e) { localSubmissions = []; }
       
-      const phone = kycData.phone || (typeof profileIdOrPhone === 'string' && profileIdOrPhone.startsWith('+') ? profileIdOrPhone : null);
-      const subItem = { ...payload, phone: phone || '+91 98480 23145', id: profileIdOrPhone || ('sub_' + Date.now()) };
-      const existingIdx = localSubmissions.findIndex(s => (s.phone && s.phone === subItem.phone) || s.id === subItem.id);
+      const phone = kycData.phone || (typeof profileIdOrPhone === 'string' && (profileIdOrPhone.startsWith('+') || /^\d{10,}$/.test(profileIdOrPhone.replace(/[\s+-]/g, ''))) ? profileIdOrPhone : null);
+      const email = kycData.email || (typeof profileIdOrPhone === 'string' && profileIdOrPhone.includes('@') ? profileIdOrPhone : null);
+      const subItem = { ...payload, phone: phone || '+91 98480 23145', email: email || '', id: profileIdOrPhone || ('sub_' + Date.now()) };
+      const existingIdx = localSubmissions.findIndex(s => (s.phone && s.phone === subItem.phone) || (s.email && s.email === subItem.email) || s.id === subItem.id);
       if (existingIdx >= 0) {
-        localSubmissions[existingIdx] = subItem;
+        localSubmissions[existingIdx] = { ...localSubmissions[existingIdx], ...subItem };
       } else {
         localSubmissions.unshift(subItem);
       }
       localStorage.setItem(submissionsKey, JSON.stringify(localSubmissions));
+
+      // Notify Node.js server store in real time
+      try {
+        fetch('/api/kyc/notify', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(subItem)
+        }).catch(err => console.warn('Server kyc notify error:', err));
+      } catch (e) {}
 
       if (!client) {
         console.log('⚡ Offline/Local Manual KYC submitted successfully');
@@ -672,7 +683,9 @@ const db = {
       try {
         console.log('🛡️ Submitting Manual KYC to Supabase profiles for:', profileIdOrPhone);
         let query = client.from('profiles').update(payload);
-        if (typeof profileIdOrPhone === 'string' && (profileIdOrPhone.startsWith('+') || /^\d{10,}$/.test(profileIdOrPhone.replace(/[\s+-]/g, '')))) {
+        if (typeof profileIdOrPhone === 'string' && profileIdOrPhone.includes('@')) {
+          query = query.eq('email', profileIdOrPhone);
+        } else if (typeof profileIdOrPhone === 'string' && (profileIdOrPhone.startsWith('+') || /^\d{10,}$/.test(profileIdOrPhone.replace(/[\s+-]/g, '')))) {
           query = query.eq('phone', profileIdOrPhone);
         } else {
           query = query.eq('id', profileIdOrPhone);
@@ -681,8 +694,9 @@ const db = {
         const { data, error } = await query.select();
         if (error) {
           console.warn('Supabase submitManualKyc error, trying upsert:', error.message);
-          if (kycData.phone) {
-            payload.phone = kycData.phone;
+          if (kycData.phone || kycData.email) {
+            payload.phone = kycData.phone || '+91 98480 23145';
+            if (kycData.email) payload.email = kycData.email;
             const { data: upsertData, error: upsertErr } = await client
               .from('profiles')
               .upsert([payload])
@@ -889,7 +903,7 @@ const db = {
       return validAdminPasses.includes(cleanPass);
     },
 
-    // Fetch all KYC submissions for admin review (Real-time Supabase & localStorage only - NO DEMO SEEDS)
+    // Fetch all KYC submissions for admin review (Real-time Supabase, Server & localStorage sync)
     async getKycSubmissions() {
       const client = getSupabaseClient();
       let submissions = [];
@@ -900,7 +914,7 @@ const db = {
           const { data, error } = await client
             .from('profiles')
             .select('*')
-            .or('kyc_status.neq.unverified,aadhaar_number.neq.null,dl_number.neq.null')
+            .or('kyc_status.neq.unverified,aadhaar_number.not.is.null,dl_number.not.is.null')
             .order('kyc_submitted_at', { ascending: false });
 
           if (!error && data && data.length > 0) {
@@ -911,11 +925,37 @@ const db = {
         }
       }
 
-      // 2. Merge with locally cached submissions
+      // 2. Fetch from Node server real-time store (/api/kyc/submissions)
+      try {
+        const resp = await fetch('/api/kyc/submissions');
+        if (resp.ok) {
+          const json = await resp.json();
+          if (json && json.submissions && Array.isArray(json.submissions)) {
+            json.submissions.forEach(serverItem => {
+              const exists = submissions.find(s => 
+                (serverItem.id && s.id === serverItem.id) || 
+                (serverItem.phone && s.phone === serverItem.phone) ||
+                (serverItem.email && s.email && s.email === serverItem.email)
+              );
+              if (!exists) {
+                submissions.push(serverItem);
+              } else {
+                Object.assign(exists, serverItem);
+              }
+            });
+          }
+        }
+      } catch (e) {}
+
+      // 3. Merge with locally cached submissions
       try {
         const localList = JSON.parse(localStorage.getItem('routemate_kyc_submissions') || '[]');
         localList.forEach(localItem => {
-          const exists = submissions.find(s => (s.phone && s.phone === localItem.phone) || (s.id && s.id === localItem.id));
+          const exists = submissions.find(s => 
+            (localItem.id && s.id === localItem.id) || 
+            (localItem.phone && s.phone === localItem.phone) ||
+            (localItem.email && s.email && s.email === localItem.email)
+          );
           if (!exists) {
             submissions.push(localItem);
           } else {
@@ -925,6 +965,35 @@ const db = {
             }
           }
         });
+      } catch (e) {}
+
+      // 4. Merge with current logged in user if they have pending KYC or credentials
+      try {
+        const currentUser = JSON.parse(localStorage.getItem('routemate_auth_user') || '{}');
+        if (currentUser && (currentUser.kyc_status === 'verification_pending' || currentUser.kyc_status === 'under_review' || currentUser.aadhaar_number || currentUser.dl_number)) {
+          const exists = submissions.find(s => 
+            (currentUser.id && s.id === currentUser.id) || 
+            (currentUser.phone && s.phone === currentUser.phone) ||
+            (currentUser.email && s.email && s.email === currentUser.email)
+          );
+          if (!exists) {
+            submissions.push({
+              id: currentUser.id || 'usr_current',
+              name: currentUser.name || 'Verified Commuter',
+              phone: currentUser.phone || '+91 98480 23145',
+              email: currentUser.email || '',
+              avatar_url: currentUser.avatar || null,
+              aadhaar_number: currentUser.aadhaar_number || '',
+              dl_number: currentUser.dl_number || '',
+              dl_expiry: currentUser.dl_expiry || '',
+              rc_number: currentUser.rc_number || '',
+              rc_vehicle_name: currentUser.rc_vehicle_name || '',
+              kyc_status: currentUser.kyc_status || 'verification_pending',
+              is_kyc_verified: currentUser.is_kyc_verified || false,
+              kyc_submitted_at: currentUser.kyc_submitted_at || new Date().toISOString()
+            });
+          }
+        }
       } catch (e) {}
 
       // Real-time submissions strictly returned (NO fake demo driver seed)
@@ -951,7 +1020,11 @@ const db = {
       let submittedAvatar = null;
       try {
         const localList = JSON.parse(localStorage.getItem('routemate_kyc_submissions') || '[]');
-        const item = localList.find(s => (s.phone && s.phone === profileIdOrPhone) || (s.id && s.id === profileIdOrPhone));
+        const item = localList.find(s => 
+          (s.phone && s.phone === profileIdOrPhone) || 
+          (s.id && s.id === profileIdOrPhone) ||
+          (s.email && s.email === profileIdOrPhone)
+        );
         if (item) {
           if (item.avatar_url) submittedAvatar = item.avatar_url;
           Object.assign(item, updateData);
@@ -967,11 +1040,39 @@ const db = {
         updateData.avatar_url = submittedAvatar;
       }
 
+      // Notify server about decision in real time
+      try {
+        fetch('/api/kyc/decision', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            id: profileIdOrPhone,
+            status: status,
+            updateData: updateData
+          })
+        }).catch(e => console.warn('Server kyc decision notify error:', e));
+      } catch (e) {}
+
+      // Also update currently logged in user session in localStorage if matching
+      try {
+        const currentUser = JSON.parse(localStorage.getItem('routemate_auth_user') || '{}');
+        if (currentUser && (
+          currentUser.id === profileIdOrPhone || 
+          currentUser.phone === profileIdOrPhone || 
+          currentUser.email === profileIdOrPhone
+        )) {
+          Object.assign(currentUser, updateData);
+          localStorage.setItem('routemate_auth_user', JSON.stringify(currentUser));
+        }
+      } catch (e) {}
+
       // Update in Supabase profiles
       if (client) {
         try {
           let query = client.from('profiles').update(updateData);
-          if (typeof profileIdOrPhone === 'string' && (profileIdOrPhone.startsWith('+') || /^\d{10,}$/.test(profileIdOrPhone.replace(/[\s+-]/g, '')))) {
+          if (typeof profileIdOrPhone === 'string' && profileIdOrPhone.includes('@')) {
+            query = query.eq('email', profileIdOrPhone);
+          } else if (typeof profileIdOrPhone === 'string' && (profileIdOrPhone.startsWith('+') || /^\d{10,}$/.test(profileIdOrPhone.replace(/[\s+-]/g, '')))) {
             query = query.eq('phone', profileIdOrPhone);
           } else {
             query = query.eq('id', profileIdOrPhone);

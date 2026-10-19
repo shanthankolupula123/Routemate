@@ -265,5 +265,39 @@ body {
   z-index: 99999 !important;
 }
 
+/* Strict Profile Avatar Dimension & Overflow Containment */
+#headerUserAvatar, #headerUserAvatarPlaceholder {
+  width: 36px !important;
+  height: 36px !important;
+  min-width: 36px !important;
+  max-width: 36px !important;
+  min-height: 36px !important;
+  max-height: 36px !important;
+  object-fit: cover !important;
+  border-radius: 9999px !important;
+}
+
+#profileDisplayAvatar, #profileDisplayAvatarPlaceholder {
+  width: 80px !important;
+  height: 80px !important;
+  min-width: 80px !important;
+  max-width: 80px !important;
+  min-height: 80px !important;
+  max-height: 80px !important;
+  object-fit: cover !important;
+  border-radius: 9999px !important;
+}
+
+#kycAvatarPreview, #kycAvatarPlaceholder {
+  width: 96px !important;
+  height: 96px !important;
+  min-width: 96px !important;
+  max-width: 96px !important;
+  min-height: 96px !important;
+  max-height: 96px !important;
+  object-fit: cover !important;
+  border-radius: 9999px !important;
+}
+
 
 

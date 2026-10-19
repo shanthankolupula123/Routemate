@@ -584,11 +584,29 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // 12B. Retrieve Real-Time Driver KYC Submissions for Admin Portal
+  if (urlPath === '/api/kyc/submissions' && req.method === 'GET') {
+    res.writeHead(200, { ...corsHeaders, 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ success: true, submissions: driverKycStore }));
+    return;
+  }
+
   // 13. Notify Real-Time Driver KYC Submission
   if (urlPath === '/api/kyc/notify' && req.method === 'POST') {
     const data = await parseJsonBody(req);
-    driverKycStore.unshift(data);
-    broadcastToClients({ event: 'new_kyc_submission', kyc: data });
+    if (data) {
+      const idx = driverKycStore.findIndex(s => 
+        (data.id && s.id === data.id) || 
+        (data.phone && s.phone === data.phone) ||
+        (data.email && s.email && s.email === data.email)
+      );
+      if (idx >= 0) {
+        driverKycStore[idx] = { ...driverKycStore[idx], ...data };
+      } else {
+        driverKycStore.unshift(data);
+      }
+      broadcastToClients({ event: 'new_kyc_submission', kyc: data });
+    }
     res.writeHead(200, { ...corsHeaders, 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ success: true }));
     return;
@@ -597,7 +615,22 @@ const server = http.createServer(async (req, res) => {
   // 14. Notify Real-Time Driver KYC Decision (Approved / Rejected)
   if (urlPath === '/api/kyc/decision' && req.method === 'POST') {
     const data = await parseJsonBody(req);
-    broadcastToClients({ event: 'kyc_decision_updated', decision: data });
+    if (data) {
+      const targetId = data.id;
+      const target = driverKycStore.find(s => 
+        s.id === targetId || 
+        (s.phone && s.phone === targetId) ||
+        (s.email && s.email === targetId)
+      );
+      if (target) {
+        target.kyc_status = data.status;
+        target.is_kyc_verified = data.status === 'verified_success';
+        if (data.updateData) {
+          Object.assign(target, data.updateData);
+        }
+      }
+      broadcastToClients({ event: 'kyc_decision_updated', decision: data });
+    }
     res.writeHead(200, { ...corsHeaders, 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ success: true }));
     return;

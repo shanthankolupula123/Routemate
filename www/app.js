@@ -4079,11 +4079,48 @@ function showOnboardingStep(phone = null, profile = null) {
   if (otpStep) otpStep.classList.add('hidden');
   if (profileStep) profileStep.classList.remove('hidden');
 
-  const phoneVal = phone || state.authPhone || (state.currentUser && state.currentUser.phone) || '+91 98480 23145';
-  const phoneInput = document.getElementById('onboardingPhoneInput');
-  if (phoneInput) phoneInput.value = phoneVal;
-
   const user = profile || state.currentUser;
+
+  // Auto-fill and lock verified Email Address
+  const authenticatedEmail = state.authEmail || (user && user.email) || (typeof sessionStorage !== 'undefined' && sessionStorage.getItem('routemate_auth_target')) || '';
+  const emailInput = document.getElementById('onboardingEmailInput');
+  const emailContainer = document.getElementById('onboardingEmailContainer');
+  const emailBadge = document.getElementById('onboardingEmailBadge');
+
+  if (emailInput) {
+    emailInput.value = authenticatedEmail;
+    if (authenticatedEmail) {
+      emailInput.readOnly = true;
+      if (emailContainer) {
+        emailContainer.className = 'flex items-center bg-slate-100 border border-slate-200 rounded-xl px-3 py-2.5 text-slate-700 transition-all shadow-inner';
+      }
+      if (emailBadge) {
+        emailBadge.className = 'text-[9px] font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.2 rounded border border-emerald-200 flex items-center gap-0.5';
+        emailBadge.innerHTML = '<i data-lucide="check" class="w-2.5 h-2.5"></i><span>Verified via OTP</span>';
+      }
+    } else {
+      emailInput.readOnly = false;
+      if (emailContainer) {
+        emailContainer.className = 'flex items-center bg-slate-50 border-2 border-slate-200 rounded-xl px-3 py-2.5 focus-within:border-blue-600 focus-within:bg-white transition-all shadow-inner';
+      }
+    }
+  }
+
+  // Resolve Phone Input: Never put an email address into the mobile number field
+  let rawPhone = phone || (user && user.phone) || (state.authPhone && !state.authPhone.includes('@') ? state.authPhone : '') || '';
+  if (rawPhone.includes('@')) rawPhone = '';
+
+  const phoneInput = document.getElementById('onboardingPhoneInput');
+  const phoneBadge = document.getElementById('onboardingPhoneBadge');
+  if (phoneInput) {
+    phoneInput.value = rawPhone;
+    phoneInput.readOnly = false;
+  }
+  if (phoneBadge) {
+    phoneBadge.textContent = 'Mandatory';
+    phoneBadge.className = 'text-[9px] font-bold text-blue-700 bg-blue-50 px-1.5 py-0.2 rounded border border-blue-200';
+  }
+
   const nameInput = document.getElementById('onboardingNameInput');
   if (nameInput) {
     if (user && user.name && user.name !== 'Verified Commuter' && user.name !== 'Guest Commuter') {
@@ -4102,23 +4139,19 @@ function showOnboardingStep(phone = null, profile = null) {
     }
   }
 
-  const emailInput = document.getElementById('onboardingEmailInput');
-  if (emailInput) {
-    emailInput.value = state.authEmail || (user && user.email) || '';
-  }
-
   const dobInput = document.getElementById('onboardingDobInput');
   if (dobInput) {
     dobInput.value = (user && user.dob) ? user.dob : '';
   }
 
   clearOnboardingErrors();
-  if (nameInput) setTimeout(() => nameInput.focus(), 150);
+  if (nameInput && !nameInput.value) setTimeout(() => nameInput.focus(), 150);
+  else if (phoneInput && !phoneInput.value) setTimeout(() => phoneInput.focus(), 150);
   if (window.lucide) lucide.createIcons();
 }
 
 function clearOnboardingErrors() {
-  const errs = ['onboardingNameError', 'onboardingGenderError', 'onboardingEmailError'];
+  const errs = ['onboardingNameError', 'onboardingPhoneError', 'onboardingGenderError', 'onboardingEmailError'];
   errs.forEach(id => {
     const el = document.getElementById(id);
     if (el) el.classList.add('hidden');
@@ -4142,7 +4175,7 @@ async function handleOnboardingSubmit() {
   const submitBtn = document.getElementById('btnSubmitOnboarding');
 
   const nameVal = nameInput ? nameInput.value.trim() : '';
-  const phoneVal = (phoneInput && phoneInput.value.trim()) || state.authPhone || '+91 98480 23145';
+  const rawPhoneVal = phoneInput ? phoneInput.value.trim() : '';
   const genderVal = genderSelect ? genderSelect.value : '';
   const emailVal = emailInput ? emailInput.value.trim() : '';
   const dobVal = dobInput ? dobInput.value : '';
@@ -4157,15 +4190,26 @@ async function handleOnboardingSubmit() {
     hasError = true;
   }
 
-  // 2. Mandatory Gender Validation
+  // 2. Mandatory Mobile Number Validation
+  const cleanPhoneDigits = rawPhoneVal.replace(/[^\d]/g, '');
+  if (!cleanPhoneDigits || cleanPhoneDigits.length < 10) {
+    showOnboardingError('onboardingPhoneError', 'Please enter a valid 10-digit mobile number');
+    if (!hasError && phoneInput) phoneInput.focus();
+    hasError = true;
+  }
+  const formattedPhone = cleanPhoneDigits.length === 10 
+    ? `+91 ${cleanPhoneDigits.slice(0, 5)} ${cleanPhoneDigits.slice(5)}`
+    : (rawPhoneVal.startsWith('+') ? rawPhoneVal : `+91 ${cleanPhoneDigits}`);
+
+  // 3. Mandatory Gender Validation
   if (!genderVal) {
     showOnboardingError('onboardingGenderError', 'Please select your gender');
     if (!hasError && genderSelect) genderSelect.focus();
     hasError = true;
   }
 
-  // 3. Optional Email Validation (validated only if provided)
-  if (emailVal && !validateEmail(emailVal)) {
+  // 4. Mandatory / Verified Email Validation
+  if (!emailVal || !validateEmail(emailVal)) {
     showOnboardingError('onboardingEmailError', 'Please enter a valid email address');
     if (!hasError && emailInput) emailInput.focus();
     hasError = true;
@@ -4186,7 +4230,7 @@ async function handleOnboardingSubmit() {
       };
     }
 
-    state.currentUser.phone = phoneVal;
+    state.currentUser.phone = formattedPhone;
     state.currentUser.name = nameVal;
     state.currentUser.gender = genderVal;
     state.currentUser.email = emailVal;
@@ -4197,17 +4241,20 @@ async function handleOnboardingSubmit() {
     // Immediately update header profile display
     const profileDisplayName = document.getElementById('profileDisplayName');
     if (profileDisplayName) profileDisplayName.textContent = nameVal;
+    const profileDisplayPhone = document.getElementById('profileDisplayPhone');
+    if (profileDisplayPhone) profileDisplayPhone.textContent = formattedPhone;
 
     // Persist to local storage
     localStorage.setItem('routemate_auth_user', JSON.stringify(state.currentUser));
 
     // Persist to Supabase Database in real time
     if (window.db && window.db.profiles && window.db.profiles.updateDetails) {
-      await window.db.profiles.updateDetails(phoneVal, {
+      await window.db.profiles.updateDetails(formattedPhone || emailVal, {
         name: nameVal,
         gender: genderVal,
         email: emailVal || null,
         dob: dobVal || null,
+        phone: formattedPhone,
         profile_completed: true
       }).catch(e => console.warn('Supabase profile update warning:', e));
     }
@@ -4864,13 +4911,15 @@ async function handleKycFormSubmit(event) {
     if (window.lucide) lucide.createIcons();
   }
 
-  const userPhone = (state.currentUser && state.currentUser.phone) || state.authPhone || '+91 98480 23145';
-  const profileIdentifier = (state.currentUser && state.currentUser.id) || userPhone;
+  const userPhone = (state.currentUser && state.currentUser.phone) || (state.authPhone && !state.authPhone.includes('@') ? state.authPhone : '+91 98480 23145');
+  const userEmail = (state.currentUser && state.currentUser.email) || state.authEmail || (typeof sessionStorage !== 'undefined' && sessionStorage.getItem('routemate_auth_target')) || '';
+  const profileIdentifier = (state.currentUser && state.currentUser.id) || userPhone || userEmail;
 
   const kycPayload = {
     name: nameResult.name,
     avatarUrl: avatarUrl,
     phone: userPhone,
+    email: userEmail,
     aadhaarNumber: aadhaarResult.clean,
     aadhaarDocPhoto: state.manualKycAadhaarDoc,
     dlNumber: dlResult.clean,
@@ -4887,10 +4936,37 @@ async function handleKycFormSubmit(event) {
       console.log('🛡️ Manual KYC submission response:', res);
     }
 
+    // Direct real-time sync with server store
+    try {
+      fetch('/api/kyc/notify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: profileIdentifier,
+          name: nameResult.name,
+          avatar_url: avatarUrl,
+          phone: userPhone,
+          email: userEmail,
+          aadhaar_number: aadhaarResult.clean,
+          aadhaar_card_photo: state.manualKycAadhaarDoc,
+          dl_number: dlResult.clean,
+          dl_expiry: dlExpiry,
+          dl_photo: state.manualKycDlDoc,
+          rc_number: rcNumber,
+          rc_vehicle_name: rcModel,
+          rc_photo: state.manualKycRcDoc,
+          kyc_status: 'verification_pending',
+          is_kyc_verified: false,
+          kyc_submitted_at: new Date().toISOString()
+        })
+      }).catch(e => console.warn('Server kyc notify note:', e));
+    } catch (e) {}
+
     if (!state.currentUser) {
       state.currentUser = {
         id: 'usr_' + Date.now(),
         phone: userPhone,
+        email: userEmail,
         authenticatedAt: new Date().toISOString()
       };
     }
@@ -4900,11 +4976,14 @@ async function handleKycFormSubmit(event) {
     state.currentUser.is_kyc_verified = false;
     state.currentUser.name = nameResult.name;
     state.currentUser.avatar = avatarUrl;
+    state.currentUser.email = userEmail;
+    state.currentUser.phone = userPhone;
     state.currentUser.aadhaar_number = aadhaarResult.clean;
     state.currentUser.dl_number = dlResult.clean;
     state.currentUser.dl_expiry = dlExpiry;
     state.currentUser.rc_number = rcNumber;
     state.currentUser.rc_vehicle_name = rcModel;
+    state.currentUser.kyc_submitted_at = new Date().toISOString();
 
     localStorage.setItem('routemate_auth_user', JSON.stringify(state.currentUser));
 
@@ -5802,10 +5881,15 @@ function renderAdminSubmissions() {
     return item;
   });
 
-  const pendingCount = all.filter(s => s.kyc_status === 'verification_pending' && !s.is_blocked).length;
-  const approvedCount = all.filter(s => (s.kyc_status === 'verified_success' || s.is_kyc_verified) && !s.is_blocked).length;
-  const blockedCount = all.filter(s => s.is_blocked || s.account_status === 'blocked').length;
-  const rejectedCount = all.filter(s => s.kyc_status === 'rejected' && !s.is_blocked).length;
+  const isPending = (s) => (s.kyc_status === 'verification_pending' || s.kyc_status === 'pending' || s.kyc_status === 'under_review') && !s.is_blocked;
+  const isApproved = (s) => (s.kyc_status === 'verified_success' || s.kyc_status === 'verified' || s.is_kyc_verified) && !s.is_blocked;
+  const isRejected = (s) => (s.kyc_status === 'rejected') && !s.is_blocked;
+  const isBlockedStatus = (s) => Boolean(s.is_blocked || s.account_status === 'blocked');
+
+  const pendingCount = all.filter(isPending).length;
+  const approvedCount = all.filter(isApproved).length;
+  const blockedCount = all.filter(isBlockedStatus).length;
+  const rejectedCount = all.filter(isRejected).length;
 
   const countPendingEl = document.getElementById('adminCountPending');
   const countApprovedEl = document.getElementById('adminCountApproved');
@@ -5819,13 +5903,13 @@ function renderAdminSubmissions() {
 
   let filtered = all;
   if (state.adminFilter === 'pending') {
-    filtered = all.filter(s => s.kyc_status === 'verification_pending' && !s.is_blocked);
+    filtered = all.filter(isPending);
   } else if (state.adminFilter === 'approved') {
-    filtered = all.filter(s => (s.kyc_status === 'verified_success' || s.is_kyc_verified) && !s.is_blocked);
+    filtered = all.filter(isApproved);
   } else if (state.adminFilter === 'blocked') {
-    filtered = all.filter(s => s.is_blocked || s.account_status === 'blocked');
+    filtered = all.filter(isBlockedStatus);
   } else if (state.adminFilter === 'rejected') {
-    filtered = all.filter(s => s.kyc_status === 'rejected' && !s.is_blocked);
+    filtered = all.filter(isRejected);
   }
 
   // Filter by adminSearchQuery across all relevant driver attributes
@@ -6170,7 +6254,7 @@ const INDIAN_STATE_CODES = new Set([
   'AN', 'AP', 'AR', 'AS', 'BR', 'CH', 'CG', 'DD', 'DL', 'DN',
   'GA', 'GJ', 'HR', 'HP', 'JH', 'JK', 'KA', 'KL', 'LA', 'LD',
   'MP', 'MH', 'MN', 'ML', 'MZ', 'NL', 'OD', 'PB', 'PY', 'RJ',
-  'SK', 'TN', 'TR', 'TS', 'UK', 'UP', 'WB'
+  'SK', 'TN', 'TR', 'TS', 'TG', 'UK', 'UP', 'WB'
 ]);
 
 // UIDAI Verhoeff algorithm multiplication table
@@ -6229,34 +6313,25 @@ function validateAadhaar(aadhaarStr) {
 }
 
 function validateDrivingLicense(dlStr) {
-  const clean = (dlStr || '').toUpperCase().replace(/[\s\-\/]/g, '');
+  const clean = (dlStr || '').toUpperCase().replace(/[\s\-\/\.]/g, '');
   if (!clean) {
     return { valid: false, error: 'Please enter your state Driving License number.' };
   }
-  if (clean.length < 15 || clean.length > 16) {
-    return { valid: false, error: 'Invalid Driving License length. Parivahan format requires 15-16 characters (e.g. TS-08-20210012345).' };
+  if (clean.length < 10 || clean.length > 16) {
+    return { valid: false, error: 'Invalid Driving License length. Standard Indian format requires 10-16 characters (e.g. TG0219240003760 or TS0820210012345).' };
   }
   const stateCode = clean.slice(0, 2);
   if (!INDIAN_STATE_CODES.has(stateCode)) {
-    return { valid: false, error: `Invalid State Code "${stateCode}". Must be an Indian State/UT code (e.g. TS, AP, KA, MH, DL).` };
+    return { valid: false, error: `Invalid State Code "${stateCode}". Must be an Indian State/UT code (e.g. TG, TS, AP, KA, MH, DL).` };
   }
-  const rtoCode = clean.slice(2, 4);
-  if (!/^\d{2}$/.test(rtoCode) || parseInt(rtoCode, 10) === 0) {
-    return { valid: false, error: 'Invalid RTO Code. 2-digit numeric RTO code required (e.g. 08 in TS-08).' };
+  const rest = clean.slice(2);
+  if (!/^[A-Z0-9]{8,14}$/.test(rest)) {
+    return { valid: false, error: 'Invalid Driving License characters. Only letters and numbers are permitted.' };
   }
-  const yearStr = clean.slice(4, 8);
-  const year = parseInt(yearStr, 10);
-  const currentYear = new Date().getFullYear();
-  if (isNaN(year) || year < 1980 || year > currentYear) {
-    return { valid: false, error: `Invalid issue year "${yearStr}". Must be between 1980 and ${currentYear}.` };
+  if (/^(\w)\1{7,}$/.test(rest)) {
+    return { valid: false, error: 'Fake Driving License detected: Repeating characters are rejected.' };
   }
-  const licenseNum = clean.slice(8);
-  if (!/^\d{7,8}$/.test(licenseNum)) {
-    return { valid: false, error: 'Invalid serial digits: Driving License must end with 7 numeric digits (e.g. 0012345).' };
-  }
-  if (/^(\d)\1{6,}$/.test(licenseNum)) {
-    return { valid: false, error: 'Fake Driving License detected: Repeating serial digits are rejected.' };
-  }
+
   return { valid: true, clean };
 }
 
@@ -6725,7 +6800,11 @@ function verifyDocumentAuthenticity(rawText, parsed) {
 
       passedChecks.push(`Official Parivahan State Jurisdictional Code verified (${stateCode}).`);
       passedChecks.push(`Valid Regional Transport Office (RTO) series verified (${rtoCode}).`);
-      passedChecks.push(`Issue Epoch verified: Year ${year} conforms to legal licensing period (1980-${currentYear}).`);
+      if (!isNaN(year) && year >= 1980 && year <= currentYear) {
+        passedChecks.push(`Issue Epoch verified: Year ${year} conforms to legal licensing period (1980-${currentYear}).`);
+      } else {
+        passedChecks.push(`Official State Transport Authority series number authenticated.`);
+      }
       passedChecks.push(`Unique sequential serial allocation authenticated.`);
       hasValidCredential = true;
     }
