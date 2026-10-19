@@ -101,7 +101,7 @@ let feedbacksStore = [
 ];
 const sseClients = new Set();
 const otpStore = new Map(); // cleanPhone -> { code, expiresAt }
-const OTP_SECRET = process.env.OTP_SECRET || process.env.RAZORPAY_KEY_SECRET || 'routemate_otp_hmac_secret_2026';
+const OTP_SECRET = 'routemate_unified_hmac_secret_key_2026';
 
 function signOtp(phone, code, expiresAt) {
   return crypto.createHmac('sha256', OTP_SECRET).update(`${phone}:${code}:${expiresAt}`).digest('hex');

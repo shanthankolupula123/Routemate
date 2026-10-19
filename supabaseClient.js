@@ -208,8 +208,8 @@ const db = {
           expiresAt
         });
 
-        if (backendResult && backendResult.res.ok && backendResult.data && backendResult.data.success && backendResult.data.status === 'approved') {
-          console.log('✅ OTP verified successfully via Resend verification service!');
+        if (backendResult && backendResult.data && (backendResult.data.success || backendResult.data.status === 'approved')) {
+          console.log('✅ OTP verified successfully via verification service!');
           try {
             sessionStorage.removeItem('routemate_otp_token');
             sessionStorage.removeItem('routemate_otp_expires');

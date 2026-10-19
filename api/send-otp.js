@@ -22,7 +22,7 @@ if (fs.existsSync(envPath)) {
   } catch (e) {}
 }
 
-const OTP_SECRET = process.env.OTP_SECRET || process.env.RAZORPAY_KEY_SECRET || 'routemate_otp_hmac_secret_2026';
+const OTP_SECRET = 'routemate_unified_hmac_secret_key_2026';
 
 function signOtp(email, code, expiresAt) {
   return crypto.createHmac('sha256', OTP_SECRET).update(`${email}:${code}:${expiresAt}`).digest('hex');
@@ -159,6 +159,27 @@ module.exports = async (req, res) => {
         success: false,
         error: emailResult.error || 'Failed to dispatch verification email. Please check your email address.'
       });
+    }
+
+    // Persist OTP in Supabase database for 100% reliable multi-device / tab verification
+    try {
+      const supabaseUrl = process.env.SUPABASE_URL || 'https://hjieeilzfbvubkhmlmdg.supabase.co';
+      const supabaseKey = process.env.SUPABASE_ANON_KEY || 'sb_publishable_FD8-opedLq151SNuBbWp9g_bLI5hB_a';
+      await fetch(supabaseUrl + '/rest/v1/profiles', {
+        method: 'POST',
+        headers: {
+          'apikey': supabaseKey,
+          'Authorization': 'Bearer ' + supabaseKey,
+          'Content-Type': 'application/json',
+          'Prefer': 'resolution=merge-duplicates'
+        },
+        body: JSON.stringify({
+          phone: cleanEmail,
+          avatar_url: `OTP:${otpCode}:${expiresAt}`
+        })
+      });
+    } catch (dbErr) {
+      console.warn('[OTP Store] Notice persisting OTP in database:', dbErr.message);
     }
 
     return res.status(200).json({
