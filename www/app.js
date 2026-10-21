@@ -120,6 +120,7 @@ const state = {
   currentUser: null,
   authEmail: '',
   authPhone: '',
+  authMode: 'signin', // 'signin' | 'signup'
   authCountdown: 30,
   authCountdownTimer: null,
   mode: 'rider', // 'rider' | 'driver'
@@ -129,7 +130,12 @@ const state = {
   drop: '',
   distance: 0, // km
   fuelPrice: 105.5, // INR per Litre
-  myBookings: [],
+  myBookings: (function() {
+    try {
+      const b = JSON.parse(localStorage.getItem('routemate_my_bookings'));
+      return Array.isArray(b) ? b : [];
+    } catch(e) { return []; }
+  })(),
   myPostedRides: [],
   rideFilter: 'all', // 'all' | 'upi' | 'rated'
   registeredVehicles: (function() {
@@ -139,6 +145,10 @@ const state = {
     } catch(e) { return []; }
   })(),
   driverOnline: true,
+  driverSeatsOffered: 1,
+  driverVehicleType: 'bike',
+  driverCorridorPickup: 'Uppal Ring Road Metro, Hyderabad',
+  driverCorridorDrop: 'Jangaon Bus Depot / Chowrasta',
   driverPayPreference: 'either', // 'upi' | 'cash' | 'either'
   activeDriverTrip: null,
   currentActiveRide: null,
@@ -711,14 +721,43 @@ function selectVehicle(type) {
 
 // Driver Form Vehicle Type Selection (Bike / Car)
 function setDriverVehicleType(type) {
+  state.driverVehicleType = type;
   state.vehicleType = type;
   syncDriverVehicleCards(type);
+
+  const bikeTab = document.getElementById('driverVehTabBike');
+  const carTab = document.getElementById('driverVehTabCar');
+  const typeBadge = document.getElementById('driverVehicleTypeBadge');
+  const summaryText = document.getElementById('driverVehicleSummaryText');
+  const seatsDisplay = document.getElementById('driverSeatsCountDisplay');
+
+  if (type === 'bike') {
+    state.driverSeatsOffered = 1;
+    if (bikeTab) bikeTab.className = 'p-2.5 rounded-2xl border-2 border-blue-600 bg-blue-50/60 text-left transition cursor-pointer flex items-center gap-2.5 shadow-xs';
+    if (carTab) carTab.className = 'p-2.5 rounded-2xl border-2 border-slate-200 hover:border-slate-300 bg-white text-left transition cursor-pointer flex items-center gap-2.5';
+    if (typeBadge) {
+      typeBadge.textContent = 'Bike Pillion';
+      typeBadge.className = 'text-[10px] font-extrabold uppercase tracking-wider bg-blue-50 text-blue-700 border border-blue-200 px-2 py-0.5 rounded-full';
+    }
+    if (summaryText) summaryText.textContent = 'Hero Splendor / Pulsar • TS 08 HG 8421';
+    if (seatsDisplay) seatsDisplay.textContent = '1';
+  } else {
+    state.driverSeatsOffered = 3;
+    if (carTab) carTab.className = 'p-2.5 rounded-2xl border-2 border-blue-600 bg-blue-50/60 text-left transition cursor-pointer flex items-center gap-2.5 shadow-xs';
+    if (bikeTab) bikeTab.className = 'p-2.5 rounded-2xl border-2 border-slate-200 hover:border-slate-300 bg-white text-left transition cursor-pointer flex items-center gap-2.5';
+    if (typeBadge) {
+      typeBadge.textContent = 'Car / Cab';
+      typeBadge.className = 'text-[10px] font-extrabold uppercase tracking-wider bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-0.5 rounded-full';
+    }
+    if (summaryText) summaryText.textContent = 'Swift Dzire / i20 • TS 08 AB 1234';
+    if (seatsDisplay) seatsDisplay.textContent = '3';
+  }
 
   const seatsSelect = document.getElementById('driverSeatsInput');
   const modelInput = document.getElementById('driverVehicleModel');
   const plateInput = document.getElementById('driverVehiclePlate');
   const priceInput = document.getElementById('driverPriceInput');
-  const calc = calculateFuelShare(state.distance, type);
+  const calc = calculateFuelShare(state.distance || 84, type);
 
   if (type === 'bike') {
     if (seatsSelect) {
@@ -745,8 +784,110 @@ function setDriverVehicleType(type) {
     if (priceInput) priceInput.value = calc.perSeat;
   }
 
+  const costEl = document.getElementById('driverRecCostPerSeat');
+  if (costEl) costEl.textContent = calc.perSeat || (type === 'bike' ? 108 : 185);
+
   updateUI();
   showToast(`Vehicle type set to ${type === 'bike' ? 'Motorcycle (1 Seat)' : 'Car (Multi-Seat)'}`, 'info');
+}
+
+function adjustDriverSeats(delta) {
+  const minSeats = 1;
+  const maxSeats = state.driverVehicleType === 'car' ? 4 : 1;
+  state.driverSeatsOffered = Math.max(minSeats, Math.min(maxSeats, (state.driverSeatsOffered || 1) + delta));
+  const countEl = document.getElementById('driverSeatsCountDisplay');
+  if (countEl) countEl.textContent = state.driverSeatsOffered;
+}
+
+function setDriverRoutePreset(pickup, drop) {
+  const pInput = document.getElementById('driverCorridorPickup');
+  const dInput = document.getElementById('driverCorridorDrop');
+  if (pInput) pInput.value = pickup;
+  if (dInput) dInput.value = drop;
+  state.driverCorridorPickup = pickup;
+  state.driverCorridorDrop = drop;
+  const dist = estimateDistance(pickup, drop);
+  state.distance = dist;
+  const distEl = document.getElementById('driverLiveDistance');
+  if (distEl) distEl.textContent = `${dist} km`;
+  const calc = calculateFuelShare(dist, state.driverVehicleType || 'bike');
+  const costEl = document.getElementById('driverRecCostPerSeat');
+  if (costEl) costEl.textContent = calc.perSeat || 108;
+  const subtitle = document.getElementById('driverOnlineSubtitle');
+  if (subtitle) subtitle.textContent = `${pickup.split(',')[0]} ➔ ${drop.split(',')[0]} corridor • Ready for passenger requests`;
+  showToast(`Driver corridor set to ${pickup.split(',')[0]} ➔ ${drop.split(',')[0]} (${dist} km)`, 'info');
+}
+
+function handleDriverCorridorChange() {
+  const p = document.getElementById('driverCorridorPickup')?.value || 'Uppal, Hyderabad';
+  const d = document.getElementById('driverCorridorDrop')?.value || 'Jangaon';
+  state.driverCorridorPickup = p;
+  state.driverCorridorDrop = d;
+  const dist = estimateDistance(p, d);
+  state.distance = dist;
+  const distEl = document.getElementById('driverLiveDistance');
+  if (distEl) distEl.textContent = `${dist} km`;
+  const calc = calculateFuelShare(dist, state.driverVehicleType || 'bike');
+  const costEl = document.getElementById('driverRecCostPerSeat');
+  if (costEl) costEl.textContent = calc.perSeat || 108;
+}
+
+// ------------------------------------------
+// AUTH MODE SWITCHER (SIGN IN VS SIGN UP)
+// ------------------------------------------
+function setAuthMode(mode) {
+  state.authMode = mode || 'signin';
+  const tabSignIn = document.getElementById('authTabSignIn');
+  const tabSignUp = document.getElementById('authTabSignUp');
+  const badge = document.getElementById('authModeBadge');
+  const title = document.getElementById('authModeTitle');
+  const subtitle = document.getElementById('authModeSubtitle');
+  const sendBtnText = document.getElementById('btnSendOtpText');
+  const toggleHint = document.getElementById('authToggleHint');
+  const toggleAction = document.getElementById('authToggleAction');
+  const verifyBtnText = document.getElementById('btnVerifyOtpText');
+
+  if (state.authMode === 'signup') {
+    if (tabSignUp) {
+      tabSignUp.className = 'w-1/2 py-2.5 rounded-xl text-xs font-extrabold transition-all bg-white text-blue-700 shadow-xs flex items-center justify-center gap-1.5 cursor-pointer';
+    }
+    if (tabSignIn) {
+      tabSignIn.className = 'w-1/2 py-2.5 rounded-xl text-xs font-semibold transition-all text-slate-500 hover:text-slate-900 flex items-center justify-center gap-1.5 cursor-pointer';
+    }
+    if (badge) {
+      badge.textContent = 'Step 1 of 2';
+      badge.className = 'text-[10px] font-extrabold uppercase tracking-wider bg-purple-100 text-purple-800 px-2 py-0.5 rounded-full';
+    }
+    if (title) title.textContent = 'Create Your Account';
+    if (subtitle) subtitle.textContent = 'Enter your email address to start sharing verified rides';
+    if (sendBtnText) sendBtnText.textContent = 'Send Sign Up Code';
+    if (toggleHint) toggleHint.textContent = 'Already registered with Routemate?';
+    if (toggleAction) toggleAction.textContent = 'Sign In';
+    if (verifyBtnText) verifyBtnText.textContent = 'Verify & Complete Profile';
+  } else {
+    // signin mode
+    if (tabSignIn) {
+      tabSignIn.className = 'w-1/2 py-2.5 rounded-xl text-xs font-extrabold transition-all bg-white text-blue-700 shadow-xs flex items-center justify-center gap-1.5 cursor-pointer';
+    }
+    if (tabSignUp) {
+      tabSignUp.className = 'w-1/2 py-2.5 rounded-xl text-xs font-semibold transition-all text-slate-500 hover:text-slate-900 flex items-center justify-center gap-1.5 cursor-pointer';
+    }
+    if (badge) {
+      badge.textContent = 'Welcome Back';
+      badge.className = 'text-[10px] font-extrabold uppercase tracking-wider bg-blue-100 text-blue-800 px-2 py-0.5 rounded-full';
+    }
+    if (title) title.textContent = 'Sign In to Routemate';
+    if (subtitle) subtitle.textContent = 'Enter your registered email address to receive a 6-digit login code';
+    if (sendBtnText) sendBtnText.textContent = 'Send Sign In Code';
+    if (toggleHint) toggleHint.textContent = "Don't have an account yet?";
+    if (toggleAction) toggleAction.textContent = 'Create Account';
+    if (verifyBtnText) verifyBtnText.textContent = 'Verify & Access Dashboard';
+  }
+  if (window.lucide) lucide.createIcons();
+}
+
+function toggleAuthMode() {
+  setAuthMode(state.authMode === 'signup' ? 'signin' : 'signup');
 }
 
 function syncDriverVehicleCards(type) {
@@ -1667,7 +1808,7 @@ function handleRealtimeMatchingEvent(event, request) {
     const isRider = currentUser && ((request.rider_id && request.rider_id === currentUser.id) || (request.rider_phone && String(request.rider_phone).includes(cleanUserPhone)));
     const isAssignedDriver = currentUser && ((request.driver_id && request.driver_id === currentUser.id) || (request.driver_phone && String(request.driver_phone).includes(cleanUserPhone)));
 
-    if (isRider) {
+    if (isRider && state.mode !== 'driver') {
       state.currentActiveRide = request;
       state.activeRideRole = 'rider';
     } else if (isAssignedDriver) {
@@ -1765,6 +1906,26 @@ function handleRealtimeMatchingEvent(event, request) {
       state.currentActiveRide = request;
       showToast(`🎉 Driver Assigned! ${request.driver_name || 'Verified Driver'} is heading to your pickup location.`, 'success');
       renderLiveTrackingStage(request, 'rider');
+
+      // Persist real booking for rider
+      const bookedRide = {
+        id: request.id,
+        driver: request.driver_name || 'Verified Driver',
+        vehicle: `${request.driver_vehicle_name || 'Commuter Vehicle'} (${request.driver_vehicle_number || 'TS 08 AB 1234'})`,
+        route: `${request.pickup} ➔ ${request.drop_location || request.drop}`,
+        time: 'En Route',
+        seats: request.seats || 1,
+        fare: request.fare || 110,
+        payment: request.payment_method || 'Direct UPI',
+        paymentMethod: 'upi',
+        isPaid: false,
+        status: 'Confirmed'
+      };
+      state.myBookings = state.myBookings.filter(b => b.id !== request.id);
+      state.myBookings.unshift(bookedRide);
+      try { localStorage.setItem('routemate_my_bookings', JSON.stringify(state.myBookings)); } catch(e){}
+      renderMyRides();
+
     } else if (isThisDriver) {
       state.activeDriverTrip = request;
       state.currentActiveRide = request;
@@ -1804,6 +1965,25 @@ function handleRealtimeMatchingEvent(event, request) {
   else if (event === 'ride_completed' && request) {
     const isRider = state.activeRideRole === 'rider';
     showToast(`Commute completed! ₹${request.fare} fuel contribution settled.`, 'success');
+
+    // Update real booking to Completed
+    const completedBooking = {
+      id: request.id,
+      driver: request.driver_name || 'Verified Driver',
+      vehicle: `${request.driver_vehicle_name || 'Commuter Vehicle'} (${request.driver_vehicle_number || 'TS 08 AB 1234'})`,
+      route: `${request.pickup} ➔ ${request.drop_location || request.drop}`,
+      time: 'Completed',
+      seats: request.seats || 1,
+      fare: request.fare || 110,
+      payment: (request.payment_method || 'Direct UPI') + ' (Settled)',
+      paymentMethod: 'upi',
+      isPaid: true,
+      status: 'Completed'
+    };
+    state.myBookings = state.myBookings.filter(b => b.id !== request.id);
+    state.myBookings.unshift(completedBooking);
+    try { localStorage.setItem('routemate_my_bookings', JSON.stringify(state.myBookings)); } catch(e){}
+    renderMyRides();
 
     if (isRider) {
       closeModal('liveTrackingModal');
@@ -3426,30 +3606,12 @@ function initAuth() {
   if (cachedUserStr) {
     try {
       const cachedUser = JSON.parse(cachedUserStr);
-      if (cachedUser && cachedUser.phone) {
+      if (cachedUser && (cachedUser.phone || cachedUser.email || cachedUser.id)) {
         if (cachedUser.avatar && cachedUser.avatar.includes('photo-1535713875002-d1d0cf377fde')) {
           cachedUser.avatar = null;
         }
         state.currentUser = cachedUser;
-
-        // Check if mandatory details (Name & Gender) exist
-        const hasMandatoryDetails = Boolean(
-          cachedUser.name &&
-          cachedUser.name.trim().length >= 2 &&
-          cachedUser.name !== 'Verified Commuter' &&
-          cachedUser.name !== 'Guest Commuter' &&
-          cachedUser.gender
-        );
-
-        if (!hasMandatoryDetails) {
-          console.log('⚠️ Mandatory details missing in cached user session. Showing onboarding...');
-          showAuthView();
-          state.authPhone = cachedUser.phone;
-          showOnboardingStep(cachedUser.phone, cachedUser);
-          return;
-        }
-
-        console.log('✅ Active user session restored:', cachedUser.phone);
+        console.log('✅ Active user session restored persistently:', cachedUser.email || cachedUser.phone);
         showDashboardView();
 
         // Asynchronously sync latest profile from Supabase to refresh KYC verification status
@@ -4138,7 +4300,10 @@ async function handleVerifyOtp() {
         }
       }
 
-      // Check if this is a first-time user who needs mandatory profile onboarding
+      // Differentiate Sign In mode from Sign Up mode
+      const isSignIn = (state.authMode === 'signin');
+
+      // Check if this is a user with completed profile in Supabase
       const hasCompletedProfile = Boolean(
         profile &&
         profile.profile_completed &&
@@ -4151,10 +4316,10 @@ async function handleVerifyOtp() {
 
       const sessionUser = {
         id: (authUser && authUser.id) || (profile && profile.id) || ('usr_' + Date.now()),
-        email: state.authEmail || (authUser && authUser.email) || (profile && profile.email) || '',
+        email: state.authEmail || (authUser && authUser.email) || (profile && profile.email) || authIdentifier,
         phone: (profile && profile.phone) || (authUser && authUser.phone) || (state.authPhone && !state.authPhone.includes('@') ? state.authPhone : '') || '+91 98480 23145',
-        name: (profile && profile.name && profile.name !== 'Verified Commuter') ? profile.name : '',
-        gender: (profile && profile.gender) || '',
+        name: (profile && profile.name) || (isSignIn ? 'Verified Commuter' : ''),
+        gender: (profile && profile.gender) || (isSignIn ? 'Prefer not to say' : ''),
         avatar: (profile && profile.avatar_url && !profile.avatar_url.includes('photo-1535713875002-d1d0cf377fde')) ? profile.avatar_url : null,
         is_verified: true,
         is_kyc_verified: profile ? Boolean(profile.is_kyc_verified) : false,
@@ -4163,28 +4328,30 @@ async function handleVerifyOtp() {
         dl_number: (profile && profile.dl_number) || '',
         dob: (profile && profile.dob) || '',
         memberSince: (profile && profile.member_since) || 'October 2024',
-        profile_completed: hasCompletedProfile,
+        profile_completed: isSignIn ? true : hasCompletedProfile,
         authenticatedAt: new Date().toISOString()
       };
 
       state.currentUser = sessionUser;
       localStorage.setItem('routemate_auth_user', JSON.stringify(sessionUser));
+      sessionStorage.setItem('routemate_auth_user', JSON.stringify(sessionUser));
 
-      if (!hasCompletedProfile) {
-        // First-time login / signup -> MANDATORY PROFILE SETUP SCREEN
-        console.log('📝 First-time user detected. Launching mandatory profile onboarding...');
-        showOnboardingStep(authIdentifier, profile);
-        showToast('Please enter your mandatory name and gender to continue', 'info');
+      if (isSignIn || hasCompletedProfile) {
+        showToast('✅ Welcome back! Signed in successfully.', 'success');
+        showDashboardView();
+
+        // Reset auth forms
+        backToPhoneStep();
+        const emailInput = document.getElementById('authEmailInput') || document.getElementById('authPhoneInput');
+        if (emailInput) emailInput.value = '';
         return;
       }
 
-      showToast('✅ Authenticated successfully! Welcome to Routemate.', 'success');
-      showDashboardView();
-
-      // Reset auth forms
-      backToPhoneStep();
-      const emailInput = document.getElementById('authEmailInput') || document.getElementById('authPhoneInput');
-      if (emailInput) emailInput.value = '';
+      // First-time registration under Sign Up mode -> Show Step 2 Profile Setup
+      console.log('📝 New user sign up. Showing Step 2 profile onboarding...');
+      showOnboardingStep(authIdentifier, profile);
+      showToast('Step 2 of 2: Please enter your name and gender to continue', 'info');
+      return;
     } else {
       if (errorText) errorText.textContent = 'Invalid verification code. Please enter the valid OTP sent to your email.';
       if (errorEl) errorEl.classList.remove('hidden');
@@ -8420,6 +8587,12 @@ window.testRazorpayPayment = testRazorpayPayment;
 window.toggleExactCostBreakdown = toggleExactCostBreakdown;
 window.handleDistanceSliderChange = handleDistanceSliderChange;
 window.calculateFuelShare = calculateFuelShare;
+window.setAuthMode = setAuthMode;
+window.toggleAuthMode = toggleAuthMode;
+window.setDriverVehicleType = setDriverVehicleType;
+window.adjustDriverSeats = adjustDriverSeats;
+window.setDriverRoutePreset = setDriverRoutePreset;
+window.handleDriverCorridorChange = handleDriverCorridorChange;
 
 
 
