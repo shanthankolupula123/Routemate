@@ -2177,7 +2177,7 @@ const db = {
       if (client) {
         try {
           client.from('rides')
-            .delete()
+            .update({ status: 'completed' })
             .eq('vehicle_number', requestId)
             .then(() => {}).catch(() => {});
         } catch (e) {}
@@ -2215,7 +2215,7 @@ const db = {
       if (client) {
         try {
           client.from('rides')
-            .delete()
+            .update({ status: 'completed' })
             .eq('vehicle_number', requestId)
             .then(() => {}).catch(() => {});
         } catch (e) {}
