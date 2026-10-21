@@ -1648,22 +1648,29 @@ const db = {
       // 4. Server-Sent Events (SSE) Stream if hosted on server
       if (typeof window !== 'undefined' && window.EventSource && !this._sseSource) {
         try {
-          const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-          if (isLocal) {
-            this._sseSource = new EventSource('/api/ride-requests/stream');
-            this._sseSource.onmessage = (e) => {
-              try {
-                const data = JSON.parse(e.data);
-                if (data.event === 'new_feedback') {
-                  this._handleIncomingEvent('new_feedback', data.feedback);
-                } else if (data.event && data.event !== 'connected') {
-                  this._handleIncomingEvent(data.event, data.request);
-                } else if (data.event === 'connected' && data.activeRequest) {
-                  this._activeRequest = data.activeRequest;
+          this._sseSource = new EventSource('/api/ride-requests/stream');
+          this._sseSource.onmessage = (e) => {
+            try {
+              const data = JSON.parse(e.data);
+              if (data.event === 'new_feedback') {
+                this._handleIncomingEvent('new_feedback', data.feedback);
+              } else if (data.event && data.event !== 'connected') {
+                this._handleIncomingEvent(data.event, data.request);
+              } else if (data.event === 'connected' && data.activeRequest) {
+                this._activeRequest = data.activeRequest;
+                if (data.activeRequest.status === 'searching') {
+                  this._handleIncomingEvent('new_ride_request', data.activeRequest);
                 }
-              } catch (err) {}
-            };
-          }
+              }
+            } catch (err) {}
+          };
+          this._sseSource.onerror = () => {
+            // Gracefully ignore if serverless/static environment doesn't support SSE
+            if (this._sseSource) {
+              try { this._sseSource.close(); } catch(e) {}
+              this._sseSource = null;
+            }
+          };
         } catch (e) {}
       }
 
@@ -1675,11 +1682,11 @@ const db = {
         }
       } catch (e) {}
 
-      // Periodic synchronization poll (every 2.5s)
+      // Periodic synchronization poll (every 1.5s for instant synchronization)
       if (!this._pollTimer && typeof window !== 'undefined') {
         this._pollTimer = setInterval(() => {
           this.syncActiveRequest();
-        }, 2500);
+        }, 1500);
       }
     },
 
@@ -2088,9 +2095,15 @@ const db = {
           const data = await resp.json();
           if (data && data.activeRequest) {
             const serverReq = data.activeRequest;
+            const eventName = serverReq.status === 'searching' ? 'new_ride_request' : serverReq.status;
             if (!this._activeRequest || this._activeRequest.status !== serverReq.status || this._activeRequest.id !== serverReq.id) {
-              this._handleIncomingEvent(serverReq.status, serverReq);
+              this._handleIncomingEvent(eventName, serverReq);
             }
+          } else if (this._activeRequest && this._activeRequest.status === 'searching') {
+            // Active request was resolved or cleared on server
+            this._activeRequest = null;
+            try { localStorage.removeItem('routemate_active_ride_request'); } catch(e){}
+            this._notify('ride_cleared', null);
           }
         }
       } catch (e) {}

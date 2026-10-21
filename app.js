@@ -33,11 +33,30 @@ const ROUTE_DISTANCES = {
 const TELANGANA_NODES = {
   uppal: [17.4018, 78.5602],
   secunderabad: [17.4399, 78.4983],
+  hyderabad: [17.3850, 78.4867],
   hiteccity: [17.4474, 78.3762],
   gachibowli: [17.4401, 78.3489],
-  lbnagar: [17.3457, 78.5522],
+  madhapur: [17.4483, 78.3915],
+  kondapur: [17.4699, 78.3578],
+  miyapur: [17.4968, 78.3547],
+  kukatpally: [17.4849, 78.4138],
   kphb: [17.4932, 78.3995],
+  ameerpet: [17.4375, 78.4482],
+  begumpet: [17.4447, 78.4664],
+  banjarahills: [17.4156, 78.4357],
+  jubileehills: [17.4319, 78.4073],
+  tarnaka: [17.4287, 78.5307],
+  boduppal: [17.4168, 78.5832],
+  peerzadiguda: [17.4110, 78.5770],
+  lbnagar: [17.3457, 78.5522],
+  dilsukhnagar: [17.3688, 78.5247],
+  charminar: [17.3616, 78.4747],
+  mehdipatnam: [17.3916, 78.4400],
   ghatkesar: [17.4455, 78.6835],
+  ecil: [17.4720, 78.5714],
+  cherlapally: [17.4655, 78.6015],
+  malkajgiri: [17.4526, 78.5342],
+  alwal: [17.5020, 78.5080],
   bibinagar: [17.4722, 78.7903],
   bhongir: [17.5108, 78.8889],
   yadagirigutta: [17.5857, 78.9392],
@@ -58,8 +77,31 @@ const TELANGANA_NODES = {
   nizamabad: [18.6725, 78.0941],
   sangareddy: [17.6190, 78.0814],
   medchal: [17.6297, 78.4814],
+  shamirpet: [17.6044, 78.5661],
   shamshabad: [17.2403, 78.4294]
 };
+
+function resolveLocationCoords(name) {
+  if (!name || typeof name !== 'string') return { lat: 17.4024, lng: 78.5604 };
+  const clean = name.toLowerCase().replace(/[^a-z0-9]/g, '');
+
+  for (const [node, coord] of Object.entries(TELANGANA_NODES)) {
+    if (clean.includes(node) || node.includes(clean)) {
+      return { lat: coord[0], lng: coord[1] };
+    }
+  }
+
+  if (typeof resolveCorridorProximityAreaCoords === 'function') {
+    const res = resolveCorridorProximityAreaCoords(name);
+    if (res) return res;
+  }
+
+  if ((clean.includes('current') || clean.includes('mylocation') || clean.includes('nearme')) && state.userCoords) {
+    return { lat: state.userCoords.lat, lng: state.userCoords.lng };
+  }
+
+  return { lat: 17.4399, lng: 78.5804 };
+}
 
 function calculateHaversineKm(lat1, lon1, lat2, lon2) {
   const R = 6371; // Earth radius in km
@@ -1500,6 +1542,15 @@ function renderDriverIncomingRequest() {
 // 1. Rider Action: Broadcast Instant Ride Request
 async function requestRideAction() {
   if (!state.currentUser) {
+    try {
+      const cached = JSON.parse(localStorage.getItem('routemate_auth_user') || 'null');
+      if (cached && (cached.phone || cached.email)) {
+        state.currentUser = cached;
+      }
+    } catch (e) {}
+  }
+
+  if (!state.currentUser) {
     showToast('Please sign in with your mobile number to request a ride.', 'warning');
     const authScreen = document.getElementById('authScreen');
     if (authScreen) authScreen.classList.remove('hidden');
@@ -1520,6 +1571,9 @@ async function requestRideAction() {
     state.distance = estimateDistance(pickup, drop);
   }
 
+  const pCoords = resolveLocationCoords(pickup);
+  const dCoords = resolveLocationCoords(drop);
+
   const calc = calculateFuelShare(state.distance, state.vehicleType);
   const fare = calc.perSeat || 110;
   const seats = 1;
@@ -1533,7 +1587,11 @@ async function requestRideAction() {
     riderRole: state.currentUser.role || 'Daily Commuter',
     riderRating: state.currentUser.rating || 4.9,
     pickup: pickup,
+    pickupLat: pCoords.lat,
+    pickupLng: pCoords.lng,
     drop: drop,
+    dropLat: dCoords.lat,
+    dropLng: dCoords.lng,
     distance: state.distance,
     vehicleType: state.vehicleType || 'any',
     isFlexibleVehicle: isFlexible,
@@ -1543,7 +1601,7 @@ async function requestRideAction() {
     paymentMethod: 'Direct UPI'
   };
 
-  showToast('Broadcasting ride request to nearby verified drivers...', 'info');
+  showToast('Broadcasting ride request to nearby verified drivers in zone...', 'info');
 
   const res = await window.db.matching.createRequest(reqPayload);
   if (res && res.success) {
@@ -1592,7 +1650,19 @@ function handleRealtimeMatchingEvent(event, request) {
   }
 
   // --- EVENT 1: New Ride Request Broadcasted ---
-  if (event === 'new_ride_request' && request) {
+  if ((event === 'new_ride_request' || event === 'searching') && request) {
+    if (request.status && request.status !== 'searching') return;
+
+    // Avoid self-matching if rider on this exact device
+    const isSameRiderOnThisTab = currentUser && (
+      (request.rider_id && request.rider_id === currentUser.id) ||
+      (request.rider_phone && cleanUserPhone && String(request.rider_phone).includes(cleanUserPhone))
+    );
+
+    if (isSameRiderOnThisTab && state.activeRideRole === 'rider' && !state.driverOnline) {
+      return;
+    }
+
     const isFlexible = Boolean(
       request.is_flexible_vehicle ||
       request.isFlexibleVehicle ||
@@ -1603,22 +1673,25 @@ function handleRealtimeMatchingEvent(event, request) {
     );
     const reqVehType = request.vehicle_type || request.vehicleType || 'any';
     const driverVehType = (state.registeredVehicles && state.registeredVehicles[0]?.type) || state.vehicleType || 'bike';
-    const isVehicleMatched = isFlexible || reqVehType === 'any' || reqVehType === 'custom' || reqVehType === driverVehType;
+    const seatsRequested = parseInt(request.seats || 1, 10);
+    
+    // Flexible matching: Single passenger requests match across bikes, autos & cars without artificial boundaries
+    const isVehicleMatched = isFlexible || reqVehType === 'any' || reqVehType === 'custom' || reqVehType === driverVehType || seatsRequested <= 1;
 
     const prefLabel = isFlexible ? 'Any / Custom Vehicle' : (reqVehType === 'bike' ? 'Bike Pillion' : (reqVehType === 'auto' ? 'Auto Rickshaw' : 'Car / Cab'));
 
     state.incomingRequest = {
       id: request.id,
-      name: request.rider_name,
+      name: request.rider_name || 'Verified Commuter',
       role: request.rider_role || 'Daily Commuter',
       rating: request.rider_rating || 4.9,
       totalCommutes: 14,
-      avatar: request.rider_avatar,
+      avatar: request.rider_avatar || 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=120&h=120&q=80',
       pickup: request.pickup,
       drop: request.drop_location || request.drop,
       time: 'Ready in 5 mins',
       distance: request.distance_km || request.distance || 84,
-      seatCount: request.seats || 1,
+      seatCount: seatsRequested,
       fareOffer: request.fare || 110,
       paymentMethod: request.payment_method === 'cash' ? 'Cash on Board' : 'Direct UPI',
       pin: request.pin || '4821',
@@ -1628,14 +1701,25 @@ function handleRealtimeMatchingEvent(event, request) {
       rawRequest: request
     };
 
-    // Check if current user is an online verified driver
-    const kycStatus = (currentUser && currentUser.kyc_status) || (currentUser && currentUser.is_kyc_verified ? 'verified_success' : 'unverified');
-    const isOnlineVerifiedDriver = state.mode === 'driver' && state.driverOnline && kycStatus === 'verified_success';
+    // Check if current user is an active online driver
+    const isOnlineDriver = Boolean(
+      state.driverOnline ||
+      state.mode === 'driver' ||
+      (currentUser && (currentUser.is_kyc_verified || currentUser.is_verified || currentUser.role === 'driver'))
+    );
 
-    if (isOnlineVerifiedDriver && !state.activeDriverTrip && isVehicleMatched) {
+    const isDriverFree = !state.activeDriverTrip || state.activeDriverTrip.status === 'completed' || state.activeDriverTrip.status === 'cancelled';
+
+    if (isOnlineDriver && isDriverFree && isVehicleMatched) {
       openDriverIncomingModal(state.incomingRequest);
       renderDriverIncomingRequest();
       playNotificationSound();
+
+      if (typeof navigator !== 'undefined' && navigator.vibrate) {
+        try { navigator.vibrate([300, 150, 300]); } catch (e) {}
+      }
+
+      showToast(`🚗 New Ride Request: ${request.rider_name || 'Passenger'} (${request.pickup} ➔ ${request.drop_location || request.drop}) • ₹${request.fare || 110}`, 'success');
     }
   }
 
@@ -2100,6 +2184,9 @@ async function acceptDriverIncomingModal() {
 
   // Immediate UI state update (0ms latency)
   closeModal('driverIncomingRideModal');
+  if (state.mode !== 'driver' && typeof switchMode === 'function') {
+    switchMode('driver');
+  }
   state.activeDriverTrip = acceptedTrip;
   state.currentActiveRide = acceptedTrip;
   state.incomingRequest = null;
