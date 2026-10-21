@@ -2028,7 +2028,7 @@ const db = {
         current.driver_phone = driverData.phone;
         current.driver_avatar = driverData.avatar_url || driverData.avatar;
         current.driver_vehicle_name = driverData.vehicleName || driverData.rc_vehicle_name || 'Verified Commuter Vehicle';
-        current.driver_vehicle_number = driverData.vehicleNumber || driverData.rc_number || 'TS 08 EK 4321';
+        current.driver_vehicle_number = driverData.vehicleNumber || driverData.rc_number || 'TS 08 AB 1234';
         current.driver_vehicle_type = driverData.vehicleType || 'bike';
         current.accepted_at = new Date().toISOString();
       }
@@ -2244,7 +2244,8 @@ const db = {
             foundOnServer = true;
             const serverReq = data.activeRequest;
             const eventName = (serverReq.status === 'searching' || serverReq.status === 'active') ? 'new_ride_request' : serverReq.status;
-            if (!this._activeRequest || this._activeRequest.status !== serverReq.status || this._activeRequest.id !== serverReq.id) {
+            const needsIncomingUiSync = typeof state !== 'undefined' && !state.incomingRequest && !state.activeDriverTrip && (serverReq.status === 'searching' || serverReq.status === 'active');
+            if (!this._activeRequest || this._activeRequest.status !== serverReq.status || this._activeRequest.id !== serverReq.id || needsIncomingUiSync) {
               this._handleIncomingEvent(eventName, serverReq);
             }
           }
@@ -2255,6 +2256,7 @@ const db = {
       const client = getSupabaseClient();
       if (client) {
         try {
+          // A. Check for new incoming rider requests for online drivers
           const { data, error } = await client
             .from('rides')
             .select('*')
@@ -2289,10 +2291,41 @@ const db = {
               status: 'searching',
               created_at: row.created_at
             };
-            if (!this._activeRequest || this._activeRequest.id !== incomingReq.id || this._activeRequest.status !== incomingReq.status) {
+            const needsIncomingUiSync = typeof state !== 'undefined' && !state.incomingRequest && !state.activeDriverTrip;
+            if (!this._activeRequest || this._activeRequest.id !== incomingReq.id || this._activeRequest.status !== incomingReq.status || needsIncomingUiSync) {
               this._handleIncomingEvent('new_ride_request', incomingReq);
             }
           } else if (!foundOnServer && this._activeRequest && (this._activeRequest.status === 'searching' || this._activeRequest.status === 'active')) {
+            // B. If this device is a Rider waiting for driver acceptance, check if ride was accepted in Supabase
+            try {
+              const { data: myReqRows } = await client
+                .from('rides')
+                .select('*')
+                .eq('vehicle_number', this._activeRequest.id)
+                .limit(1);
+              if (myReqRows && myReqRows.length > 0) {
+                const myRow = myReqRows[0];
+                let notesData = {};
+                try { notesData = JSON.parse(myRow.notes || '{}'); } catch(e){}
+                if (notesData.status === 'driver_accepted' || myRow.status === 'completed') {
+                  const acceptedPayload = {
+                    ...this._activeRequest,
+                    ...notesData,
+                    driver_id: notesData.driver?.id || myRow.driver_id,
+                    driver_name: notesData.driver?.name || 'Verified Driver',
+                    driver_phone: notesData.driver?.phone || '+91 94942 85249',
+                    driver_avatar: notesData.driver?.avatar,
+                    driver_vehicle_name: notesData.driver?.vehicleName || 'Verified Commuter Vehicle',
+                    driver_vehicle_number: notesData.driver?.vehicleNumber || 'TS 08 AB 1234',
+                    driver_vehicle_type: notesData.driver?.vehicleType || 'bike',
+                    status: 'driver_accepted'
+                  };
+                  this._handleIncomingEvent('ride_accepted', acceptedPayload);
+                  return;
+                }
+              }
+            } catch(e){}
+
             const ageMs = this._activeRequest.created_at ? (Date.now() - new Date(this._activeRequest.created_at).getTime()) : 999999;
             if (ageMs > 300000) {
               this._activeRequest = null;
@@ -2574,69 +2607,8 @@ const db = {
         }
       } catch (e) {}
 
-      // 4. Default Seed Feedbacks Fallback
-      const seeds = [
-        {
-          id: 'FB-SEED-01',
-          rideId: 'RIDE-101',
-          driverId: 'DRV-1',
-          driverName: 'Ramesh Kumar',
-          driverPhone: '+91 94942 85249',
-          driverAvatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=120&h=120&q=80',
-          driverVehicle: 'Bajaj Pulsar 150 (TS 08 EK 4321)',
-          riderId: 'USR-881',
-          riderName: 'Ananya Verma',
-          riderPhone: '+91 98480 23145',
-          rating: 5.0,
-          tags: ['Safe Driving', 'On Time', 'Clean Vehicle'],
-          feedbackText: 'Very smooth highway ride, followed speed limits and wore helmet. Highly recommended!',
-          hasSafetyConcern: false,
-          route: 'Uppal Ring Road Metro ➔ Jangaon Railway Station',
-          createdAt: new Date(Date.now() - 3600000 * 5).toISOString()
-        },
-        {
-          id: 'FB-SEED-02',
-          rideId: 'RIDE-102',
-          driverId: 'DRV-2',
-          driverName: 'Suresh Varma',
-          driverPhone: '+91 91234 56780',
-          driverAvatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=120&h=120&q=80',
-          driverVehicle: 'Hero Splendor Plus (TS 08 AB 9812)',
-          riderId: 'USR-902',
-          riderName: 'Kavitha Reddy',
-          riderPhone: '+91 99887 76655',
-          rating: 2.0,
-          tags: ['Rash Driving'],
-          feedbackText: 'Driver was speeding aggressively on the highway corridor and taking continuous phone calls. Passenger safety was neglected.',
-          hasSafetyConcern: true,
-          route: 'Uppal X Roads ➔ Bhongir Bypass',
-          createdAt: new Date(Date.now() - 3600000 * 2).toISOString()
-        },
-        {
-          id: 'FB-SEED-03',
-          rideId: 'RIDE-103',
-          driverId: 'DRV-3',
-          driverName: 'Priya Sharma',
-          driverPhone: '+91 79890 31924',
-          driverAvatar: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=120&h=120&q=80',
-          driverVehicle: 'Maruti Suzuki Swift VXi (TS 09 FH 9182)',
-          riderId: 'USR-773',
-          riderName: 'Rahul Mehra',
-          riderPhone: '+91 98490 11223',
-          rating: 4.0,
-          tags: ['Clean Vehicle', 'Polite & Friendly'],
-          feedbackText: 'Comfortable AC car ride from Uppal to Jangaon. Punctual departure and polite driver.',
-          hasSafetyConcern: false,
-          route: 'Uppal X Roads ➔ Jangaon Court Chowrasta',
-          createdAt: new Date(Date.now() - 3600000).toISOString()
-        }
-      ];
-
-      try {
-        localStorage.setItem('routemate_feedbacks', JSON.stringify(seeds));
-      } catch (e) {}
-
-      return seeds;
+      // 4. Default Feedbacks Fallback (No mock data)
+      return [];
     }
   },
 

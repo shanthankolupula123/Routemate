@@ -1646,6 +1646,19 @@ async function cancelCurrentActiveRide() {
 function handleRealtimeMatchingEvent(event, request) {
   console.log('🔄 [Realtime Matching Event]:', event, request);
 
+  // Normalize init event into semantic matching event
+  if (event === 'init' && request) {
+    if (request.status === 'searching' || request.status === 'active') {
+      event = 'new_ride_request';
+    } else if (request.status === 'driver_accepted') {
+      event = 'ride_accepted';
+    } else if (request.status === 'ride_started') {
+      event = 'ride_started';
+    } else if (request.status === 'completed') {
+      event = 'ride_completed';
+    }
+  }
+
   const currentUser = state.currentUser;
   const cleanUserPhone = currentUser ? String(currentUser.phone || '').replace(/\D/g, '').slice(-10) : '';
 
@@ -1662,6 +1675,11 @@ function handleRealtimeMatchingEvent(event, request) {
       state.activeDriverTrip = request;
       state.activeRideRole = 'driver';
     }
+  }
+
+  // Skip if driver already declined this specific request ID on this device
+  if (request && state.declinedRequestIds && state.declinedRequestIds.has(request.id)) {
+    return;
   }
 
   // --- EVENT 1: New Ride Request Broadcasted ---
@@ -2115,6 +2133,10 @@ function stopIncomingTimer() {
 
 function declineDriverIncomingModal() {
   stopIncomingTimer();
+  if (state.incomingRequest && state.incomingRequest.id) {
+    if (!state.declinedRequestIds) state.declinedRequestIds = new Set();
+    state.declinedRequestIds.add(state.incomingRequest.id);
+  }
   closeModal('driverIncomingRideModal');
   state.incomingRequest = null;
   renderDriverIncomingRequest();
@@ -2129,7 +2151,7 @@ async function acceptDriverIncomingModal() {
   if (!state.currentUser) {
     state.currentUser = {
       id: 'driver_' + Date.now(),
-      name: 'Ramesh Kumar',
+      name: 'Verified Driver',
       phone: '9494285249',
       role: 'Verified Driver',
       rating: 4.9,
@@ -2147,18 +2169,18 @@ async function acceptDriverIncomingModal() {
   }
 
   const driverVeh = (state.registeredVehicles && state.registeredVehicles[0]) || {
-    name: 'Bajaj Pulsar 150',
-    number: 'TS 08 EK 4321',
+    name: 'Verified Commuter Vehicle',
+    number: 'TS 08 AB 1234',
     type: state.vehicleType || 'bike'
   };
 
   const driverData = {
     id: state.currentUser.id,
-    name: state.currentUser.name || 'Ramesh Kumar',
+    name: state.currentUser.name || 'Verified Driver',
     phone: state.currentUser.phone || '+91 94942 85249',
     avatar: state.currentUser.avatar_url || state.currentUser.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=120&h=120&q=80',
-    vehicleName: driverVeh.name || driverVeh.model || 'Bajaj Pulsar 150',
-    vehicleNumber: driverVeh.number || driverVeh.plate || 'TS 08 EK 4321',
+    vehicleName: driverVeh.name || driverVeh.model || 'Verified Vehicle',
+    vehicleNumber: driverVeh.number || driverVeh.plate || 'TS 08 AB 1234',
     vehicleType: driverVeh.type || state.vehicleType || 'bike',
     rating: state.currentUser.rating || 4.9
   };
@@ -2456,7 +2478,7 @@ function renderLiveTrackingStage(request, role = 'rider') {
       if (roleBadge) roleBadge.textContent = 'Passenger Ready';
     } else {
       if (nameEl) nameEl.textContent = request.driver_name || 'Verified Driver';
-      if (vehEl) vehEl.textContent = `${request.driver_vehicle_name || 'Commuter Vehicle'} • ${request.driver_vehicle_number || 'TS 08 EK 4321'}`;
+      if (vehEl) vehEl.textContent = `${request.driver_vehicle_name || 'Commuter Vehicle'} • ${request.driver_vehicle_number || 'TS 08 AB 1234'}`;
       if (avatarEl) avatarEl.src = request.driver_avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=120&h=120&q=80';
       if (callBtnLabel) callBtnLabel.textContent = 'Call Driver';
       if (roleBadge) roleBadge.textContent = stage === 'driver_accepted' ? 'Driver Assigned' : 'In Transit';
@@ -2499,7 +2521,7 @@ function renderLiveTrackingStage(request, role = 'rider') {
           pickup: request.pickup,
           drop: request.drop_location || request.drop,
           vehicle: request.driver_vehicle_name || 'Commuter Vehicle',
-          plate: request.driver_vehicle_number || 'TS 08 EK 4321',
+          plate: request.driver_vehicle_number || 'TS 08 AB 1234',
           driver: request.driver_name || 'Verified Commuter',
           avatar: request.driver_avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=120&h=120&q=80',
           vehicleType: request.vehicle_type || 'bike'
@@ -2610,7 +2632,7 @@ function openLiveTrackingForRide(rideOrId, pin = '4821') {
     drop: (state.drop && state.drop.trim()) || ride.drop || 'Jangaon Chowrasta',
     driver_name: ride.driverName || 'Verified Commuter',
     driver_vehicle_name: ride.vehicleName || 'Commuter Vehicle',
-    driver_vehicle_number: ride.vehicleNumber || 'TS 08 EK 4321',
+    driver_vehicle_number: ride.vehicleNumber || 'TS 08 AB 1234',
     driver_avatar: ride.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=120&h=120&q=80',
     pin: pin || '4821',
     fare: ride.perSeatPrice || 110,
@@ -2633,7 +2655,7 @@ function openLiveTrackingForDriver() {
     drop: trip.drop_location || trip.drop,
     rider_name: trip.rider_name || trip.name || 'Passenger',
     driver_vehicle_name: 'Co-Commuter Seat',
-    driver_vehicle_number: 'TS 08 HG 8421',
+    driver_vehicle_number: 'TS 08 AB 1234',
     rider_avatar: trip.rider_avatar || trip.avatar,
     pin: trip.pin || '4821',
     fare: trip.fare || trip.fareOffer || 110,
@@ -2657,7 +2679,7 @@ function openLiveTrackingModal(data) {
 // ==========================================
 
 function triggerEmergencyHelp() {
-  const msg = `EMERGENCY / SAFETY INCIDENT REPORT: Routemate commuter on NH 163 Corridor (${state.pickup} ➔ ${state.drop}). Distance: ${state.distance}km. Plate: TS 08 HG 8421. Immediate support requested.`;
+  const msg = `EMERGENCY / SAFETY INCIDENT REPORT: Routemate commuter on NH 163 Corridor (${state.pickup} ➔ ${state.drop}). Distance: ${state.distance}km. Plate: TS 08 AB 1234. Immediate support requested.`;
   const whatsappUrl = `https://api.whatsapp.com/send?phone=919848023145&text=${encodeURIComponent(msg)}`;
   
   showToast('Connecting to 24x7 Routemate Safety Response Desk...', 'error');
@@ -2678,12 +2700,12 @@ function openRatingModal(tripInfo = null) {
   currentRatingTripInfo = tripInfo || {
     rideId: 'RIDE-101',
     driverId: 'DRV-1',
-    driverName: 'Ramesh Kumar',
+    driverName: 'Verified Driver',
     driverPhone: '+91 94942 85249',
     avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=120&h=120&q=80',
     pickup: state.pickup || 'Uppal Ring Road Metro',
     drop: state.drop || 'Jangaon Railway Station',
-    vehicleName: 'Bajaj Pulsar 150'
+    vehicleName: 'Verified Commuter Vehicle'
   };
 
   const info = currentRatingTripInfo;
@@ -2792,12 +2814,12 @@ async function submitRideRating(event) {
   const trip = currentRatingTripInfo || {
     rideId: 'RIDE-101',
     driverId: 'DRV-1',
-    driverName: 'Ramesh Kumar',
+    driverName: 'Verified Driver',
     driverPhone: '+91 94942 85249',
     avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=120&h=120&q=80',
     pickup: state.pickup || 'Uppal Ring Road Metro',
     drop: state.drop || 'Jangaon Railway Station',
-    vehicleName: 'Bajaj Pulsar 150'
+    vehicleName: 'Verified Commuter Vehicle'
   };
 
   const finalFeedbackText = [
@@ -2808,7 +2830,7 @@ async function submitRideRating(event) {
   const feedbackPayload = {
     rideId: trip.rideId || ('RIDE-' + Date.now().toString(36).toUpperCase()),
     driverId: trip.driverId || null,
-    driverName: trip.driverName || 'Ramesh Kumar',
+    driverName: trip.driverName || 'Verified Driver',
     driverPhone: trip.driverPhone || null,
     driverAvatar: trip.avatar || null,
     driverVehicle: trip.vehicleName || 'Commuter Vehicle',
@@ -2986,7 +3008,7 @@ function renderMyRides() {
             drop: b.route.split('➔')[1]?.trim() || 'Jangaon Chowrasta',
             driverName: b.driver,
             vehicleName: b.vehicle,
-            vehicleNumber: 'TS 08 EK 4321',
+            vehicleNumber: 'TS 08 AB 1234',
             vehicleType: 'bike',
             avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=120&h=120&q=80'
           }).replace(/"/g, '&quot;')}, '4821')" class="py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold rounded-xl flex items-center justify-center gap-1.5 transition">
@@ -3304,7 +3326,7 @@ function setupLocalhostTestSession(role) {
     const driverUser = {
       id: 'driver_test_9494285249',
       phone: '9494285249',
-      name: 'Ramesh Kumar',
+      name: 'Verified Driver',
       gender: 'male',
       role: 'Verified Corridor Driver',
       rating: 4.9,
@@ -5628,65 +5650,8 @@ async function loadAdminFeedbacks(showToastNotice = false) {
       }
     } catch (e) {}
 
-    // Supply initial default feedback seeds if store is empty
-    if (feedbacks.length === 0) {
-      feedbacks = [
-        {
-          id: 'FB-SEED-01',
-          rideId: 'RIDE-101',
-          driverId: 'DRV-1',
-          driverName: 'Ramesh Kumar',
-          driverPhone: '+91 94942 85249',
-          driverAvatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=120&h=120&q=80',
-          driverVehicle: 'Bajaj Pulsar 150 (TS 08 EK 4321)',
-          riderId: 'USR-881',
-          riderName: 'Ananya Verma',
-          riderPhone: '+91 98480 23145',
-          rating: 5.0,
-          tags: ['Safe Driving', 'On Time', 'Clean Vehicle'],
-          feedbackText: 'Very smooth highway ride, followed speed limits and wore helmet. Highly recommended!',
-          hasSafetyConcern: false,
-          route: 'Uppal Ring Road Metro ➔ Jangaon Railway Station',
-          createdAt: new Date(Date.now() - 3600000 * 5).toISOString()
-        },
-        {
-          id: 'FB-SEED-02',
-          rideId: 'RIDE-102',
-          driverId: 'DRV-2',
-          driverName: 'Suresh Varma',
-          driverPhone: '+91 91234 56780',
-          driverAvatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=120&h=120&q=80',
-          driverVehicle: 'Hero Splendor Plus (TS 08 AB 9812)',
-          riderId: 'USR-902',
-          riderName: 'Kavitha Reddy',
-          riderPhone: '+91 99887 76655',
-          rating: 2.0,
-          tags: ['Rash Driving'],
-          feedbackText: 'Driver was speeding aggressively on the highway corridor and taking continuous phone calls. Passenger safety was neglected.',
-          hasSafetyConcern: true,
-          route: 'Uppal X Roads ➔ Bhongir Bypass',
-          createdAt: new Date(Date.now() - 3600000 * 2).toISOString()
-        },
-        {
-          id: 'FB-SEED-03',
-          rideId: 'RIDE-103',
-          driverId: 'DRV-3',
-          driverName: 'Priya Sharma',
-          driverPhone: '+91 79890 31924',
-          driverAvatar: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=120&h=120&q=80',
-          driverVehicle: 'Maruti Suzuki Swift VXi (TS 09 FH 9182)',
-          riderId: 'USR-773',
-          riderName: 'Rahul Mehra',
-          riderPhone: '+91 98490 11223',
-          rating: 4.0,
-          tags: ['Clean Vehicle', 'Polite & Friendly'],
-          feedbackText: 'Comfortable AC car ride from Uppal to Jangaon. Punctual departure and polite driver.',
-          hasSafetyConcern: false,
-          route: 'Uppal X Roads ➔ Jangaon Court Chowrasta',
-          createdAt: new Date(Date.now() - 3600000).toISOString()
-        }
-      ];
-    }
+    // No mock seed feedbacks; store starts clean
+    state.adminFeedbacks = feedbacks;
 
     state.adminFeedbacks = feedbacks;
   } catch (err) {
@@ -7795,8 +7760,8 @@ async function triggerLiveRideSos() {
   if (routeEl) routeEl.textContent = routeText;
 
   // Driver details from active trip or default
-  const driverName = (typeof currentRatingTripInfo !== 'undefined' && currentRatingTripInfo?.driverName) || 'Ramesh Kumar';
-  const driverVehicle = (typeof currentRatingTripInfo !== 'undefined' && currentRatingTripInfo?.vehicleName) || 'Bajaj Pulsar 150 (TS 08 EK 4321)';
+  const driverName = (typeof currentRatingTripInfo !== 'undefined' && currentRatingTripInfo?.driverName) || 'Verified Driver';
+  const driverVehicle = (typeof currentRatingTripInfo !== 'undefined' && currentRatingTripInfo?.vehicleName) || 'Verified Commuter Vehicle (TS 08 AB 1234)';
   const driverText = `${driverName} (${driverVehicle})`;
   if (driverEl) driverEl.textContent = driverText;
 
@@ -7880,7 +7845,7 @@ function renderSosEmergencyContactActions(mapsUrl) {
   const routeStr = `${(state.pickup || 'Uppal').split(',')[0].trim()} to ${(state.drop || 'Jangaon').split(',')[0].trim()}`;
   const driverInfo = (typeof currentRatingTripInfo !== 'undefined' && currentRatingTripInfo?.driverName) 
     ? `${currentRatingTripInfo.driverName} (${currentRatingTripInfo.vehicleName || 'Vehicle'})`
-    : 'Ramesh Kumar (Bajaj Pulsar TS 08 EK 4321)';
+    : 'Verified Driver (TS 08 AB 1234)';
 
   const alertMsg = `EMERGENCY ALERT from Routemate! I (${userName}) have triggered an active ride SOS. My live GPS location: ${locUrl}. Ride route: ${routeStr}. Driver: ${driverInfo}. Please contact me or emergency services immediately!`;
   currentSosMessage = alertMsg;
@@ -8433,7 +8398,7 @@ function testRazorpayPayment() {
     perSeatPrice: 1, // 1 INR = 100 paise (Razorpay minimum amount)
     pickup: 'Uppal Metro Gate 2',
     drop: 'Jangaon Bus Stand',
-    driverName: 'Ramesh Kumar'
+    driverName: 'Verified Driver'
   };
   showToast('Creating Razorpay order...', 'info');
   window.routematePayment.initiatePayment(

@@ -43,62 +43,7 @@ const MIME_TYPES = {
 
 // In-memory Realtime Ride Requests Store & SSE Subscribers
 let activeRideRequest = null;
-let feedbacksStore = [
-  {
-    id: 'FB-SEED-01',
-    rideId: 'RIDE-101',
-    driverId: 'DRV-1',
-    driverName: 'Ramesh Kumar',
-    driverPhone: '+91 94942 85249',
-    driverAvatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=120&h=120&q=80',
-    driverVehicle: 'Bajaj Pulsar 150 (TS 08 EK 4321)',
-    riderId: 'USR-881',
-    riderName: 'Ananya Verma',
-    riderPhone: '+91 98480 23145',
-    rating: 5.0,
-    tags: ['Safe Driving', 'On Time', 'Clean Vehicle'],
-    feedbackText: 'Very smooth highway ride, followed speed limits and wore helmet. Highly recommended!',
-    hasSafetyConcern: false,
-    route: 'Uppal Ring Road Metro ➔ Jangaon Railway Station',
-    createdAt: new Date(Date.now() - 3600000 * 5).toISOString()
-  },
-  {
-    id: 'FB-SEED-02',
-    rideId: 'RIDE-102',
-    driverId: 'DRV-2',
-    driverName: 'Suresh Varma',
-    driverPhone: '+91 91234 56780',
-    driverAvatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=120&h=120&q=80',
-    driverVehicle: 'Hero Splendor Plus (TS 08 AB 9812)',
-    riderId: 'USR-902',
-    riderName: 'Kavitha Reddy',
-    riderPhone: '+91 99887 76655',
-    rating: 2.0,
-    tags: ['Rash Driving'],
-    feedbackText: 'Driver was speeding aggressively on the highway corridor and taking continuous phone calls. Passenger safety was neglected.',
-    hasSafetyConcern: true,
-    route: 'Uppal X Roads ➔ Bhongir Bypass',
-    createdAt: new Date(Date.now() - 3600000 * 2).toISOString()
-  },
-  {
-    id: 'FB-SEED-03',
-    rideId: 'RIDE-103',
-    driverId: 'DRV-3',
-    driverName: 'Priya Sharma',
-    driverPhone: '+91 79890 31924',
-    driverAvatar: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=120&h=120&q=80',
-    driverVehicle: 'Maruti Suzuki Swift VXi (TS 09 FH 9182)',
-    riderId: 'USR-773',
-    riderName: 'Rahul Mehra',
-    riderPhone: '+91 98490 11223',
-    rating: 4.0,
-    tags: ['Clean Vehicle', 'Polite & Friendly'],
-    feedbackText: 'Comfortable AC car ride from Uppal to Jangaon. Punctual departure and polite driver.',
-    hasSafetyConcern: false,
-    route: 'Uppal X Roads ➔ Jangaon Court Chowrasta',
-    createdAt: new Date(Date.now() - 3600000).toISOString()
-  }
-];
+let feedbacksStore = [];
 let safetyAlertsStore = [];
 let driverKycStore = [];
 const sseClients = new Set();
@@ -320,49 +265,45 @@ const server = http.createServer(async (req, res) => {
 
   // 2. Get Active Ride Request
   if ((urlPath === '/api/ride-requests/active' || urlPath === '/api/ride-requests') && req.method === 'GET') {
-    try {
-      const SUPABASE_URL = process.env.SUPABASE_URL || 'https://hjieeilzfbvubkhmlmdg.supabase.co';
-      const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || 'sb_publishable_FD8-opedLq151SNuBbWp9g_bLI5hB_a';
-      const resp = await fetch(`${SUPABASE_URL}/rest/v1/rides?status=eq.active&vehicle_number=ilike.REQ-%25&order=created_at.desc&limit=1`, {
-        headers: {
-          'apikey': SUPABASE_ANON_KEY,
-          'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+    if (!activeRideRequest) {
+      try {
+        const SUPABASE_URL = process.env.SUPABASE_URL || 'https://hjieeilzfbvubkhmlmdg.supabase.co';
+        const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || 'sb_publishable_FD8-opedLq151SNuBbWp9g_bLI5hB_a';
+        const resp = await fetch(`${SUPABASE_URL}/rest/v1/rides?status=eq.active&vehicle_number=ilike.REQ-%25&order=created_at.desc&limit=1`, {
+          headers: {
+            'apikey': SUPABASE_ANON_KEY,
+            'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+          }
+        });
+        if (resp.ok) {
+          const rows = await resp.json();
+          if (rows && rows.length > 0) {
+            const row = rows[0];
+            let meta = {};
+            try { meta = JSON.parse(row.notes || '{}'); } catch (e) {}
+            activeRideRequest = {
+              id: row.vehicle_number,
+              rider_id: meta.riderId || row.driver_id,
+              rider_name: meta.riderName || (row.driver_name ? row.driver_name.replace(' (Rider Request)', '') : 'Passenger'),
+              rider_phone: meta.riderPhone || '+91 98480 23145',
+              rider_avatar: meta.riderAvatar || row.avatar,
+              rider_role: meta.riderRole || row.driver_role || 'Daily Commuter',
+              pickup: row.pickup,
+              drop_location: row.drop_location,
+              drop: row.drop_location,
+              seats: row.seats_available || 1,
+              fare: row.per_seat_price || 108,
+              distance: meta.distance || 84,
+              pin: meta.pin || '4821',
+              vehicle_type: meta.vehicleType || row.vehicle_type || 'any',
+              is_flexible_vehicle: Boolean(meta.isFlexible),
+              payment_method: meta.paymentMethod || 'Direct UPI',
+              status: 'searching',
+              created_at: row.created_at
+            };
+          }
         }
-      });
-      if (resp.ok) {
-        const rows = await resp.json();
-        if (rows && rows.length > 0) {
-          const row = rows[0];
-          let meta = {};
-          try { meta = JSON.parse(row.notes || '{}'); } catch (e) {}
-          activeRideRequest = {
-            id: row.vehicle_number,
-            rider_id: meta.riderId || row.driver_id,
-            rider_name: meta.riderName || (row.driver_name ? row.driver_name.replace(' (Rider Request)', '') : 'Passenger'),
-            rider_phone: meta.riderPhone || '+91 98480 23145',
-            rider_avatar: meta.riderAvatar || row.avatar,
-            rider_role: meta.riderRole || row.driver_role || 'Daily Commuter',
-            pickup: row.pickup,
-            drop_location: row.drop_location,
-            drop: row.drop_location,
-            seats: row.seats_available || 1,
-            fare: row.per_seat_price || 108,
-            distance: meta.distance || 84,
-            pin: meta.pin || '4821',
-            vehicle_type: meta.vehicleType || row.vehicle_type || 'any',
-            is_flexible_vehicle: Boolean(meta.isFlexible),
-            payment_method: meta.paymentMethod || 'Direct UPI',
-            status: 'searching',
-            created_at: row.created_at
-          };
-        } else {
-          activeRideRequest = null;
-        }
-      } else {
-        console.warn('Supabase fetch not ok:', resp.status);
-      }
-    } catch (err) {
-      console.warn('Supabase fetch err:', err.message);
+      } catch (err) {}
     }
     res.writeHead(200, { ...corsHeaders, 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ success: true, activeRequest: activeRideRequest }));
@@ -379,8 +320,8 @@ const server = http.createServer(async (req, res) => {
       if (!activeRideRequest || activeRideRequest.id !== requestId) {
         activeRideRequest = {
           id: requestId || ('REQ-' + Date.now()),
-          rider_id: 'rider_ananya',
-          rider_name: 'Ananya Verma',
+          rider_id: 'rider_commuter',
+          rider_name: 'Verified Commuter',
           rider_phone: '+91 98480 23145',
           rider_avatar: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=120&h=120&q=80',
           pickup: 'Uppal Ring Road Metro (Gate 2)',
@@ -555,7 +496,7 @@ const server = http.createServer(async (req, res) => {
     if (!activeRideRequest || activeRideRequest.id !== requestId) {
       activeRideRequest = {
         id: requestId || ('REQ-' + Date.now()),
-        rider_name: 'Ananya Verma',
+        rider_name: 'Verified Commuter',
         pickup: 'Uppal Ring Road Metro (Gate 2)',
         drop_location: 'Jangaon Chowrasta',
         fare: 108,

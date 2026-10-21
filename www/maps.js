@@ -1263,11 +1263,11 @@ function initTrackingMap(tripData) {
   if (!container) return;
 
   const defaultTrip = tripData || {
-    pickup: 'Uppal Ring Road Metro',
-    drop: 'Jangaon Chowrasta',
-    vehicle: 'Bajaj Pulsar 150',
-    plate: 'TS 08 EK 4321',
-    driver: 'Ramesh Kumar',
+    pickup: (typeof state !== 'undefined' && state.pickup) || 'Uppal Ring Road Metro',
+    drop: (typeof state !== 'undefined' && state.drop) || 'Jangaon Bus Depot',
+    vehicle: 'Verified Vehicle',
+    plate: 'TS 08 -- ----',
+    driver: 'Verified Commuter',
     vehicleType: 'bike'
   };
 

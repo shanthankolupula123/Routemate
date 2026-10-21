@@ -102,7 +102,7 @@ module.exports = async (req, res) => {
         name: driver.name || 'Verified Highway Driver',
         phone: driver.phone || '+91 94942 85249',
         avatar: driver.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=120&h=120&q=80',
-        vehicle: driver.vehicle || 'Hero Splendor Plus (TS 08 EK 4321)',
+        vehicle: driver.vehicle || 'Verified Commuter Vehicle (TS 08 AB 1234)',
         vehicleType: driver.vehicleType || 'bike',
         rating: driver.rating || 4.9,
         totalRides: driver.totalRides || 86,
