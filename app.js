@@ -305,72 +305,141 @@ let availableRides = [
   }
 ];
 
-// Calculation Functions
-function calculateFuelShare(distanceKm, type) {
-  const fuelRate = state.fuelPrice;
-  if (type === 'bike') {
-    // 45 km/l average mileage for 125cc-150cc commuter bike
-    const fuelLitres = distanceKm / 45;
-    const totalFuelCost = fuelLitres * fuelRate;
-    // 50% split with rider + 5% tire/oil wear share
-    const fairShare = Math.round(totalFuelCost * 0.55);
-    const cabPrice = Math.round(distanceKm * 6.5 + 50);
-    return {
-      fuelLitres: fuelLitres.toFixed(1),
-      totalFuelCost: Math.round(totalFuelCost),
-      perSeat: Math.max(35, fairShare),
-      seats: 1,
-      commercialCabPrice: Math.max(250, cabPrice),
-      savingsPct: Math.round(((cabPrice - fairShare) / cabPrice) * 100)
-    };
-  } else if (type === 'auto') {
-    // 26 km/l average mileage for LPG/CNG 3-wheeler auto
-    const fuelLitres = distanceKm / 26;
-    const totalFuelCost = fuelLitres * fuelRate * 0.72; // CNG / fuel efficiency ratio
-    const fairShare = Math.round(totalFuelCost / 2.3);
-    const cabPrice = Math.round(distanceKm * 10 + 60);
-    return {
-      fuelLitres: fuelLitres.toFixed(1),
-      totalFuelCost: Math.round(totalFuelCost),
-      perSeat: Math.max(45, fairShare),
-      seats: 3,
-      commercialCabPrice: Math.max(350, cabPrice),
-      savingsPct: Math.round(((cabPrice - fairShare) / cabPrice) * 100)
-    };
-  } else if (type === 'any' || type === 'custom') {
-    // Flexible option: starting price baseline from bike fair share
-    const bikeCalc = calculateFuelShare(distanceKm, 'bike');
-    return {
-      fuelLitres: bikeCalc.fuelLitres,
-      totalFuelCost: bikeCalc.totalFuelCost,
-      perSeat: bikeCalc.perSeat,
-      seats: 1,
-      commercialCabPrice: bikeCalc.commercialCabPrice,
-      savingsPct: bikeCalc.savingsPct,
-      isFlexible: true
-    };
-  } else {
-    // 16 km/l average mileage for petrol hatchback/sedan
-    const fuelLitres = distanceKm / 16;
-    const totalFuelCost = fuelLitres * fuelRate;
-    // Split across 3 riders (driver absorbs 1 share)
-    const fairShare = Math.round(totalFuelCost / 3.2);
-    const cabPrice = Math.round(distanceKm * 18 + 120);
-    return {
-      fuelLitres: fuelLitres.toFixed(1),
-      totalFuelCost: Math.round(totalFuelCost),
-      perSeat: Math.max(60, fairShare),
-      seats: 3,
-      commercialCabPrice: Math.max(600, cabPrice),
-      savingsPct: Math.round(((cabPrice - fairShare) / cabPrice) * 100)
-    };
+// Calculation Functions: Exact Real-Time Vehicle Cost & Operating Model
+const REALTIME_VEHICLE_SPECS = {
+  bike: {
+    name: 'Bike Pillion (Two-Wheeler)',
+    shortName: 'Bike',
+    vehicleTag: '100cc-150cc Commuter Bike (Hero Splendor / Pulsar / Activa)',
+    icon: 'bike',
+    fuelType: 'Petrol',
+    fuelPrice: 107.41, // ₹ / Litre
+    unit: 'L',
+    mileage: 48.0, // km / L
+    wearRatePerKm: 0.35, // Engine oil, chain lubrication, brake shoes, tire wear
+    capacity: 1, // 1 passenger pillion seat
+    splitRatio: 0.50, // 50% fair fuel split with driver
+    formulaRatio: '50% Commuter Fuel Split',
+    minFare: 30,
+    commercialCabRate: 9.5, // Commercial bike taxi (Rapido / Uber Moto)
+    commercialCabBase: 35
+  },
+  auto: {
+    name: 'Auto Rickshaw (3-Wheeler CNG)',
+    shortName: 'Auto',
+    vehicleTag: 'Bajaj Maxima / RE CNG Auto (Shared Transit)',
+    icon: 'truck',
+    fuelType: 'CNG',
+    fuelPrice: 89.50, // ₹ / kg CNG
+    unit: 'kg',
+    mileage: 28.0, // km / kg CNG
+    wearRatePerKm: 0.55, // 3-wheeler maintenance, tire wear & grease
+    capacity: 3, // 3 passenger seats
+    splitRatio: 0.38, // Shared group split per seat
+    formulaRatio: 'Shared Group Split (2.5x)',
+    minFare: 40,
+    commercialCabRate: 14.0, // Commercial meter auto / Ola Auto
+    commercialCabBase: 45
+  },
+  car: {
+    name: 'Car / Hatchback / Sedan',
+    shortName: 'Car',
+    vehicleTag: '1.2L Petrol AC Car (Swift / i20 / Baleno)',
+    icon: 'car',
+    fuelType: 'Petrol',
+    fuelPrice: 107.41, // ₹ / Litre petrol
+    unit: 'L',
+    mileage: 16.5, // km / L
+    wearRatePerKm: 1.15, // Oil service, filters, AC load, tires & toll amortisation
+    capacity: 3, // 3 passenger seats + 1 driver (4 total seats)
+    splitRatio: 0.286, // 1 / 3.5 shares (driver absorbs 1 full share)
+    formulaRatio: '4-Way Shared Commute (Driver + 3)',
+    minFare: 55,
+    commercialCabRate: 18.5, // Commercial AC Cab (Ola/Uber)
+    commercialCabBase: 110
+  },
+  any: {
+    name: 'Any / Flexible Commute',
+    shortName: 'Any / Custom',
+    vehicleTag: 'First Verified Match (Bike, Auto, or Car)',
+    icon: 'sparkles',
+    fuelType: 'Multi-Fuel',
+    fuelPrice: 107.41,
+    unit: 'L',
+    mileage: 48.0,
+    wearRatePerKm: 0.35,
+    capacity: 1,
+    splitRatio: 0.50,
+    formulaRatio: 'Flexible Commute Match',
+    minFare: 30,
+    commercialCabRate: 9.5,
+    commercialCabBase: 35,
+    isFlexible: true
   }
+};
+
+function calculateFuelShare(distanceKm, type) {
+  const vehicleKey = (type || 'any').toLowerCase();
+  const spec = REALTIME_VEHICLE_SPECS[vehicleKey] || REALTIME_VEHICLE_SPECS.car;
+  const dist = Math.max(1, Math.round(Number(distanceKm) || 84));
+
+  // 1. Fuel Required & Fuel Expense
+  const fuelUnits = dist / spec.mileage;
+  const fuelCost = fuelUnits * spec.fuelPrice;
+
+  // 2. Consumable Wear, Engine Oil, Tire Wear
+  const wearCost = dist * spec.wearRatePerKm;
+
+  // 3. Total Trip Vehicle Operating Cost
+  const totalTripCost = fuelCost + wearCost;
+  const costPerKm = totalTripCost / dist;
+
+  // 4. Exact Fair Share Per Seat
+  const rawPerSeat = totalTripCost * spec.splitRatio;
+  const perSeat = Math.max(spec.minFare, Math.round(rawPerSeat));
+
+  // 5. Driver Absorbed Share
+  const driverShare = Math.max(0, Math.round(totalTripCost - (perSeat * (spec.capacity > 1 ? 2 : 1))));
+
+  // 6. Commercial Cab Benchmark
+  const cabPrice = Math.round(dist * spec.commercialCabRate + spec.commercialCabBase);
+  const savingsAmount = Math.max(0, cabPrice - perSeat);
+  const savingsPct = Math.min(95, Math.max(15, Math.round((savingsAmount / cabPrice) * 100)));
+
+  return {
+    distanceKm: dist,
+    vehicleType: vehicleKey,
+    vehicleName: spec.name,
+    vehicleTag: spec.vehicleTag,
+    icon: spec.icon,
+    fuelType: spec.fuelType,
+    fuelPrice: spec.fuelPrice,
+    unit: spec.unit,
+    mileage: spec.mileage,
+    fuelLitres: fuelUnits.toFixed(2),
+    baseFuelCost: Math.round(fuelCost),
+    wearCost: Math.round(wearCost),
+    wearRate: spec.wearRatePerKm.toFixed(2),
+    totalFuelCost: Math.round(totalTripCost),
+    totalVehicleCost: Math.round(totalTripCost),
+    costPerKm: costPerKm.toFixed(2),
+    perSeat: perSeat,
+    driverShare: driverShare,
+    seats: spec.capacity,
+    formulaRatio: spec.formulaRatio,
+    commercialCabPrice: cabPrice,
+    savingsAmount: savingsAmount,
+    savingsPct: savingsPct,
+    isFlexible: Boolean(spec.isFlexible)
+  };
 }
 
 // Estimate distance between pickup and drop across Telangana
 function estimateDistance(pickup, drop) {
   const cleanPick = (pickup || '').toLowerCase().replace(/[^a-z]/g, '');
   const cleanDrop = (drop || '').toLowerCase().replace(/[^a-z]/g, '');
+
+  if (!cleanPick || !cleanDrop) return 84;
 
   // 1. Direct dictionary lookup
   for (const [key, dist] of Object.entries(ROUTE_DISTANCES)) {
@@ -384,8 +453,8 @@ function estimateDistance(pickup, drop) {
   let pickCoord = null;
   let dropCoord = null;
   for (const [node, coord] of Object.entries(TELANGANA_NODES)) {
-    if (cleanPick.includes(node)) pickCoord = coord;
-    if (cleanDrop.includes(node)) dropCoord = coord;
+    if (!pickCoord && (cleanPick.includes(node) || node.includes(cleanPick))) pickCoord = coord;
+    if (!dropCoord && (cleanDrop.includes(node) || node.includes(cleanDrop))) dropCoord = coord;
   }
   if (pickCoord && dropCoord) {
     return calculateHaversineKm(pickCoord[0], pickCoord[1], dropCoord[0], dropCoord[1]);
@@ -395,7 +464,35 @@ function estimateDistance(pickup, drop) {
   if (cleanPick.includes('uppal') && cleanDrop.includes('jangaon')) return 84;
   if (cleanPick.includes('uppal') && cleanDrop.includes('raghunathapally')) return 104;
   if (cleanPick.includes('uppal') && cleanDrop.includes('warangal')) return 138;
-  return 75;
+  return 84;
+}
+
+// Toggle Exact Real-Time Vehicle Cost Breakdown Drawer
+function toggleExactCostBreakdown() {
+  const card = document.getElementById('exactCostBreakdownCard');
+  const icon = document.getElementById('btnToggleCostBreakdownIcon');
+  const label = document.getElementById('btnToggleCostBreakdownLabel');
+  if (!card) return;
+
+  const isHidden = card.classList.contains('hidden');
+  if (isHidden) {
+    card.classList.remove('hidden');
+    if (icon) icon.classList.add('rotate-180');
+    if (label) label.textContent = 'Hide Exact Vehicle Cost Breakdown';
+  } else {
+    card.classList.add('hidden');
+    if (icon) icon.classList.remove('rotate-180');
+    if (label) label.textContent = 'View Exact Vehicle Cost Breakdown';
+  }
+  if (window.lucide) lucide.createIcons();
+}
+
+// Distance Slider Real-Time Change Handler
+function handleDistanceSliderChange(val) {
+  const dist = parseInt(val, 10);
+  if (isNaN(dist) || dist <= 0) return;
+  state.distance = dist;
+  updateUI();
 }
 
 // Update DOM UI elements based on state
@@ -408,7 +505,7 @@ function updateUI() {
 
   // Update distance indicators
   const distBadges = document.querySelectorAll('.dynamic-distance-val');
-  distBadges.forEach(el => el.textContent = `${state.distance} km`);
+  distBadges.forEach(el => el.textContent = `${calc.distanceKm} km`);
 
   // Update Fuel Share Widget
   const fuelCostEl = document.getElementById('calcTotalFuelCost');
@@ -416,12 +513,45 @@ function updateUI() {
   const fuelLitresEl = document.getElementById('calcFuelLitres');
   const cabSavingEl = document.getElementById('calcSavingsBadge');
   const cabPriceEl = document.getElementById('calcCabCompare');
+  const calcFuelSubtitle = document.getElementById('calcFuelSubtitle');
 
-  if (fuelCostEl) fuelCostEl.textContent = `₹${calc.totalFuelCost}`;
+  if (fuelCostEl) fuelCostEl.textContent = `₹${calc.totalVehicleCost}`;
   if (perSeatEl) perSeatEl.textContent = `₹${calc.perSeat}`;
-  if (fuelLitresEl) fuelLitresEl.textContent = `~${calc.fuelLitres} L Fuel`;
+  if (fuelLitresEl) fuelLitresEl.textContent = `~${calc.fuelLitres} ${calc.unit}`;
   if (cabSavingEl) cabSavingEl.textContent = `Save ${calc.savingsPct}% vs Cabs`;
-  if (cabPriceEl) cabPriceEl.textContent = `Commercial taxi ~₹${calc.commercialCabPrice}`;
+  if (cabPriceEl) cabPriceEl.textContent = `Commercial taxi charges ₹${calc.commercialCabPrice}+ for this distance`;
+  if (calcFuelSubtitle) calcFuelSubtitle.textContent = `Fair split algorithm @ ₹${calc.fuelPrice}/${calc.unit} ${calc.fuelType.toLowerCase()}`;
+
+  // Update Real-Time Breakdown Elements
+  const breakdownTitle = document.getElementById('breakdownVehicleTitle');
+  const breakdownSubtitle = document.getElementById('breakdownVehicleSubtitle');
+  const breakdownIcon = document.getElementById('breakdownVehicleIcon');
+  const bdDistance = document.getElementById('bdDistance');
+  const bdFuelUnits = document.getElementById('bdFuelUnits');
+  const bdWearCost = document.getElementById('bdWearCost');
+  const bdTotalVehicleCost = document.getElementById('bdTotalVehicleCost');
+  const bdFormulaRatio = document.getElementById('bdFormulaRatio');
+  const bdFairPerSeat = document.getElementById('bdFairPerSeat');
+  const bdCommercialPrice = document.getElementById('bdCommercialPrice');
+  const bdSavingsHighlight = document.getElementById('bdSavingsHighlight');
+  const sliderDistanceDisplay = document.getElementById('sliderDistanceDisplay');
+  const distanceRangeSlider = document.getElementById('distanceRangeSlider');
+
+  if (breakdownTitle) breakdownTitle.textContent = `${calc.vehicleName}`;
+  if (breakdownSubtitle) breakdownSubtitle.textContent = `Mileage: ${calc.mileage} km/${calc.unit} • ${calc.fuelType}: ₹${calc.fuelPrice}/${calc.unit}`;
+  if (breakdownIcon) breakdownIcon.setAttribute('data-lucide', calc.icon);
+  if (bdDistance) bdDistance.textContent = `${calc.distanceKm} km`;
+  if (bdFuelUnits) bdFuelUnits.textContent = `~${calc.fuelLitres} ${calc.unit} (₹${calc.baseFuelCost}.00)`;
+  if (bdWearCost) bdWearCost.textContent = `+₹${calc.wearCost}.00 (₹${calc.wearRate}/km)`;
+  if (bdTotalVehicleCost) bdTotalVehicleCost.textContent = `₹${calc.totalVehicleCost}.00 (₹${calc.costPerKm}/km)`;
+  if (bdFormulaRatio) bdFormulaRatio.textContent = calc.formulaRatio;
+  if (bdFairPerSeat) bdFairPerSeat.textContent = `₹${calc.perSeat} / seat`;
+  if (bdCommercialPrice) bdCommercialPrice.textContent = `₹${calc.commercialCabPrice}+`;
+  if (bdSavingsHighlight) bdSavingsHighlight.textContent = `Save ₹${calc.savingsAmount} (${calc.savingsPct}%)`;
+  if (sliderDistanceDisplay) sliderDistanceDisplay.textContent = `${calc.distanceKm} km`;
+  if (distanceRangeSlider && Number(distanceRangeSlider.value) !== calc.distanceKm) {
+    distanceRangeSlider.value = calc.distanceKm;
+  }
 
   // Update vehicle cards pricing
   const bikeCardPrice = document.getElementById('bikeCardCost');
@@ -431,7 +561,7 @@ function updateUI() {
   if (bikeCardPrice) bikeCardPrice.textContent = `₹${bikeCalc.perSeat}`;
   if (autoCardPrice) autoCardPrice.textContent = `₹${autoCalc.perSeat}`;
   if (carCardPrice) carCardPrice.textContent = `₹${carCalc.perSeat}`;
-  if (anyCardPrice) anyCardPrice.textContent = `From ₹${anyCalc.perSeat}`;
+  if (anyCardPrice) anyCardPrice.textContent = `From ₹${bikeCalc.perSeat}`;
 
   const instantFareEl = document.getElementById('instantRideFareVal');
   if (instantFareEl) instantFareEl.textContent = calc.perSeat;
@@ -450,11 +580,24 @@ function updateUI() {
   // Update Driver Mode live fuel-share calculation display
   const driverLiveCost = document.getElementById('driverRecCostPerSeat');
   const driverLiveDist = document.getElementById('driverLiveDistance');
+  const driverLiveFuelRate = document.getElementById('driverLiveFuelRate');
+  const driverLiveFuelLitres = document.getElementById('driverLiveFuelLitres');
+  const driverLiveSplitRatio = document.getElementById('driverLiveSplitRatio');
+
   if (driverLiveCost) {
-    driverLiveCost.textContent = `${state.distance === 84 && state.vehicleType === 'bike' ? 108 : calc.perSeat}`;
+    driverLiveCost.textContent = `${calc.perSeat}`;
   }
   if (driverLiveDist) {
-    driverLiveDist.textContent = `${state.distance} km`;
+    driverLiveDist.textContent = `${calc.distanceKm} km`;
+  }
+  if (driverLiveFuelRate) {
+    driverLiveFuelRate.textContent = `₹${calc.fuelPrice}/${calc.unit}`;
+  }
+  if (driverLiveFuelLitres) {
+    driverLiveFuelLitres.textContent = `~${calc.fuelLitres} ${calc.unit} fuel`;
+  }
+  if (driverLiveSplitRatio) {
+    driverLiveSplitRatio.textContent = calc.formulaRatio;
   }
 
   // Dynamic timeline labels (format friendly readable label for timeline stops)
@@ -8439,6 +8582,9 @@ function testRazorpayPayment() {
   );
 }
 window.testRazorpayPayment = testRazorpayPayment;
+window.toggleExactCostBreakdown = toggleExactCostBreakdown;
+window.handleDistanceSliderChange = handleDistanceSliderChange;
+window.calculateFuelShare = calculateFuelShare;
 
 
 
