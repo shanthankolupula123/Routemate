@@ -29,5 +29,28 @@ module.exports = async (req, res) => {
   }
   saveStore(list);
 
+  // Sync to Supabase profiles cloud store
+  try {
+    const supabaseUrl = process.env.SUPABASE_URL || 'https://hjieeilzfbvubkhmlmdg.supabase.co';
+    const supabaseKey = process.env.SUPABASE_ANON_KEY || 'sb_publishable_FD8-opedLq151SNuBbWp9g_bLI5hB_a';
+    const target = data.phone || data.email;
+    if (target) {
+      await fetch(`${supabaseUrl}/rest/v1/profiles?phone=eq.${encodeURIComponent(target)}`, {
+        method: 'PATCH',
+        headers: {
+          'apikey': supabaseKey,
+          'Authorization': `Bearer ${supabaseKey}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          name: data.name || undefined,
+          avatar_url: data.avatar_url || undefined,
+          role: JSON.stringify(data),
+          is_verified: false
+        })
+      });
+    }
+  } catch (e) {}
+
   return res.status(200).json({ success: true, count: list.length });
 };
