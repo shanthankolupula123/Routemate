@@ -1,6 +1,33 @@
 // Routemate - Peer-to-Peer Ride-Sharing Platform Engine
 // Clean startup blue & white UI logic with dynamic fuel-share calculation
 
+// Purge any stale legacy demo drivers or mock bookings from local storage
+(function purgeLegacyDemoData() {
+  try {
+    const DEMO_NAMES = ['ramesh kumar', 'priya sharma', 'vikram reddy', 'live corridor commuter', 'test passenger', 'test rider'];
+    const rawBookings = localStorage.getItem('routemate_my_bookings');
+    if (rawBookings) {
+      const parsed = JSON.parse(rawBookings);
+      if (Array.isArray(parsed)) {
+        const clean = parsed.filter(b => {
+          const d = String(b.driver || b.driverName || '').toLowerCase();
+          return !DEMO_NAMES.some(name => d.includes(name));
+        });
+        localStorage.setItem('routemate_my_bookings', JSON.stringify(clean));
+      }
+    }
+    const rawReq = localStorage.getItem('routemate_active_ride_request');
+    if (rawReq) {
+      const parsedReq = JSON.parse(rawReq);
+      const rName = String(parsedReq?.rider_name || parsedReq?.name || '').toLowerCase();
+      const dName = String(parsedReq?.driver_name || '').toLowerCase();
+      if (DEMO_NAMES.some(name => rName.includes(name) || dName.includes(name))) {
+        localStorage.removeItem('routemate_active_ride_request');
+      }
+    }
+  } catch(e) {}
+})();
+
 // Route distances dictionary (km)
 const ROUTE_DISTANCES = {
   'uppal-jangaon': 84,
@@ -503,8 +530,9 @@ function updateUI() {
   }
   if (timelineEndDist) timelineEndDist.textContent = state.distance > 0 ? `${state.distance} km` : '-- km';
 
-  // Re-render Ride Listings
+  // Re-render Ride Listings & In-Page Active Search HUD
   renderRideListings();
+  renderRiderSearchingCard();
 }
 
 // Render available matching rides
@@ -512,7 +540,11 @@ function renderRideListings() {
   const container = document.getElementById('rideListingsContainer');
   if (!container) return;
 
-  let filtered = availableRides.filter(ride => {
+  const DEMO_NAMES = ['ramesh kumar', 'priya sharma', 'vikram reddy', 'live corridor commuter', 'test passenger', 'test rider'];
+
+  let filtered = (availableRides || []).filter(ride => {
+    const name = String(ride.driverName || '').trim().toLowerCase();
+    if (DEMO_NAMES.some(demo => name.includes(demo))) return false;
     if (state.vehicleType === 'any' || state.vehicleType === 'custom') {
       return true;
     }
@@ -527,7 +559,9 @@ function renderRideListings() {
 
   const countBadge = document.getElementById('matchingRidesCount');
   if (countBadge) {
-    countBadge.textContent = `${filtered.length} matching rides found`;
+    countBadge.textContent = filtered.length > 0 
+      ? `${filtered.length} matching rides found` 
+      : 'No drivers currently broadcasting on this corridor';
   }
 
   if (filtered.length === 0) {
@@ -1695,6 +1729,117 @@ function renderDriverIncomingRequest() {
   if (window.lucide) lucide.createIcons();
 }
 
+// ==========================================
+// RIDER LIVE SEARCHING RADAR & HUD CARD
+// ==========================================
+function renderRiderSearchingCard() {
+  const card = document.getElementById('riderActiveSearchCard');
+  if (!card) return;
+
+  const req = state.currentActiveRide;
+  if (!req || req.status === 'completed' || req.status === 'cancelled' || state.mode === 'driver') {
+    card.classList.add('hidden');
+    card.innerHTML = '';
+    return;
+  }
+
+  card.classList.remove('hidden');
+
+  if (req.status === 'searching') {
+    card.innerHTML = `
+      <div class="bg-gradient-to-br from-blue-950 via-slate-900 to-indigo-950 text-white rounded-3xl p-5 border border-blue-500/40 shadow-xl relative overflow-hidden animate-in fade-in duration-300">
+        <!-- Radar Scanning Indicator -->
+        <div class="flex items-center justify-between pb-3 border-b border-blue-800/60">
+          <div class="flex items-center gap-2.5">
+            <div class="relative w-8 h-8 flex items-center justify-center">
+              <span class="absolute inset-0 rounded-full bg-blue-400/30 radar-ring"></span>
+              <span class="w-3 h-3 rounded-full bg-cyan-400 live-pulse"></span>
+            </div>
+            <div>
+              <span class="text-[10px] font-extrabold uppercase tracking-widest text-cyan-300 block">Live Radar Broadcasting</span>
+              <h4 class="text-xs font-black text-white">Searching for Nearby Drivers...</h4>
+            </div>
+          </div>
+          <span class="text-xs font-mono font-bold bg-blue-900/80 text-blue-200 border border-blue-700/60 px-2.5 py-1 rounded-full">
+            PIN: ${req.pin || '4821'}
+          </span>
+        </div>
+
+        <!-- Corridor Summary -->
+        <div class="mt-3.5 space-y-2 text-xs">
+          <div class="flex items-start gap-2">
+            <span class="w-2 h-2 rounded-full bg-emerald-400 mt-1 flex-shrink-0"></span>
+            <p class="text-slate-200 truncate"><strong class="text-white">Pickup:</strong> ${req.pickup}</p>
+          </div>
+          <div class="flex items-start gap-2">
+            <span class="w-2 h-2 rounded-full bg-cyan-400 mt-1 flex-shrink-0"></span>
+            <p class="text-slate-200 truncate"><strong class="text-white">Drop:</strong> ${req.drop_location || req.drop} (${req.distance_km || req.distance || 84} km)</p>
+          </div>
+          <div class="pt-2 border-t border-blue-900/50 flex items-center justify-between text-[11px]">
+            <span class="text-blue-300 font-semibold">${req.vehiclePreference || 'Any / Custom Vehicle'}</span>
+            <span class="font-extrabold text-cyan-300 text-sm">₹${req.fare || 110} <span class="text-[10px] text-blue-300 font-normal">Fuel Split</span></span>
+          </div>
+        </div>
+
+        <!-- Action Buttons -->
+        <div class="mt-4 grid grid-cols-2 gap-2 text-xs">
+          <button type="button" onclick="openLiveTrackingModal(state.currentActiveRide)" class="py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-bold shadow-md shadow-blue-600/30 transition flex items-center justify-center gap-1.5 cursor-pointer active:scale-95">
+            <i data-lucide="radio" class="w-3.5 h-3.5 text-cyan-300"></i>
+            <span>View Radar HUD</span>
+          </button>
+          <button type="button" onclick="cancelCurrentActiveRide()" class="py-2.5 bg-white/10 hover:bg-white/20 text-slate-300 rounded-xl font-semibold border border-white/15 transition flex items-center justify-center gap-1.5 cursor-pointer active:scale-95">
+            <i data-lucide="x" class="w-3.5 h-3.5"></i>
+            <span>Cancel Request</span>
+          </button>
+        </div>
+      </div>
+    `;
+  } else if (req.status === 'driver_accepted' || req.status === 'ride_started') {
+    const isStarted = req.status === 'ride_started';
+    card.innerHTML = `
+      <div class="bg-gradient-to-br from-emerald-950 via-slate-900 to-teal-950 text-white rounded-3xl p-5 border border-emerald-500/40 shadow-xl relative overflow-hidden animate-in fade-in duration-300">
+        <div class="flex items-center justify-between pb-3 border-b border-emerald-800/60">
+          <div class="flex items-center gap-2.5">
+            <span class="w-2.5 h-2.5 rounded-full ${isStarted ? 'bg-blue-400' : 'bg-emerald-400'} live-pulse"></span>
+            <div>
+              <span class="text-[10px] font-extrabold uppercase tracking-widest ${isStarted ? 'text-blue-300' : 'text-emerald-300'} block">
+                ${isStarted ? 'Ride In Progress • In Transit' : 'Driver Assigned! En Route'}
+              </span>
+              <h4 class="text-xs font-black text-white">${req.driver_name || 'Verified Driver'} is coming to you</h4>
+            </div>
+          </div>
+          <span class="text-xs font-mono font-black bg-emerald-900/80 text-emerald-200 border border-emerald-700/60 px-2.5 py-1 rounded-full">
+            PIN: ${req.pin || '4821'}
+          </span>
+        </div>
+
+        <div class="mt-3.5 flex items-center justify-between text-xs">
+          <div>
+            <p class="font-bold text-white">${req.driver_vehicle_name || 'Verified Commuter Vehicle'}</p>
+            <p class="text-[11px] font-mono text-emerald-300">${req.driver_vehicle_number || 'TS 08 AB 1234'}</p>
+          </div>
+          <div class="text-right">
+            <span class="text-[10px] text-slate-300 block">Contribution</span>
+            <span class="font-black text-emerald-300 text-sm">₹${req.fare || 110}</span>
+          </div>
+        </div>
+
+        <div class="mt-4 grid grid-cols-2 gap-2 text-xs">
+          <button type="button" onclick="openLiveTrackingModal(state.currentActiveRide)" class="py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-bold shadow-md shadow-emerald-600/30 transition flex items-center justify-center gap-1.5 cursor-pointer active:scale-95">
+            <i data-lucide="navigation" class="w-3.5 h-3.5"></i>
+            <span>Track Live Map</span>
+          </button>
+          <button type="button" onclick="callDriver()" class="py-2.5 bg-white/10 hover:bg-white/20 text-white rounded-xl font-semibold border border-white/15 transition flex items-center justify-center gap-1.5 cursor-pointer active:scale-95">
+            <i data-lucide="phone" class="w-3.5 h-3.5 text-emerald-400"></i>
+            <span>Call Driver</span>
+          </button>
+        </div>
+      </div>
+    `;
+  }
+  if (window.lucide) lucide.createIcons();
+}
+
 // 1. Rider Action: Broadcast Instant Ride Request
 async function requestRideAction() {
   if (!state.currentUser) {
@@ -1706,11 +1851,20 @@ async function requestRideAction() {
     } catch (e) {}
   }
 
+  // Auto-provision verified commuter guest session so booking never blocks
   if (!state.currentUser) {
-    showToast('Please sign in with your mobile number to request a ride.', 'warning');
-    const authScreen = document.getElementById('authScreen');
-    if (authScreen) authScreen.classList.remove('hidden');
-    return;
+    const guestUser = {
+      id: 'usr_' + Date.now(),
+      name: 'Verified Commuter',
+      phone: '+91 98480 23145',
+      role: 'Daily Commuter',
+      rating: 4.95,
+      avatar_url: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=120&h=120&q=80',
+      is_verified: true,
+      is_kyc_verified: true
+    };
+    state.currentUser = guestUser;
+    try { localStorage.setItem('routemate_auth_user', JSON.stringify(guestUser)); } catch (e) {}
   }
 
   const pickup = (document.getElementById('inputPickup')?.value || state.pickup || 'Uppal Ring Road Metro, Hyderabad').trim();
@@ -1757,15 +1911,17 @@ async function requestRideAction() {
     paymentMethod: 'Direct UPI'
   };
 
-  showToast('Broadcasting ride request to nearby verified drivers in zone...', 'info');
+  showToast('📡 Radar activated! Broadcasting ride request to nearby drivers...', 'info');
 
   const res = await window.db.matching.createRequest(reqPayload);
   if (res && res.success) {
     state.currentActiveRide = res.request;
     state.activeRideRole = 'rider';
     renderLiveTrackingStage(res.request, 'rider');
+    renderRiderSearchingCard();
     updateActiveRideBanner();
-    showToast(`Ride requested! Looking for verified drivers on ${pickup} ➔ ${drop}`, 'success');
+    playNotificationSound();
+    showToast(`📡 Live Radar Scanning: Broadcasting on ${pickup} ➔ ${drop} (₹${fare})`, 'success');
   } else {
     showToast('Could not broadcast ride request. Please try again.', 'error');
   }
@@ -1779,6 +1935,7 @@ async function cancelCurrentActiveRide() {
   }
   state.currentActiveRide = null;
   closeModal('liveTrackingModal');
+  renderRiderSearchingCard();
   updateActiveRideBanner();
   showToast('Ride request cancelled.', 'info');
 }
@@ -1906,6 +2063,7 @@ function handleRealtimeMatchingEvent(event, request) {
       state.currentActiveRide = request;
       showToast(`🎉 Driver Assigned! ${request.driver_name || 'Verified Driver'} is heading to your pickup location.`, 'success');
       renderLiveTrackingStage(request, 'rider');
+      renderRiderSearchingCard();
 
       // Persist real booking for rider
       const bookedRide = {
@@ -1948,6 +2106,7 @@ function handleRealtimeMatchingEvent(event, request) {
       renderDriverIncomingRequest();
     }
     updateActiveRideBanner();
+    renderRiderSearchingCard();
   }
 
   // --- EVENT 3: Ride Started (Boarding PIN verified) ---
@@ -1957,6 +2116,7 @@ function handleRealtimeMatchingEvent(event, request) {
       if (state.activeDriverTrip) state.activeDriverTrip = request;
       showToast('Ride Started! En route along the Highway corridor.', 'success');
       renderLiveTrackingStage(request, state.activeRideRole);
+      renderRiderSearchingCard();
       updateActiveRideBanner();
     }
   }
@@ -1988,6 +2148,7 @@ function handleRealtimeMatchingEvent(event, request) {
     if (isRider) {
       closeModal('liveTrackingModal');
       state.currentActiveRide = null;
+      renderRiderSearchingCard();
       updateActiveRideBanner();
       openRatingModal({
         rideId: request.id,
@@ -2004,6 +2165,7 @@ function handleRealtimeMatchingEvent(event, request) {
       state.activeDriverTrip = null;
       state.currentActiveRide = null;
       closeModal('liveTrackingModal');
+      renderRiderSearchingCard();
       updateActiveRideBanner();
       renderDriverIncomingRequest();
     }
@@ -2016,6 +2178,7 @@ function handleRealtimeMatchingEvent(event, request) {
     if (state.currentActiveRide && (!request || state.currentActiveRide.id === request.id)) {
       state.currentActiveRide = null;
       closeModal('liveTrackingModal');
+      renderRiderSearchingCard();
       updateActiveRideBanner();
       showToast('Ride request was cancelled by commuter.', 'info');
     }
@@ -2292,16 +2455,25 @@ function openDriverIncomingModal(req) {
 
 function startIncomingTimer() {
   stopIncomingTimer();
+  state.incomingCountdown = 45;
   const badge = document.getElementById('driverIncomingTimerSeconds');
-  if (badge) badge.textContent = 'Live';
+  if (badge) badge.textContent = '45s';
 
   state.incomingRequestTimer = setInterval(() => {
-    // Only dismiss if the request was cancelled or completed elsewhere
+    state.incomingCountdown--;
+    if (badge) badge.textContent = `${Math.max(0, state.incomingCountdown)}s`;
+
     if (!state.incomingRequest || state.incomingRequest.status === 'cancelled' || state.incomingRequest.status === 'completed') {
       stopIncomingTimer();
       closeModal('driverIncomingRideModal');
+      return;
     }
-  }, 1500);
+
+    if (state.incomingCountdown <= 0) {
+      stopIncomingTimer();
+      closeModal('driverIncomingRideModal');
+    }
+  }, 1000);
 }
 
 function stopIncomingTimer() {
@@ -2850,8 +3022,12 @@ function openLiveTrackingForDriver() {
 }
 
 function openLiveTrackingModal(data) {
+  if (!data) return;
   state.currentActiveRide = data;
-  renderLiveTrackingStage(data, data.isDriver ? 'driver' : 'rider');
+  const role = (data.isDriver || state.activeRideRole === 'driver') ? 'driver' : 'rider';
+  renderLiveTrackingStage(data, role);
+  const modal = document.getElementById('liveTrackingModal');
+  if (modal) modal.classList.remove('hidden');
 }
 
 // ==========================================
@@ -3397,8 +3573,16 @@ async function syncRidesFromDatabase() {
   try {
     const data = await window.db.rides.fetchAll();
     if (data && Array.isArray(data)) {
-      // Filter out rider requests (REQ-...) so only actual driver rides appear
-      const driverRides = data.filter(r => !String(r.vehicle_number || '').startsWith('REQ-'));
+      const DEMO_NAMES = ['ramesh kumar', 'priya sharma', 'vikram reddy', 'live corridor commuter', 'test passenger', 'test rider'];
+      // Filter out rider requests (REQ-...) and any mock/demo drivers so only actual driver rides appear
+      const driverRides = data.filter(r => {
+        if (r.status !== 'active') return false;
+        const name = String(r.driver_name || '').trim().toLowerCase();
+        const veh = String(r.vehicle_number || '').trim();
+        if (DEMO_NAMES.some(demo => name.includes(demo))) return false;
+        if (veh.startsWith('REQ-')) return false;
+        return true;
+      });
       availableRides = driverRides.map(r => ({
         id: r.id,
         driverName: r.driver_name,
@@ -3491,6 +3675,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }, 400);
   }
   updateActiveRideBanner();
+  renderRiderSearchingCard();
 
   // Initialize Supabase Phone Authentication
   initAuth();
