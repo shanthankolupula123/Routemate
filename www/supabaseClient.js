@@ -1623,22 +1623,73 @@ const db = {
         });
       }
 
-      // 3. Supabase Realtime Broadcast Channel
+      // 3. Supabase Realtime Broadcast Channel & Postgres Database Listener
       const client = getSupabaseClient();
       if (client && !this._channel) {
         try {
           this._channel = client.channel('routemate_matching', {
-            config: { broadcast: { self: false } }
+            config: { broadcast: { ack: true } }
           });
           this._channel
             .on('broadcast', { event: 'ride_matching_event' }, (payload) => {
               if (payload && payload.payload) {
-                console.log('📡 [Supabase Realtime] Received:', payload.payload.event);
+                console.log('📡 [Supabase Realtime Broadcast] Received:', payload.payload.event);
                 this._handleIncomingEvent(payload.payload.event, payload.payload.request);
+              }
+            })
+            .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'rides' }, (payload) => {
+              console.log('📡 [Supabase Realtime DB INSERT on rides]:', payload.new);
+              const row = payload.new;
+              if (row && (row.status === 'active' || row.status === 'searching') && String(row.vehicle_number || '').startsWith('REQ-')) {
+                let meta = {};
+                try { meta = JSON.parse(row.notes || '{}'); } catch(e){}
+                const incomingReq = {
+                  id: row.vehicle_number,
+                  dbId: row.id,
+                  rider_id: meta.riderId || row.driver_id,
+                  rider_name: meta.riderName || (row.driver_name ? row.driver_name.replace(' (Rider Request)', '') : 'Passenger'),
+                  rider_phone: meta.riderPhone || '+91 98480 23145',
+                  rider_avatar: meta.riderAvatar || row.avatar,
+                  rider_role: meta.riderRole || row.driver_role || 'Daily Commuter',
+                  pickup: row.pickup,
+                  drop: row.drop_location,
+                  drop_location: row.drop_location,
+                  seats: row.seats_available || 1,
+                  fare: row.per_seat_price || 108,
+                  distance: meta.distance || 84,
+                  pin: meta.pin || '4821',
+                  vehicle_type: row.vehicle_type || 'any',
+                  vehicleType: row.vehicle_type || 'any',
+                  isFlexibleVehicle: Boolean(meta.isFlexible),
+                  payment_method: meta.paymentMethod || 'Direct UPI',
+                  status: 'searching',
+                  created_at: row.created_at
+                };
+                this._handleIncomingEvent('new_ride_request', incomingReq);
+              }
+            })
+            .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'rides' }, (payload) => {
+              console.log('📡 [Supabase Realtime DB UPDATE on rides]:', payload.new);
+              const row = payload.new;
+              if (row && String(row.vehicle_number || '').startsWith('REQ-')) {
+                let meta = {};
+                try { meta = JSON.parse(row.notes || '{}'); } catch(e){}
+                if (row.status === 'completed' || meta.status === 'driver_accepted') {
+                  this._handleIncomingEvent('ride_accepted', { id: row.vehicle_number, ...meta });
+                }
+              }
+            })
+            .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'rides' }, (payload) => {
+              console.log('📡 [Supabase Realtime DB DELETE on rides]:', payload.old);
+              if (payload.old && payload.old.vehicle_number) {
+                this._handleIncomingEvent('ride_cancelled', { id: payload.old.vehicle_number });
               }
             })
             .subscribe((status) => {
               console.log('📡 Supabase Realtime channel status:', status);
+              if (status === 'SUBSCRIBED') {
+                this.syncActiveRequest();
+              }
             });
         } catch (e) {
           console.warn('Supabase Realtime channel init skipped:', e);
@@ -1682,12 +1733,17 @@ const db = {
         }
       } catch (e) {}
 
-      // Periodic synchronization poll (every 1.5s for instant synchronization)
+      // Periodic synchronization poll (every 1.5s for instant synchronization across devices)
       if (!this._pollTimer && typeof window !== 'undefined') {
         this._pollTimer = setInterval(() => {
           this.syncActiveRequest();
         }, 1500);
       }
+
+      // Immediate first sync
+      setTimeout(() => {
+        this.syncActiveRequest();
+      }, 100);
     },
 
     // Broadcast an event across all channels
@@ -1831,13 +1887,52 @@ const db = {
         });
       } catch (e) {}
 
-      // 3. Supabase Database insert
+      // 3. Supabase Database insert (Persist to Supabase 'rides' table for real-time cloud broadcast across devices)
       const client = getSupabaseClient();
       if (client) {
         try {
-          client.from('ride_requests').insert([request]).then(({ error }) => {
-            if (error) console.log('Supabase ride_requests insert note:', error.message);
-          }).catch(() => {});
+          const dbRow = {
+            driver_name: `${request.rider_name || 'Passenger'} (Rider Request)`,
+            driver_role: request.rider_role || 'Commuter',
+            avatar: request.rider_avatar || 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=120&h=120&q=80',
+            vehicle_type: request.vehicle_type || request.vehicleType || 'bike',
+            vehicle_name: reqData.vehiclePreferenceLabel || 'P2P Ride Request',
+            vehicle_number: request.id,
+            pickup: request.pickup,
+            drop_location: request.drop,
+            departure_time: 'Immediate',
+            seats_available: request.seats || 1,
+            per_seat_price: request.fare || 108,
+            payment_preference: request.payment_method === 'cash' ? 'cash' : 'upi',
+            verified: true,
+            status: 'active',
+            notes: JSON.stringify({
+              isRequest: true,
+              riderId: request.rider_id,
+              riderName: request.rider_name,
+              riderPhone: request.rider_phone,
+              riderAvatar: request.rider_avatar,
+              riderRole: request.rider_role,
+              fare: request.fare,
+              distance: request.distance,
+              pin: request.pin,
+              pickupLat: request.pickupLat,
+              pickupLng: request.pickupLng,
+              dropLat: request.dropLat,
+              dropLng: request.dropLng,
+              isFlexible: request.isFlexibleVehicle,
+              paymentMethod: request.payment_method,
+              createdAt: request.created_at
+            })
+          };
+
+          client.from('rides').insert([dbRow]).then(({ data, error }) => {
+            if (error) {
+              console.warn('Supabase rides insert note:', error.message);
+            } else {
+              console.log('✅ Supabase rides row inserted successfully for real-time driver sync:', request.id);
+            }
+          }).catch(e => console.warn('Supabase insert error:', e));
         } catch (e) {}
       }
 
@@ -1935,22 +2030,30 @@ const db = {
       // Broadcast immediately so other drivers get removed
       this._emit('ride_accepted', current);
 
-      // Supabase DB update
+      // Supabase DB update on rides table
       const client = getSupabaseClient();
       if (client) {
         try {
-          client.from('ride_requests')
+          const updateNotes = JSON.stringify({
+            isRequest: true,
+            status: 'driver_accepted',
+            driver: {
+              id: current.driver_id,
+              name: current.driver_name,
+              phone: current.driver_phone,
+              avatar: current.driver_avatar,
+              vehicleName: current.driver_vehicle_name,
+              vehicleNumber: current.driver_vehicle_number,
+              vehicleType: current.driver_vehicle_type
+            },
+            accepted_at: current.accepted_at
+          });
+          client.from('rides')
             .update({
-              status: 'driver_accepted',
-              driver_id: current.driver_id,
-              driver_name: current.driver_name,
-              driver_phone: current.driver_phone,
-              driver_avatar: current.driver_avatar,
-              driver_vehicle_name: current.driver_vehicle_name,
-              driver_vehicle_number: current.driver_vehicle_number,
-              accepted_at: current.accepted_at
+              status: 'completed',
+              notes: updateNotes
             })
-            .eq('id', current.id)
+            .eq('vehicle_number', current.id)
             .then(() => {}).catch(() => {});
         } catch (e) {}
       }
@@ -2005,9 +2108,12 @@ const db = {
       const client = getSupabaseClient();
       if (client) {
         try {
-          client.from('ride_requests')
-            .update({ status: 'ride_started', started_at: current.started_at })
-            .eq('id', current.id)
+          client.from('rides')
+            .update({
+              status: 'completed',
+              notes: JSON.stringify({ isRequest: true, status: 'ride_started', started_at: current.started_at })
+            })
+            .eq('vehicle_number', current.id)
             .then(() => {}).catch(() => {});
         } catch (e) {}
       }
@@ -2070,9 +2176,9 @@ const db = {
       const client = getSupabaseClient();
       if (client) {
         try {
-          client.from('ride_requests')
-            .update({ status: 'ride_completed', completed_at: current.completed_at })
-            .eq('id', requestId)
+          client.from('rides')
+            .delete()
+            .eq('vehicle_number', requestId)
             .then(() => {}).catch(() => {});
         } catch (e) {}
       }
@@ -2108,9 +2214,9 @@ const db = {
       const client = getSupabaseClient();
       if (client) {
         try {
-          client.from('ride_requests')
-            .update({ status: 'cancelled', cancelled_at: new Date().toISOString() })
-            .eq('id', requestId)
+          client.from('rides')
+            .delete()
+            .eq('vehicle_number', requestId)
             .then(() => {}).catch(() => {});
         } catch (e) {}
       }
@@ -2118,8 +2224,9 @@ const db = {
       return { success: true };
     },
 
-    // 6. Sync Active Request
+    // 6. Sync Active Request (Dual Check: Local Node Server + Supabase Cloud Database)
     async syncActiveRequest() {
+      let foundOnServer = false;
       try {
         let resp = await fetch('/api/ride-requests');
         if (!resp.ok) {
@@ -2128,19 +2235,69 @@ const db = {
         if (resp.ok) {
           const data = await resp.json();
           if (data && data.activeRequest) {
+            foundOnServer = true;
             const serverReq = data.activeRequest;
-            const eventName = serverReq.status === 'searching' ? 'new_ride_request' : serverReq.status;
+            const eventName = (serverReq.status === 'searching' || serverReq.status === 'active') ? 'new_ride_request' : serverReq.status;
             if (!this._activeRequest || this._activeRequest.status !== serverReq.status || this._activeRequest.id !== serverReq.id) {
               this._handleIncomingEvent(eventName, serverReq);
             }
-          } else if (this._activeRequest && this._activeRequest.status === 'searching') {
-            // Active request was resolved or cleared on server
-            this._activeRequest = null;
-            try { localStorage.removeItem('routemate_active_ride_request'); } catch(e){}
-            this._notify('ride_cleared', null);
           }
         }
       } catch (e) {}
+
+      // Dual sync with Supabase cloud rides table directly (Cross-device real-time safety net)
+      const client = getSupabaseClient();
+      if (client) {
+        try {
+          const { data, error } = await client
+            .from('rides')
+            .select('*')
+            .eq('status', 'active')
+            .ilike('vehicle_number', 'REQ-%')
+            .order('created_at', { ascending: false })
+            .limit(1);
+
+          if (!error && data && data.length > 0) {
+            const row = data[0];
+            let meta = {};
+            try { meta = JSON.parse(row.notes || '{}'); } catch(e){}
+            const incomingReq = {
+              id: row.vehicle_number,
+              dbId: row.id,
+              rider_id: meta.riderId || row.driver_id,
+              rider_name: meta.riderName || (row.driver_name ? row.driver_name.replace(' (Rider Request)', '') : 'Passenger'),
+              rider_phone: meta.riderPhone || '+91 98480 23145',
+              rider_avatar: meta.riderAvatar || row.avatar,
+              rider_role: meta.riderRole || row.driver_role || 'Daily Commuter',
+              pickup: row.pickup,
+              drop: row.drop_location,
+              drop_location: row.drop_location,
+              seats: row.seats_available || 1,
+              fare: row.per_seat_price || 108,
+              distance: meta.distance || 84,
+              pin: meta.pin || '4821',
+              vehicle_type: row.vehicle_type || 'any',
+              vehicleType: row.vehicle_type || 'any',
+              isFlexibleVehicle: Boolean(meta.isFlexible),
+              payment_method: meta.paymentMethod || 'Direct UPI',
+              status: 'searching',
+              created_at: row.created_at
+            };
+            if (!this._activeRequest || this._activeRequest.id !== incomingReq.id || this._activeRequest.status !== incomingReq.status) {
+              this._handleIncomingEvent('new_ride_request', incomingReq);
+            }
+          } else if (!foundOnServer && this._activeRequest && (this._activeRequest.status === 'searching' || this._activeRequest.status === 'active')) {
+            const ageMs = this._activeRequest.created_at ? (Date.now() - new Date(this._activeRequest.created_at).getTime()) : 999999;
+            if (ageMs > 300000) {
+              this._activeRequest = null;
+              try { localStorage.removeItem('routemate_active_ride_request'); } catch(e){}
+              this._notify('ride_cleared', null);
+            }
+          }
+        } catch (e) {
+          console.warn('Supabase syncActiveRequest error:', e);
+        }
+      }
     },
 
     getActiveRequest() {

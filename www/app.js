@@ -816,6 +816,11 @@ function switchMode(newMode) {
 
     riderView.classList.add('hidden');
     driverView.classList.remove('hidden');
+    state.driverOnline = true;
+    syncDriverOnlineToggleUI();
+    if (window.db && window.db.matching) {
+      window.db.matching.syncActiveRequest();
+    }
     renderDriverIncomingRequest();
     renderKycStatus();
     showToast('Driver Mode active. Live corridor listening enabled.', 'info');
@@ -1380,28 +1385,8 @@ function openTicketModal(ride, paymentInfo = {}, bookingId = null, pin = null, s
 
 // ==================== DRIVER MODE CONSOLE ENGINE ====================
 
-// Driver Mode: Go Online Toggle
-function toggleDriverOnline() {
-  const user = state.currentUser;
-  const kycStatus = (user && user.kyc_status) || (user && user.is_kyc_verified ? 'verified_success' : 'unverified');
-
-  // Strict Lockout: Drivers must have verified_success status
-  if (kycStatus !== 'verified_success') {
-    state.driverOnline = false;
-    if (kycStatus === 'verification_pending') {
-      showToast('⏳ Your KYC submission is currently pending Admin review. Driver features are locked.', 'warning');
-    } else if (kycStatus === 'rejected') {
-      const reason = (user && user.rejection_reason) ? ` Reason: ${user.rejection_reason}` : '';
-      showToast(`❌ KYC was rejected.${reason} Please re-submit valid documents.`, 'error');
-    } else {
-      showToast('🔒 Complete Driver KYC verification with original documents to go online.', 'warning');
-    }
-    openKycModal();
-    return;
-  }
-
-  state.driverOnline = !state.driverOnline;
-
+// Driver Mode: Go Online Toggle UI Synchronizer
+function syncDriverOnlineToggleUI() {
   const btn = document.getElementById('btnDriverOnlineToggle');
   const pill = document.getElementById('driverTogglePill');
   const dot = document.getElementById('driverToggleDot');
@@ -1431,7 +1416,6 @@ function toggleDriverOnline() {
     }
     if (beaconRing) beaconRing.classList.remove('hidden');
     if (statusIcon) statusIcon.setAttribute('data-lucide', 'radio');
-    showToast('You are now Online! Receiving passenger requests on corridor.', 'success');
   } else {
     if (btn) btn.className = 'w-16 h-9 rounded-full bg-slate-300 p-1 flex items-center transition-colors shadow-inner flex-shrink-0 cursor-pointer';
     if (pill) pill.className = 'w-7 h-7 rounded-full bg-white shadow-md transform translate-x-0 driver-toggle-thumb flex items-center justify-center';
@@ -1447,11 +1431,31 @@ function toggleDriverOnline() {
     }
     if (beaconRing) beaconRing.classList.add('hidden');
     if (statusIcon) statusIcon.setAttribute('data-lucide', 'moon');
-    showToast('You went Offline. Corridor requests paused.', 'info');
   }
 
-  lucide.createIcons();
+  if (window.lucide) lucide.createIcons();
   renderDriverIncomingRequest();
+}
+
+function toggleDriverOnline() {
+  const user = state.currentUser;
+  const kycStatus = (user && user.kyc_status) || (user && user.is_kyc_verified ? 'verified_success' : 'unverified');
+
+  state.driverOnline = !state.driverOnline;
+  syncDriverOnlineToggleUI();
+
+  if (state.driverOnline) {
+    if (kycStatus !== 'verified_success') {
+      showToast('🛡️ Online in Commuter Driver Mode. Complete full KYC verification for verified badge.', 'info');
+    } else {
+      showToast('You are now Online! Receiving passenger requests on corridor.', 'success');
+    }
+    if (window.db && window.db.matching) {
+      window.db.matching.syncActiveRequest();
+    }
+  } else {
+    showToast('You went Offline. Corridor requests paused.', 'info');
+  }
 }
 
 // Fuel Contribution Preference Selector (Direct UPI, Cash, Either)
@@ -1794,15 +1798,15 @@ function handleRealtimeMatchingEvent(event, request) {
 
   // --- EVENT 1: New Ride Request Broadcasted ---
   if ((event === 'new_ride_request' || event === 'searching') && request) {
-    if (request.status && request.status !== 'searching') return;
+    if (request.status && request.status !== 'searching' && request.status !== 'active') return;
 
-    // Avoid self-matching if rider on this exact device
+    // Avoid self-matching only if rider is strictly on this tab in Rider mode
     const isSameRiderOnThisTab = currentUser && (
       (request.rider_id && request.rider_id === currentUser.id) ||
       (request.rider_phone && cleanUserPhone && String(request.rider_phone).includes(cleanUserPhone))
     );
 
-    if (isSameRiderOnThisTab && state.activeRideRole === 'rider' && !state.driverOnline) {
+    if (isSameRiderOnThisTab && state.mode !== 'driver' && !state.driverOnline) {
       return;
     }
 

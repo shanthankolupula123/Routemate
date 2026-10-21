@@ -11,7 +11,48 @@ module.exports = async (req, res) => {
 
   // GET: Fetch currently active ride request
   if (req.method === 'GET') {
-    const active = getActiveRide();
+    let active = getActiveRide();
+    if (!active) {
+      try {
+        const SUPABASE_URL = process.env.SUPABASE_URL || 'https://hjieeilzfbvubkhmlmdg.supabase.co';
+        const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || 'sb_publishable_FD8-opedLq151SNuBbWp9g_bLI5hB_a';
+        const resp = await fetch(`${SUPABASE_URL}/rest/v1/rides?status=eq.active&vehicle_number=ilike.REQ-%25&order=created_at.desc&limit=1`, {
+          headers: {
+            'apikey': SUPABASE_ANON_KEY,
+            'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+          }
+        });
+        if (resp.ok) {
+          const rows = await resp.json();
+          if (rows && rows.length > 0) {
+            const row = rows[0];
+            let meta = {};
+            try { meta = JSON.parse(row.notes || '{}'); } catch (e) {}
+            active = {
+              id: row.vehicle_number,
+              rider_id: meta.riderId || row.driver_id,
+              rider_name: meta.riderName || (row.driver_name ? row.driver_name.replace(' (Rider Request)', '') : 'Passenger'),
+              rider_phone: meta.riderPhone || '+91 98480 23145',
+              rider_avatar: meta.riderAvatar || row.avatar,
+              rider_role: meta.riderRole || row.driver_role || 'Daily Commuter',
+              pickup: row.pickup,
+              drop_location: row.drop_location,
+              drop: row.drop_location,
+              seats: row.seats_available || 1,
+              fare: row.per_seat_price || 108,
+              distance: meta.distance || 84,
+              pin: meta.pin || '4821',
+              vehicle_type: row.vehicle_type || 'any',
+              is_flexible_vehicle: Boolean(meta.isFlexible),
+              payment_method: meta.paymentMethod || 'Direct UPI',
+              status: 'searching',
+              created_at: row.created_at
+            };
+            saveActiveRide(active);
+          }
+        }
+      } catch (err) {}
+    }
     return res.status(200).json({ success: true, activeRequest: active });
   }
 
