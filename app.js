@@ -6151,10 +6151,10 @@ function renderAdminSubmissions() {
     const identifier = item.phone || item.id;
 
     return `
-      <div class="p-3.5 sm:p-4 bg-slate-50 border ${isBlocked ? 'border-rose-300 bg-rose-50/20' : 'border-slate-200'} rounded-3xl space-y-3.5 shadow-xs transition">
+      <div class="admin-kyc-card p-3.5 sm:p-4 bg-slate-50 border ${isBlocked ? 'border-rose-300 bg-rose-50/20' : 'border-slate-200'} rounded-3xl space-y-3.5 shadow-xs transition">
         <!-- Header: Driver Info & Status -->
-        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-2 border-b border-slate-200/60">
-          <div class="flex items-center gap-3 min-w-0">
+        <div class="flex items-start justify-between gap-3 pb-3 border-b border-slate-200/70">
+          <div class="flex items-center gap-3 min-w-0 flex-1">
             ${item.avatar_url ? `
               <img src="${item.avatar_url}" onclick="openAdminDocViewer('${item.avatar_url}', 'Driver Photo - ${item.name || 'Driver'}')" class="w-12 h-12 rounded-2xl object-cover border border-slate-300 cursor-pointer hover:opacity-90 transition flex-shrink-0" title="Click to enlarge" />
             ` : `
@@ -6163,19 +6163,18 @@ function renderAdminSubmissions() {
               </div>
             `}
             <div class="min-w-0 flex-1">
-              <div class="flex items-center gap-2 flex-wrap">
-                <h4 class="font-extrabold text-slate-900 text-sm truncate">${item.name || 'Commuter'}</h4>
-                ${statusBadge}
-              </div>
-              <p class="text-[11px] font-mono text-slate-600 font-semibold mt-0.5 flex items-center gap-1.5 flex-wrap">
+              <h4 class="admin-driver-name font-black text-slate-900 text-sm sm:text-base leading-snug break-words">${item.name || 'Commuter'}</h4>
+              <p class="text-[11px] font-mono text-slate-600 font-bold mt-0.5 flex items-center gap-1.5 flex-wrap">
                 <span>${item.phone || 'Phone hidden'}</span>
-                ${item.role ? `<span class="text-[10px] text-slate-400 uppercase font-bold">• ${item.role}</span>` : ''}
+                ${item.role ? `<span class="text-[10px] text-purple-700 bg-purple-50 px-1.5 py-0.5 rounded uppercase font-bold">• ${item.role}</span>` : ''}
               </p>
             </div>
           </div>
-          <div class="self-start sm:self-center flex items-center gap-1.5 text-[10px] text-slate-500 font-medium bg-white sm:bg-transparent px-2.5 py-1 sm:px-0 sm:py-0 rounded-full border border-slate-200 sm:border-0 flex-shrink-0">
-            <i data-lucide="calendar" class="w-3 h-3 text-slate-400"></i>
-            <span>${item.kyc_submitted_at ? new Date(item.kyc_submitted_at).toLocaleDateString() : 'Recent Submission'}</span>
+          <div class="flex flex-col items-end gap-1 flex-shrink-0 text-right">
+            <div>${statusBadge}</div>
+            <span class="text-[10px] text-slate-400 font-medium whitespace-nowrap">
+              ${item.kyc_submitted_at ? new Date(item.kyc_submitted_at).toLocaleDateString() : 'Recent'}
+            </span>
           </div>
         </div>
 
@@ -6190,55 +6189,68 @@ function renderAdminSubmissions() {
           </div>
         ` : ''}
 
-        <!-- Submitted Text Details: Responsive Grid with Non-Overlapping Blocks -->
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-2.5 sm:gap-3 text-xs bg-white p-3 rounded-2xl border border-slate-200 shadow-2xs">
+        <!-- Submitted Text Details: Dedicated Stack on Mobile, 3 Columns on Tablet/Desktop -->
+        <div class="admin-doc-grid bg-white p-3 rounded-2xl border border-slate-200/90 shadow-2xs">
           <!-- Aadhaar UID Card -->
-          <div class="p-2.5 rounded-xl bg-slate-50 border border-slate-100 flex flex-col justify-between min-w-0">
-            <div class="flex items-center gap-1.5 text-slate-500 mb-1">
-              <div class="w-5 h-5 rounded-md bg-blue-100 text-blue-700 flex items-center justify-center flex-shrink-0">
-                <i data-lucide="fingerprint" class="w-3 h-3"></i>
+          <div class="admin-doc-box flex flex-col justify-between">
+            <div>
+              <div class="flex items-center gap-1.5 text-slate-500 mb-1.5">
+                <div class="w-5 h-5 rounded-md bg-blue-100 text-blue-700 flex items-center justify-center flex-shrink-0">
+                  <i data-lucide="fingerprint" class="w-3.5 h-3.5"></i>
+                </div>
+                <span class="text-[10px] uppercase font-black tracking-wider text-slate-500">Aadhaar UID</span>
               </div>
-              <span class="text-[10px] uppercase font-extrabold tracking-wider text-slate-500">Aadhaar UID</span>
+              <span class="font-mono font-black text-slate-900 text-sm tracking-wider select-all block break-all mt-1">
+                ${item.aadhaar_number || '<span class="text-slate-400 font-normal italic text-xs">Not provided</span>'}
+              </span>
             </div>
-            <span class="font-mono font-bold text-slate-900 text-xs sm:text-sm break-all select-all tracking-wide mt-1">
-              ${item.aadhaar_number || '<span class="text-slate-400 font-normal italic text-[11px]">Not provided</span>'}
-            </span>
           </div>
 
           <!-- Driving License Card -->
-          <div class="p-2.5 rounded-xl bg-slate-50 border border-slate-100 flex flex-col justify-between min-w-0">
+          <div class="admin-doc-box flex flex-col justify-between">
             <div>
-              <div class="flex items-center gap-1.5 text-slate-500 mb-1">
+              <div class="flex items-center gap-1.5 text-slate-500 mb-1.5">
                 <div class="w-5 h-5 rounded-md bg-emerald-100 text-emerald-700 flex items-center justify-center flex-shrink-0">
-                  <i data-lucide="award" class="w-3 h-3"></i>
+                  <i data-lucide="award" class="w-3.5 h-3.5"></i>
                 </div>
-                <span class="text-[10px] uppercase font-extrabold tracking-wider text-slate-500">Driving License</span>
+                <span class="text-[10px] uppercase font-black tracking-wider text-slate-500">Driving License</span>
               </div>
-              <span class="font-mono font-bold text-slate-900 text-xs sm:text-sm break-all select-all tracking-wide block mt-1">
-                ${item.dl_number || '<span class="text-slate-400 font-normal italic text-[11px]">Not provided</span>'}
+              <span class="font-mono font-black text-slate-900 text-sm tracking-wider select-all block break-all mt-1">
+                ${item.dl_number || '<span class="text-slate-400 font-normal italic text-xs">Not provided</span>'}
               </span>
             </div>
-            ${item.dl_expiry ? `<div class="mt-1.5"><span class="inline-block px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-800 border border-emerald-200 text-[10px] font-bold">Valid Thru: ${item.dl_expiry}</span></div>` : ''}
+            ${item.dl_expiry ? `
+              <div class="mt-2 pt-1.5 border-t border-slate-200/60">
+                <span class="inline-block px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-800 border border-emerald-200 text-[10px] font-bold">
+                  Valid Thru: ${item.dl_expiry}
+                </span>
+              </div>
+            ` : ''}
           </div>
 
           <!-- Vehicle RC & Chassis Card -->
-          <div class="p-2.5 rounded-xl bg-slate-50 border border-slate-100 flex flex-col justify-between min-w-0">
+          <div class="admin-doc-box flex flex-col justify-between">
             <div>
-              <div class="flex items-center gap-1.5 text-slate-500 mb-1">
+              <div class="flex items-center gap-1.5 text-slate-500 mb-1.5">
                 <div class="w-5 h-5 rounded-md bg-purple-100 text-purple-700 flex items-center justify-center flex-shrink-0">
-                  <i data-lucide="truck" class="w-3 h-3"></i>
+                  <i data-lucide="truck" class="w-3.5 h-3.5"></i>
                 </div>
-                <span class="text-[10px] uppercase font-extrabold tracking-wider text-slate-500">Vehicle Registration</span>
+                <span class="text-[10px] uppercase font-black tracking-wider text-slate-500">Vehicle Registration</span>
               </div>
-              <span class="font-mono font-bold text-slate-900 text-xs sm:text-sm break-all select-all tracking-wide block mt-1">
-                ${item.rc_number || '<span class="text-slate-400 font-normal italic text-[11px]">Not provided</span>'}
+              <span class="font-mono font-black text-slate-900 text-sm tracking-wider select-all block break-all mt-1">
+                ${item.rc_number || '<span class="text-slate-400 font-normal italic text-xs">Not provided</span>'}
               </span>
-              ${item.rc_vehicle_name ? `<span class="text-[11px] text-slate-600 font-medium block mt-1 break-words">${item.rc_vehicle_name}</span>` : ''}
+              ${item.rc_vehicle_name ? `
+                <div class="text-xs text-slate-700 font-bold mt-1 break-words flex items-center gap-1">
+                  <span class="text-[10px] text-slate-400 uppercase font-semibold">Model:</span>
+                  <span>${item.rc_vehicle_name}</span>
+                </div>
+              ` : ''}
             </div>
             ${item.rc_chassis_number ? `
-              <div class="mt-2 pt-2 border-t border-purple-100 flex flex-wrap items-center gap-1.5">
-                <span class="text-[9px] uppercase font-black text-purple-700 tracking-wider bg-purple-100 px-1.5 py-0.5 rounded border border-purple-200 flex-shrink-0">Chassis</span>
-                <span class="font-mono font-bold text-purple-950 text-[11px] sm:text-xs break-all select-all">${item.rc_chassis_number}</span>
+              <div class="mt-2.5 pt-2 border-t border-purple-200/80 bg-purple-50/70 -mx-3 -mb-3 p-2.5 rounded-b-xl">
+                <span class="text-[9px] uppercase font-black text-purple-700 tracking-wider block mb-0.5">Vehicle Chassis No</span>
+                <span class="font-mono font-black text-purple-950 text-xs select-all block break-all">${item.rc_chassis_number}</span>
               </div>
             ` : ''}
           </div>
