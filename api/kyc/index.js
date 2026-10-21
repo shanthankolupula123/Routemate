@@ -1,4 +1,4 @@
-const { getStore, saveStore } = require('./kyc-store');
+const { getStore, saveStore } = require('../kyc-store');
 
 module.exports = async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');

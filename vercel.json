@@ -1,6 +1,7 @@
 {
   "version": 2,
   "cleanUrls": true,
+  "buildCommand": "node prepare-www.js",
   "outputDirectory": "www",
   "headers": [
     {

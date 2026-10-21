@@ -1,4 +1,4 @@
-const { getStore, saveStore } = require('./feedbacks-store');
+const { getStore, saveStore } = require('../feedbacks-store');
 
 module.exports = async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
