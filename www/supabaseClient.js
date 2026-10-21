@@ -1818,11 +1818,17 @@ const db = {
 
       // 2. Server API if available
       try {
-        fetch('/api/ride-requests/create', {
+        fetch('/api/ride-requests', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(request)
-        }).catch(() => {});
+          body: JSON.stringify({ action: 'create', ...request })
+        }).catch(() => {
+          fetch('/api/ride-requests/create', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(request)
+          }).catch(() => {});
+        });
       } catch (e) {}
 
       // 3. Supabase Database insert
@@ -1879,11 +1885,18 @@ const db = {
       // Try server atomic accept first if available
       let serverConfirmed = false;
       try {
-        const resp = await fetch('/api/ride-requests/accept', {
+        let resp = await fetch('/api/ride-requests', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ requestId: current.id, driver: driverData })
+          body: JSON.stringify({ action: 'accept', requestId: current.id, driver: driverData })
         });
+        if (!resp.ok && resp.status === 404) {
+          resp = await fetch('/api/ride-requests/accept', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ requestId: current.id, driver: driverData })
+          });
+        }
         const resData = await resp.json();
         if (resp.ok && resData.success) {
           serverConfirmed = true;
@@ -1976,11 +1989,17 @@ const db = {
       this._emit('ride_started', current);
 
       try {
-        fetch('/api/ride-requests/start', {
+        fetch('/api/ride-requests', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ requestId: current.id, pin: enteredPin })
-        }).catch(() => {});
+          body: JSON.stringify({ action: 'start', requestId: current.id, pin: enteredPin })
+        }).catch(() => {
+          fetch('/api/ride-requests/start', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ requestId: current.id, pin: enteredPin })
+          }).catch(() => {});
+        });
       } catch (e) {}
 
       const client = getSupabaseClient();
@@ -2022,11 +2041,17 @@ const db = {
       this._emit('ride_completed', current);
 
       try {
-        fetch('/api/ride-requests/complete', {
+        fetch('/api/ride-requests', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ requestId })
-        }).catch(() => {});
+          body: JSON.stringify({ action: 'complete', requestId })
+        }).catch(() => {
+          fetch('/api/ride-requests/complete', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ requestId })
+          }).catch(() => {});
+        });
       } catch (e) {}
 
       // Store in Supabase bookings
@@ -2067,11 +2092,17 @@ const db = {
       try { localStorage.removeItem('routemate_active_ride_request'); } catch(e){}
 
       try {
-        fetch('/api/ride-requests/cancel', {
+        fetch('/api/ride-requests', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ requestId })
-        }).catch(() => {});
+          body: JSON.stringify({ action: 'cancel', requestId })
+        }).catch(() => {
+          fetch('/api/ride-requests/cancel', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ requestId })
+          }).catch(() => {});
+        });
       } catch (e) {}
 
       const client = getSupabaseClient();
@@ -2090,7 +2121,10 @@ const db = {
     // 6. Sync Active Request
     async syncActiveRequest() {
       try {
-        const resp = await fetch('/api/ride-requests/active');
+        let resp = await fetch('/api/ride-requests');
+        if (!resp.ok) {
+          resp = await fetch('/api/ride-requests/active');
+        }
         if (resp.ok) {
           const data = await resp.json();
           if (data && data.activeRequest) {

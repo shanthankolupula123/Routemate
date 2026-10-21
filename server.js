@@ -319,15 +319,100 @@ const server = http.createServer(async (req, res) => {
   }
 
   // 2. Get Active Ride Request
-  if (urlPath === '/api/ride-requests/active' && req.method === 'GET') {
+  if ((urlPath === '/api/ride-requests/active' || urlPath === '/api/ride-requests') && req.method === 'GET') {
     res.writeHead(200, { ...corsHeaders, 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ success: true, activeRequest: activeRideRequest }));
     return;
   }
 
   // 3. Create & Broadcast New Ride Request (Rider)
-  if (urlPath === '/api/ride-requests/create' && req.method === 'POST') {
+  if ((urlPath === '/api/ride-requests/create' || (urlPath === '/api/ride-requests' && req.method === 'POST')) && req.method === 'POST') {
     const data = await parseJsonBody(req);
+    const action = data.action || 'create';
+
+    if (action === 'accept') {
+      const { requestId, driver } = data;
+      if (!activeRideRequest || activeRideRequest.id !== requestId) {
+        activeRideRequest = {
+          id: requestId || ('REQ-' + Date.now()),
+          rider_id: 'rider_ananya',
+          rider_name: 'Ananya Verma',
+          rider_phone: '+91 98480 23145',
+          rider_avatar: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=120&h=120&q=80',
+          pickup: 'Uppal Ring Road Metro (Gate 2)',
+          drop_location: 'Jangaon Chowrasta',
+          fare: 108,
+          seats: 1,
+          pin: '4821',
+          status: 'searching',
+          createdAt: new Date().toISOString()
+        };
+      }
+      if (activeRideRequest.status !== 'searching') {
+        res.writeHead(409, { ...corsHeaders, 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: 'Ride was already accepted by another driver.', alreadyAccepted: true, currentStatus: activeRideRequest.status }));
+        return;
+      }
+      activeRideRequest.status = 'driver_accepted';
+      activeRideRequest.driver = driver;
+      activeRideRequest.acceptedAt = new Date().toISOString();
+      broadcastToClients({ event: 'driver_accepted', request: activeRideRequest, driver });
+      res.writeHead(200, { ...corsHeaders, 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: true, request: activeRideRequest }));
+      return;
+    }
+
+    if (action === 'start') {
+      const { requestId, pin } = data;
+      if (!activeRideRequest) {
+        res.writeHead(404, { ...corsHeaders, 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: 'No active ride request found' }));
+        return;
+      }
+      if (activeRideRequest.pin && pin && String(activeRideRequest.pin).trim() !== String(pin).trim()) {
+        res.writeHead(400, { ...corsHeaders, 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: 'Invalid PIN. Please ask rider for 4-digit PIN.' }));
+        return;
+      }
+      activeRideRequest.status = 'ride_started';
+      activeRideRequest.startedAt = new Date().toISOString();
+      broadcastToClients({ event: 'ride_started', request: activeRideRequest });
+      res.writeHead(200, { ...corsHeaders, 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: true, request: activeRideRequest }));
+      return;
+    }
+
+    if (action === 'complete') {
+      const { requestId } = data;
+      if (!activeRideRequest) {
+        res.writeHead(404, { ...corsHeaders, 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: 'No active ride request found' }));
+        return;
+      }
+      activeRideRequest.status = 'ride_completed';
+      activeRideRequest.completedAt = new Date().toISOString();
+      const completedRide = activeRideRequest;
+      broadcastToClients({ event: 'ride_completed', request: completedRide });
+      setTimeout(() => { if (activeRideRequest && activeRideRequest.id === requestId) activeRideRequest = null; }, 5000);
+      res.writeHead(200, { ...corsHeaders, 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: true, request: completedRide }));
+      return;
+    }
+
+    if (action === 'cancel') {
+      const { requestId } = data;
+      if (activeRideRequest && activeRideRequest.id === requestId) {
+        activeRideRequest.status = 'cancelled';
+        activeRideRequest.cancelledAt = new Date().toISOString();
+        broadcastToClients({ event: 'ride_cancelled', request: activeRideRequest });
+        activeRideRequest = null;
+      }
+      res.writeHead(200, { ...corsHeaders, 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: true }));
+      return;
+    }
+
+    // Default action: Create
     activeRideRequest = {
       ...data,
       id: data.id || ('REQ-' + Date.now().toString(36).toUpperCase()),
