@@ -696,30 +696,44 @@ const db = {
 
       try {
         console.log('🛡️ Submitting Manual KYC to Supabase profiles for:', profileIdOrPhone);
-        let query = client.from('profiles').update(payload);
-        if (typeof profileIdOrPhone === 'string' && profileIdOrPhone.includes('@')) {
-          query = query.eq('email', profileIdOrPhone);
-        } else if (typeof profileIdOrPhone === 'string' && (profileIdOrPhone.startsWith('+') || /^\d{10,}$/.test(profileIdOrPhone.replace(/[\s+-]/g, '')))) {
-          query = query.eq('phone', profileIdOrPhone);
-        } else {
+        
+        // Profiles table schema contains: id, name, role, rating, total_rides, phone, avatar_url, is_verified, created_at
+        // Store full KYC details (Aadhaar, DL, RC, photos) serialized in role column
+        const dbPayload = {
+          name: kycData.name,
+          avatar_url: kycData.avatarUrl || null,
+          role: JSON.stringify(payload),
+          is_verified: false
+        };
+
+        const targetIdentifier = typeof profileIdOrPhone === 'string' && (profileIdOrPhone.includes('@') || profileIdOrPhone.startsWith('+') || /^\d{10,}$/.test(profileIdOrPhone.replace(/[\s+-]/g, '')))
+          ? profileIdOrPhone
+          : (subItem.phone || subItem.email);
+
+        let query = client.from('profiles').update(dbPayload);
+        if (targetIdentifier && targetIdentifier.includes('@') || targetIdentifier.startsWith('+') || /^\d{10,}$/.test(targetIdentifier.replace(/[\s+-]/g, ''))) {
+          query = query.eq('phone', targetIdentifier);
+        } else if (profileIdOrPhone) {
           query = query.eq('id', profileIdOrPhone);
         }
 
         const { data, error } = await query.select();
-        if (error) {
-          console.warn('Supabase submitManualKyc error, trying upsert:', error.message);
-          if (kycData.phone || kycData.email) {
-            payload.phone = kycData.phone || '+91 98480 23145';
-            if (kycData.email) payload.email = kycData.email;
-            const { data: upsertData, error: upsertErr } = await client
-              .from('profiles')
-              .upsert([payload])
-              .select();
-            if (!upsertErr && upsertData && upsertData.length > 0) {
-              return { success: true, profile: upsertData[0] };
-            }
+        if (error || !data || data.length === 0) {
+          console.warn('Supabase submitManualKyc update had no match or error, performing upsert:', error ? error.message : 'no row matched');
+          const upsertRow = {
+            phone: targetIdentifier || '+91 94942 85249',
+            name: kycData.name,
+            avatar_url: kycData.avatarUrl || null,
+            role: JSON.stringify(payload),
+            is_verified: false
+          };
+          const { data: upsertData } = await client
+            .from('profiles')
+            .upsert([upsertRow], { onConflict: 'phone' })
+            .select();
+          if (upsertData && upsertData.length > 0) {
+            return { success: true, profile: upsertData[0] };
           }
-          return { success: true, localOnly: true, profile: payload };
         }
 
         return { success: true, profile: (data && data[0]) || payload };
@@ -922,17 +936,67 @@ const db = {
       const client = getSupabaseClient();
       let submissions = [];
 
-      // 1. Fetch from Supabase profiles where KYC has been submitted
+      // 1. Fetch from Supabase profiles where KYC has been submitted or role has serialized KYC
       if (client) {
         try {
           const { data, error } = await client
             .from('profiles')
-            .select('*')
-            .or('kyc_status.neq.unverified,aadhaar_number.not.is.null,dl_number.not.is.null')
-            .order('kyc_submitted_at', { ascending: false });
+            .select('*');
 
           if (!error && data && data.length > 0) {
-            submissions = data;
+            data.forEach(p => {
+              let extra = {};
+              if (p.role && typeof p.role === 'string') {
+                if (p.role.trim().startsWith('{') || p.role.includes('"kyc_status"') || p.role.includes('"dl_number"')) {
+                  try {
+                    extra = JSON.parse(p.role);
+                  } catch (e) {}
+                }
+              }
+
+              // Check if user has submitted KYC details or has driver credentials
+              if (extra && (extra.kyc_status || extra.aadhaar_number || extra.dl_number || extra.rc_number)) {
+                submissions.push({
+                  id: p.id,
+                  name: extra.name || p.name || 'Commuter',
+                  phone: p.phone,
+                  email: extra.email || (p.phone && p.phone.includes('@') ? p.phone : ''),
+                  avatar_url: p.avatar_url || extra.avatar_url || null,
+                  aadhaar_number: extra.aadhaar_number || '',
+                  aadhaar_card_photo: extra.aadhaar_card_photo || '',
+                  dl_number: extra.dl_number || '',
+                  dl_expiry: extra.dl_expiry || '',
+                  dl_photo: extra.dl_photo || '',
+                  rc_number: extra.rc_number || '',
+                  rc_vehicle_name: extra.rc_vehicle_name || '',
+                  rc_chassis_number: extra.rc_chassis_number || '',
+                  rc_photo: extra.rc_photo || '',
+                  kyc_status: extra.kyc_status || (p.is_verified ? 'verified_success' : 'verification_pending'),
+                  is_kyc_verified: Boolean(p.is_verified || extra.is_kyc_verified),
+                  kyc_submitted_at: extra.kyc_submitted_at || p.created_at || new Date().toISOString()
+                });
+              } else if (p.role && typeof p.role === 'string' && (p.role.toLowerCase().includes('driver') || p.is_verified)) {
+                submissions.push({
+                  id: p.id,
+                  name: p.name || 'Commuter',
+                  phone: p.phone,
+                  email: p.phone && p.phone.includes('@') ? p.phone : '',
+                  avatar_url: p.avatar_url || null,
+                  aadhaar_number: '',
+                  aadhaar_card_photo: '',
+                  dl_number: '',
+                  dl_expiry: '',
+                  dl_photo: '',
+                  rc_number: '',
+                  rc_vehicle_name: '',
+                  rc_chassis_number: '',
+                  rc_photo: '',
+                  kyc_status: p.is_verified ? 'verified_success' : 'verification_pending',
+                  is_kyc_verified: Boolean(p.is_verified),
+                  kyc_submitted_at: p.created_at || new Date().toISOString()
+                });
+              }
+            });
           }
         } catch (e) {
           console.warn('Admin Supabase fetch warning:', e);
@@ -961,7 +1025,7 @@ const db = {
         }
       } catch (e) {}
 
-      // 3. Merge with locally cached submissions
+      // 3. Merge with locally cached submissions (and preserve documents/chassis)
       try {
         const localList = JSON.parse(localStorage.getItem('routemate_kyc_submissions') || '[]');
         localList.forEach(localItem => {
@@ -977,6 +1041,11 @@ const db = {
             if (localItem.kyc_status && (!exists.kyc_status || exists.kyc_status === 'unverified')) {
               Object.assign(exists, localItem);
             }
+            if (localItem.aadhaar_card_photo && !exists.aadhaar_card_photo) exists.aadhaar_card_photo = localItem.aadhaar_card_photo;
+            if (localItem.dl_photo && !exists.dl_photo) exists.dl_photo = localItem.dl_photo;
+            if (localItem.rc_photo && !exists.rc_photo) exists.rc_photo = localItem.rc_photo;
+            if (localItem.rc_chassis_number && !exists.rc_chassis_number) exists.rc_chassis_number = localItem.rc_chassis_number;
+            if (localItem.avatar_url && !exists.avatar_url) exists.avatar_url = localItem.avatar_url;
           }
         });
       } catch (e) {}
@@ -991,22 +1060,31 @@ const db = {
             (currentUser.email && s.email && s.email === currentUser.email)
           );
           if (!exists) {
-            submissions.push({
+            submissions.unshift({
               id: currentUser.id || 'usr_current',
               name: currentUser.name || 'Verified Commuter',
-              phone: currentUser.phone || '+91 98480 23145',
+              phone: currentUser.phone || '+91 94942 85249',
               email: currentUser.email || '',
-              avatar_url: currentUser.avatar || null,
+              avatar_url: currentUser.avatar || currentUser.avatar_url || null,
               aadhaar_number: currentUser.aadhaar_number || '',
+              aadhaar_card_photo: currentUser.aadhaar_card_photo || null,
               dl_number: currentUser.dl_number || '',
               dl_expiry: currentUser.dl_expiry || '',
+              dl_photo: currentUser.dl_photo || null,
               rc_number: currentUser.rc_number || '',
               rc_vehicle_name: currentUser.rc_vehicle_name || '',
               rc_chassis_number: currentUser.rc_chassis_number || '',
+              rc_photo: currentUser.rc_photo || null,
               kyc_status: currentUser.kyc_status || 'verification_pending',
-              is_kyc_verified: currentUser.is_kyc_verified || false,
+              is_kyc_verified: Boolean(currentUser.is_kyc_verified),
               kyc_submitted_at: currentUser.kyc_submitted_at || new Date().toISOString()
             });
+          } else {
+            if (currentUser.aadhaar_card_photo && !exists.aadhaar_card_photo) exists.aadhaar_card_photo = currentUser.aadhaar_card_photo;
+            if (currentUser.dl_photo && !exists.dl_photo) exists.dl_photo = currentUser.dl_photo;
+            if (currentUser.rc_photo && !exists.rc_photo) exists.rc_photo = currentUser.rc_photo;
+            if (currentUser.rc_chassis_number && !exists.rc_chassis_number) exists.rc_chassis_number = currentUser.rc_chassis_number;
+            if ((currentUser.avatar || currentUser.avatar_url) && !exists.avatar_url) exists.avatar_url = currentUser.avatar || currentUser.avatar_url;
           }
         }
       } catch (e) {}
@@ -1084,10 +1162,34 @@ const db = {
       // Update in Supabase profiles
       if (client) {
         try {
-          let query = client.from('profiles').update(updateData);
-          if (typeof profileIdOrPhone === 'string' && profileIdOrPhone.includes('@')) {
-            query = query.eq('email', profileIdOrPhone);
-          } else if (typeof profileIdOrPhone === 'string' && (profileIdOrPhone.startsWith('+') || /^\d{10,}$/.test(profileIdOrPhone.replace(/[\s+-]/g, '')))) {
+          // Fetch existing profile to preserve full KYC JSON in role
+          let selQuery = client.from('profiles').select('id, phone, role, avatar_url');
+          if (typeof profileIdOrPhone === 'string' && (profileIdOrPhone.includes('@') || profileIdOrPhone.startsWith('+') || /^\d{10,}$/.test(profileIdOrPhone.replace(/[\s+-]/g, '')))) {
+            selQuery = selQuery.eq('phone', profileIdOrPhone);
+          } else {
+            selQuery = selQuery.eq('id', profileIdOrPhone);
+          }
+          const { data: existingProfiles } = await selQuery;
+          let roleObj = {};
+          if (existingProfiles && existingProfiles[0] && existingProfiles[0].role) {
+            try {
+              if (existingProfiles[0].role.trim().startsWith('{')) {
+                roleObj = JSON.parse(existingProfiles[0].role);
+              }
+            } catch (e) {}
+          }
+          Object.assign(roleObj, updateData);
+
+          const dbPayload = {
+            is_verified: isApproved,
+            role: JSON.stringify(roleObj)
+          };
+          if (submittedAvatar) {
+            dbPayload.avatar_url = submittedAvatar;
+          }
+
+          let query = client.from('profiles').update(dbPayload);
+          if (typeof profileIdOrPhone === 'string' && (profileIdOrPhone.includes('@') || profileIdOrPhone.startsWith('+') || /^\d{10,}$/.test(profileIdOrPhone.replace(/[\s+-]/g, '')))) {
             query = query.eq('phone', profileIdOrPhone);
           } else {
             query = query.eq('id', profileIdOrPhone);
@@ -1123,7 +1225,7 @@ const db = {
           }
           const text = [
             item.name, item.phone, item.aadhaar_number, item.dl_number, 
-            item.rc_number, item.rc_vehicle_name, item.kyc_status
+            item.rc_number, item.rc_vehicle_name, item.rc_chassis_number, item.kyc_status
           ].filter(Boolean).join(' ').toLowerCase();
 
           if (text.includes(q)) {
@@ -1138,13 +1240,37 @@ const db = {
           const { data, error } = await client
             .from('profiles')
             .select('*')
-            .or(`name.ilike.%${q}%,phone.ilike.%${q}%,dl_number.ilike.%${q}%,rc_number.ilike.%${q}%,aadhaar_number.ilike.%${q}%`)
+            .or(`name.ilike.%${q}%,phone.ilike.%${q}%,role.ilike.%${q}%`)
             .limit(25);
 
           if (!error && data && data.length > 0) {
             data.forEach(p => {
+              let extra = {};
+              if (p.role && typeof p.role === 'string' && p.role.trim().startsWith('{')) {
+                try { extra = JSON.parse(p.role); } catch(e) {}
+              }
               const exists = results.find(r => (r.phone && r.phone === p.phone) || (r.id && r.id === p.id));
-              if (!exists) results.push(p);
+              if (!exists) {
+                results.push({
+                  id: p.id,
+                  name: extra.name || p.name || 'Commuter',
+                  phone: p.phone,
+                  email: extra.email || (p.phone && p.phone.includes('@') ? p.phone : ''),
+                  avatar_url: p.avatar_url || extra.avatar_url || null,
+                  aadhaar_number: extra.aadhaar_number || '',
+                  aadhaar_card_photo: extra.aadhaar_card_photo || '',
+                  dl_number: extra.dl_number || '',
+                  dl_expiry: extra.dl_expiry || '',
+                  dl_photo: extra.dl_photo || '',
+                  rc_number: extra.rc_number || '',
+                  rc_vehicle_name: extra.rc_vehicle_name || '',
+                  rc_chassis_number: extra.rc_chassis_number || '',
+                  rc_photo: extra.rc_photo || '',
+                  kyc_status: extra.kyc_status || (p.is_verified ? 'verified_success' : 'verification_pending'),
+                  is_kyc_verified: Boolean(p.is_verified || extra.is_kyc_verified),
+                  kyc_submitted_at: extra.kyc_submitted_at || p.created_at || new Date().toISOString()
+                });
+              }
             });
           }
         } catch (e) {

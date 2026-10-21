@@ -5032,11 +5032,14 @@ async function handleKycFormSubmit(event) {
     state.currentUser.email = userEmail;
     state.currentUser.phone = userPhone;
     state.currentUser.aadhaar_number = aadhaarResult.clean;
+    state.currentUser.aadhaar_card_photo = state.manualKycAadhaarDoc || null;
     state.currentUser.dl_number = dlResult.clean;
     state.currentUser.dl_expiry = dlExpiry;
+    state.currentUser.dl_photo = state.manualKycDlDoc || null;
     state.currentUser.rc_number = rcNumber;
     state.currentUser.rc_vehicle_name = rcModel;
     state.currentUser.rc_chassis_number = rcChassis;
+    state.currentUser.rc_photo = state.manualKycRcDoc || null;
     state.currentUser.kyc_submitted_at = new Date().toISOString();
 
     try {
@@ -6039,6 +6042,18 @@ async function loadAdminKycSubmissions() {
     } else {
       if (curUser.rc_chassis_number && !exists.rc_chassis_number) {
         exists.rc_chassis_number = curUser.rc_chassis_number;
+      }
+      if (!exists.aadhaar_card_photo && (curUser.aadhaar_card_photo || state.manualKycAadhaarDoc)) {
+        exists.aadhaar_card_photo = curUser.aadhaar_card_photo || state.manualKycAadhaarDoc;
+      }
+      if (!exists.dl_photo && (curUser.dl_photo || state.manualKycDlDoc)) {
+        exists.dl_photo = curUser.dl_photo || state.manualKycDlDoc;
+      }
+      if (!exists.rc_photo && (curUser.rc_photo || state.manualKycRcDoc)) {
+        exists.rc_photo = curUser.rc_photo || state.manualKycRcDoc;
+      }
+      if (!exists.avatar_url && (curUser.avatar || curUser.avatar_url)) {
+        exists.avatar_url = curUser.avatar || curUser.avatar_url;
       }
     }
   }
