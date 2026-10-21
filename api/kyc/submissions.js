@@ -11,9 +11,10 @@ module.exports = async (req, res) => {
 
   const submissions = getStore();
 
+  let dbError = null;
   try {
-    const supabaseUrl = process.env.SUPABASE_URL || 'https://hjieeilzfbvubkhmlmdg.supabase.co';
-    const supabaseKey = process.env.SUPABASE_ANON_KEY || 'sb_publishable_FD8-opedLq151SNuBbWp9g_bLI5hB_a';
+    const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://hjieeilzfbvubkhmlmdg.supabase.co';
+    const supabaseKey = process.env.SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'sb_publishable_FD8-opedLq151SNuBbWp9g_bLI5hB_a';
     const resp = await fetch(`${supabaseUrl}/rest/v1/profiles?select=*`, {
       headers: {
         'apikey': supabaseKey,
@@ -58,8 +59,12 @@ module.exports = async (req, res) => {
           }
         });
       }
+    } else {
+      dbError = 'Supabase HTTP ' + resp.status;
     }
-  } catch (e) {}
+  } catch (e) {
+    dbError = e.message;
+  }
 
-  return res.status(200).json({ success: true, submissions });
+  return res.status(200).json({ success: true, submissions, dbError });
 };
