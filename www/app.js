@@ -129,19 +129,7 @@ const state = {
   drop: '',
   distance: 0, // km
   fuelPrice: 105.5, // INR per Litre
-  myBookings: [
-    {
-      id: 'RM-8492',
-      driver: 'Ramesh Kumar',
-      vehicle: 'Bajaj Pulsar 150 (TS 08 EK 4321)',
-      route: 'Uppal Ring Road ➔ Jangaon Bus Station',
-      time: 'Today, 06:45 PM',
-      seats: 1,
-      fare: 110,
-      payment: 'Direct UPI (GPay)',
-      status: 'Confirmed'
-    }
-  ],
+  myBookings: [],
   myPostedRides: [],
   rideFilter: 'all', // 'all' | 'upi' | 'rated'
   registeredVehicles: (function() {
@@ -182,128 +170,8 @@ const state = {
   chatMessages: []
 };
 
-// Initial Driver Rides Pool
-let availableRides = [
-  {
-    id: 1,
-    driverName: 'Ramesh Kumar',
-    driverRole: 'TCS Infopark Commuter',
-    rating: 4.9,
-    totalRides: 142,
-    avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=120&h=120&q=80',
-    vehicleType: 'bike',
-    vehicleName: 'Bajaj Pulsar 150',
-    vehicleNumber: 'TS 08 EK 4321',
-    pickup: 'Uppal Ring Road Metro',
-    drop: 'Jangaon Railway Station',
-    departureTime: 'Today, 06:30 PM',
-    seatsAvailable: 1,
-    perSeatPrice: 110,
-    paymentPreference: 'upi',
-    verified: true,
-    helmetProvided: true,
-    notes: 'Leaving right on time from Uppal Metro. Regular daily commuter.'
-  },
-  {
-    id: 2,
-    driverName: 'Priya Sharma',
-    driverRole: 'Bank Officer (SBI)',
-    rating: 4.8,
-    totalRides: 88,
-    avatar: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=120&h=120&q=80',
-    vehicleType: 'car',
-    vehicleName: 'Maruti Suzuki Swift VXi (AC)',
-    vehicleNumber: 'TS 09 FH 9182',
-    pickup: 'Uppal X Roads',
-    drop: 'Jangaon Court Chowrasta',
-    departureTime: 'Today, 07:15 PM',
-    seatsAvailable: 3,
-    perSeatPrice: 185,
-    paymentPreference: 'both',
-    verified: true,
-    ac: true,
-    notes: 'Comfortable AC car ride with boot space for 2 bags. No smoking.'
-  },
-  {
-    id: 3,
-    driverName: 'Vikram Reddy',
-    driverRole: 'Civil Engineer',
-    rating: 4.9,
-    totalRides: 210,
-    avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=120&h=120&q=80',
-    vehicleType: 'bike',
-    vehicleName: 'Royal Enfield Classic 350',
-    vehicleNumber: 'TS 03 AA 5590',
-    pickup: 'Uppal Stadium Bus Stop',
-    drop: 'Jangaon Main Road',
-    departureTime: 'Today, 07:45 PM',
-    seatsAvailable: 1,
-    perSeatPrice: 125,
-    paymentPreference: 'upi',
-    verified: true,
-    helmetProvided: true,
-    notes: 'Spare sanitized helmet available. Relaxed highway cruise.'
-  },
-  {
-    id: 4,
-    driverName: 'Suresh Maddela',
-    driverRole: 'Pharma Professional',
-    rating: 4.7,
-    totalRides: 64,
-    avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=120&h=120&q=80',
-    vehicleType: 'car',
-    vehicleName: 'Hyundai i20 Asta',
-    vehicleNumber: 'TS 07 JN 3341',
-    pickup: 'Boduppal / Uppal Depot',
-    drop: 'Jangaon Bus Depot',
-    departureTime: 'Tomorrow, 07:30 AM',
-    seatsAvailable: 2,
-    perSeatPrice: 175,
-    paymentPreference: 'cash',
-    verified: true,
-    ac: true,
-    notes: 'Early morning commute. Playing acoustic indie playlist.'
-  },
-  {
-    id: 5,
-    driverName: 'Karthik Boyina',
-    driverRole: 'Software Developer',
-    rating: 5.0,
-    totalRides: 39,
-    avatar: 'https://images.unsplash.com/photo-1522075469751-3a6694fb2f61?auto=format&fit=crop&w=120&h=120&q=80',
-    vehicleType: 'bike',
-    vehicleName: 'Honda Activa 6G',
-    vehicleNumber: 'TS 08 MX 7820',
-    pickup: 'Uppal Metro Station Gate 2',
-    drop: 'Aler / Jangaon bypass',
-    departureTime: 'Tomorrow, 08:15 AM',
-    seatsAvailable: 1,
-    perSeatPrice: 100,
-    paymentPreference: 'both',
-    verified: true,
-    helmetProvided: true,
-    notes: 'Easy-paced ride. Strict lane safety.'
-  },
-  {
-    id: 4,
-    driverName: 'Suresh Goud',
-    driverRole: 'Local Shared Transit',
-    rating: 4.85,
-    totalRides: 310,
-    avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=120&h=120&q=80',
-    vehicleType: 'auto',
-    vehicleName: 'Bajaj Maxima Z CNG Auto',
-    vehicleNumber: 'TS 08 TC 2910',
-    pickup: 'Uppal Ring Road Metro',
-    drop: 'Aler / Jangaon Highway',
-    departureTime: 'Today, 06:45 PM',
-    seatsAvailable: 3,
-    perSeatPrice: 135,
-    paymentPreference: 'both',
-    verified: true,
-    notes: 'Direct highway corridor route, quick boarding, plenty of luggage space.'
-  }
-];
+// Real-Time Active Driver Rides Pool (starts clean with 0 mock rides)
+let availableRides = [];
 
 // Calculation Functions: Exact Real-Time Vehicle Cost & Operating Model
 const REALTIME_VEHICLE_SPECS = {
@@ -2226,19 +2094,16 @@ function openDriverIncomingModal(req) {
 
 function startIncomingTimer() {
   stopIncomingTimer();
-  state.incomingCountdown = 45;
   const badge = document.getElementById('driverIncomingTimerSeconds');
-  if (badge) badge.textContent = '45s';
+  if (badge) badge.textContent = 'Live';
 
   state.incomingRequestTimer = setInterval(() => {
-    state.incomingCountdown -= 1;
-    if (badge) badge.textContent = `${state.incomingCountdown}s`;
-    if (state.incomingCountdown <= 0) {
+    // Only dismiss if the request was cancelled or completed elsewhere
+    if (!state.incomingRequest || state.incomingRequest.status === 'cancelled' || state.incomingRequest.status === 'completed') {
       stopIncomingTimer();
       closeModal('driverIncomingRideModal');
-      showToast('Request expired.', 'info');
     }
-  }, 1000);
+  }, 1500);
 }
 
 function stopIncomingTimer() {
@@ -3329,9 +3194,10 @@ async function syncRidesFromDatabase() {
   if (!window.db || !window.db.rides) return;
   try {
     const data = await window.db.rides.fetchAll();
-    if (data && Array.isArray(data) && data.length > 0) {
-      console.log(`✅ Loaded ${data.length} live rides from Supabase table`);
-      availableRides = data.map(r => ({
+    if (data && Array.isArray(data)) {
+      // Filter out rider requests (REQ-...) so only actual driver rides appear
+      const driverRides = data.filter(r => !String(r.vehicle_number || '').startsWith('REQ-'));
+      availableRides = driverRides.map(r => ({
         id: r.id,
         driverName: r.driver_name,
         driverRole: r.driver_role || 'Verified Commuter',
@@ -3355,7 +3221,7 @@ async function syncRidesFromDatabase() {
       updateUI();
     }
   } catch (err) {
-    console.warn('⚠️ Supabase sync fallback to local cache:', err);
+    console.warn('⚠️ Supabase sync error:', err);
   }
 }
 

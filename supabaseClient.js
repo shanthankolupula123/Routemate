@@ -1658,8 +1658,8 @@ const db = {
                   fare: row.per_seat_price || 108,
                   distance: meta.distance || 84,
                   pin: meta.pin || '4821',
-                  vehicle_type: row.vehicle_type || 'any',
-                  vehicleType: row.vehicle_type || 'any',
+                  vehicle_type: meta.vehicleType || row.vehicle_type || 'any',
+                  vehicleType: meta.vehicleType || row.vehicle_type || 'any',
                   isFlexibleVehicle: Boolean(meta.isFlexible),
                   payment_method: meta.paymentMethod || 'Direct UPI',
                   status: 'searching',
@@ -1891,15 +1891,19 @@ const db = {
       const client = getSupabaseClient();
       if (client) {
         try {
+          // Supabase 'rides' table has check constraint 'rides_vehicle_type_check' accepting ('bike', 'car')
+          const reqType = request.vehicle_type || request.vehicleType || 'bike';
+          const dbVehicleType = (reqType === 'car') ? 'car' : 'bike';
+
           const dbRow = {
             driver_name: `${request.rider_name || 'Passenger'} (Rider Request)`,
             driver_role: request.rider_role || 'Commuter',
             avatar: request.rider_avatar || 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=120&h=120&q=80',
-            vehicle_type: request.vehicle_type || request.vehicleType || 'bike',
-            vehicle_name: reqData.vehiclePreferenceLabel || 'P2P Ride Request',
+            vehicle_type: dbVehicleType,
+            vehicle_name: reqData.vehiclePreferenceLabel || (reqType === 'car' ? 'Car / Cab' : 'Any / Custom Vehicle'),
             vehicle_number: request.id,
             pickup: request.pickup,
-            drop_location: request.drop,
+            drop_location: request.drop_location || request.drop,
             departure_time: 'Immediate',
             seats_available: request.seats || 1,
             per_seat_price: request.fare || 108,
@@ -1920,20 +1924,22 @@ const db = {
               pickupLng: request.pickupLng,
               dropLat: request.dropLat,
               dropLng: request.dropLng,
+              vehicleType: reqType,
               isFlexible: request.isFlexibleVehicle,
               paymentMethod: request.payment_method,
               createdAt: request.created_at
             })
           };
 
-          client.from('rides').insert([dbRow]).then(({ data, error }) => {
-            if (error) {
-              console.warn('Supabase rides insert note:', error.message);
-            } else {
-              console.log('✅ Supabase rides row inserted successfully for real-time driver sync:', request.id);
-            }
-          }).catch(e => console.warn('Supabase insert error:', e));
-        } catch (e) {}
+          const { data, error } = await client.from('rides').insert([dbRow]).select();
+          if (error) {
+            console.error('❌ Supabase rides insert error:', error.message);
+          } else {
+            console.log('✅ Supabase rides row inserted successfully for real-time driver sync:', request.id, data);
+          }
+        } catch (e) {
+          console.error('❌ Supabase insert exception:', e);
+        }
       }
 
       return { success: true, request };
@@ -2276,8 +2282,8 @@ const db = {
               fare: row.per_seat_price || 108,
               distance: meta.distance || 84,
               pin: meta.pin || '4821',
-              vehicle_type: row.vehicle_type || 'any',
-              vehicleType: row.vehicle_type || 'any',
+              vehicle_type: meta.vehicleType || row.vehicle_type || 'any',
+              vehicleType: meta.vehicleType || row.vehicle_type || 'any',
               isFlexibleVehicle: Boolean(meta.isFlexible),
               payment_method: meta.paymentMethod || 'Direct UPI',
               status: 'searching',

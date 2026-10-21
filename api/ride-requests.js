@@ -42,7 +42,7 @@ module.exports = async (req, res) => {
               fare: row.per_seat_price || 108,
               distance: meta.distance || 84,
               pin: meta.pin || '4821',
-              vehicle_type: row.vehicle_type || 'any',
+              vehicle_type: meta.vehicleType || row.vehicle_type || 'any',
               is_flexible_vehicle: Boolean(meta.isFlexible),
               payment_method: meta.paymentMethod || 'Direct UPI',
               status: 'searching',
