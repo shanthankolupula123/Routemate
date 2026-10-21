@@ -2736,6 +2736,14 @@ async function submitRideRating(event) {
     console.error('Feedback submission error:', err);
   }
 
+  // Real-time synchronization: immediately prepend to state.adminFeedbacks if active
+  if (!state.adminFeedbacks) state.adminFeedbacks = [];
+  if (!state.adminFeedbacks.some(f => f.id === feedbackPayload.id)) {
+    state.adminFeedbacks.unshift(feedbackPayload);
+    if (typeof updateAdminFeedbackMetrics === 'function') updateAdminFeedbackMetrics();
+    if (typeof renderAdminFeedbacks === 'function') renderAdminFeedbacks();
+  }
+
   // Update Driver Rating in availableRides and user profile
   const updatedAvg = submitResult?.driverRating?.average || star;
   updateDriverRatingAcrossApp(trip.driverName, trip.driverPhone, updatedAvg);
@@ -2947,6 +2955,10 @@ function closeModal(id) {
   if (modal) {
     modal.classList.add('hidden');
     modal.style.display = '';
+  }
+  if (id === 'adminPanelModal' && state.adminSyncTimer) {
+    clearInterval(state.adminSyncTimer);
+    state.adminSyncTimer = null;
   }
 }
 
@@ -5211,11 +5223,33 @@ async function openAdminPanelModal() {
     });
   }
 
+  // Set up periodic sync timer while Admin Panel is open (ensures serverless & multi-device realtime sync)
+  if (state.adminSyncTimer) clearInterval(state.adminSyncTimer);
+  state.adminSyncTimer = setInterval(() => {
+    const modalEl = document.getElementById('adminPanelModal');
+    if (!modalEl || modalEl.classList.contains('hidden')) {
+      if (state.adminSyncTimer) {
+        clearInterval(state.adminSyncTimer);
+        state.adminSyncTimer = null;
+      }
+      return;
+    }
+    if (state.activeAdminSection === 'feedback') {
+      loadAdminFeedbacks(false);
+    } else {
+      loadAdminKycSubmissions();
+    }
+  }, 4000);
+
   if (window.lucide) lucide.createIcons();
 }
 
 function handleAdminLogout() {
   state.isAdminAuthenticated = false;
+  if (state.adminSyncTimer) {
+    clearInterval(state.adminSyncTimer);
+    state.adminSyncTimer = null;
+  }
   if (state.adminRealtimeSubscription && typeof state.adminRealtimeSubscription.unsubscribe === 'function') {
     try { state.adminRealtimeSubscription.unsubscribe(); } catch(e){}
     state.adminRealtimeSubscribed = false;
@@ -5456,11 +5490,8 @@ function switchAdminSection(section) {
 }
 
 function refreshAdminPortal() {
-  if (state.activeAdminSection === 'feedback') {
-    loadAdminFeedbacks(true);
-  } else {
-    loadAdminKycSubmissions();
-  }
+  loadAdminKycSubmissions();
+  loadAdminFeedbacks(true);
 }
 
 async function loadAdminFeedbacks(showToastNotice = false) {
@@ -5480,10 +5511,84 @@ async function loadAdminFeedbacks(showToastNotice = false) {
     if (window.db && window.db.feedbacks) {
       feedbacks = await window.db.feedbacks.getAll();
     }
-    state.adminFeedbacks = Array.isArray(feedbacks) ? feedbacks : [];
+    if (!Array.isArray(feedbacks)) feedbacks = [];
+
+    // Merge from localStorage to guarantee immediate visibility of local submissions
+    try {
+      const localStored = JSON.parse(localStorage.getItem('routemate_feedbacks') || '[]');
+      if (Array.isArray(localStored)) {
+        localStored.forEach(lf => {
+          if (!feedbacks.some(f => f.id === lf.id)) {
+            feedbacks.unshift(lf);
+          }
+        });
+      }
+    } catch (e) {}
+
+    // Supply initial default feedback seeds if store is empty
+    if (feedbacks.length === 0) {
+      feedbacks = [
+        {
+          id: 'FB-SEED-01',
+          rideId: 'RIDE-101',
+          driverId: 'DRV-1',
+          driverName: 'Ramesh Kumar',
+          driverPhone: '+91 94942 85249',
+          driverAvatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=120&h=120&q=80',
+          driverVehicle: 'Bajaj Pulsar 150 (TS 08 EK 4321)',
+          riderId: 'USR-881',
+          riderName: 'Ananya Verma',
+          riderPhone: '+91 98480 23145',
+          rating: 5.0,
+          tags: ['Safe Driving', 'On Time', 'Clean Vehicle'],
+          feedbackText: 'Very smooth highway ride, followed speed limits and wore helmet. Highly recommended!',
+          hasSafetyConcern: false,
+          route: 'Uppal Ring Road Metro ➔ Jangaon Railway Station',
+          createdAt: new Date(Date.now() - 3600000 * 5).toISOString()
+        },
+        {
+          id: 'FB-SEED-02',
+          rideId: 'RIDE-102',
+          driverId: 'DRV-2',
+          driverName: 'Suresh Varma',
+          driverPhone: '+91 91234 56780',
+          driverAvatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=120&h=120&q=80',
+          driverVehicle: 'Hero Splendor Plus (TS 08 AB 9812)',
+          riderId: 'USR-902',
+          riderName: 'Kavitha Reddy',
+          riderPhone: '+91 99887 76655',
+          rating: 2.0,
+          tags: ['Rash Driving'],
+          feedbackText: 'Driver was speeding aggressively on the highway corridor and taking continuous phone calls. Passenger safety was neglected.',
+          hasSafetyConcern: true,
+          route: 'Uppal X Roads ➔ Bhongir Bypass',
+          createdAt: new Date(Date.now() - 3600000 * 2).toISOString()
+        },
+        {
+          id: 'FB-SEED-03',
+          rideId: 'RIDE-103',
+          driverId: 'DRV-3',
+          driverName: 'Priya Sharma',
+          driverPhone: '+91 79890 31924',
+          driverAvatar: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=120&h=120&q=80',
+          driverVehicle: 'Maruti Suzuki Swift VXi (TS 09 FH 9182)',
+          riderId: 'USR-773',
+          riderName: 'Rahul Mehra',
+          riderPhone: '+91 98490 11223',
+          rating: 4.0,
+          tags: ['Clean Vehicle', 'Polite & Friendly'],
+          feedbackText: 'Comfortable AC car ride from Uppal to Jangaon. Punctual departure and polite driver.',
+          hasSafetyConcern: false,
+          route: 'Uppal X Roads ➔ Jangaon Court Chowrasta',
+          createdAt: new Date(Date.now() - 3600000).toISOString()
+        }
+      ];
+    }
+
+    state.adminFeedbacks = feedbacks;
   } catch (err) {
     console.error('Error fetching feedbacks:', err);
-    state.adminFeedbacks = [];
+    state.adminFeedbacks = state.adminFeedbacks || [];
   }
 
   updateAdminFeedbackMetrics();
@@ -6046,28 +6151,32 @@ function renderAdminSubmissions() {
     const identifier = item.phone || item.id;
 
     return `
-      <div class="p-4 bg-slate-50 border ${isBlocked ? 'border-rose-300 bg-rose-50/20' : 'border-slate-200'} rounded-3xl space-y-3.5 shadow-xs">
+      <div class="p-3.5 sm:p-4 bg-slate-50 border ${isBlocked ? 'border-rose-300 bg-rose-50/20' : 'border-slate-200'} rounded-3xl space-y-3.5 shadow-xs transition">
         <!-- Header: Driver Info & Status -->
-        <div class="flex items-center justify-between">
-          <div class="flex items-center gap-3">
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-2 border-b border-slate-200/60">
+          <div class="flex items-center gap-3 min-w-0">
             ${item.avatar_url ? `
-              <img src="${item.avatar_url}" onclick="openAdminDocViewer('${item.avatar_url}', 'Driver Photo - ${item.name || 'Driver'}')" class="w-11 h-11 rounded-2xl object-cover border border-slate-300 cursor-pointer hover:opacity-90 transition flex-shrink-0" title="Click to enlarge" />
+              <img src="${item.avatar_url}" onclick="openAdminDocViewer('${item.avatar_url}', 'Driver Photo - ${item.name || 'Driver'}')" class="w-12 h-12 rounded-2xl object-cover border border-slate-300 cursor-pointer hover:opacity-90 transition flex-shrink-0" title="Click to enlarge" />
             ` : `
-              <div class="w-11 h-11 rounded-2xl bg-slate-200 text-slate-500 flex items-center justify-center font-bold text-xs flex-shrink-0">
-                <i data-lucide="user" class="w-5 h-5"></i>
+              <div class="w-12 h-12 rounded-2xl bg-slate-200 text-slate-500 flex items-center justify-center font-bold text-xs flex-shrink-0">
+                <i data-lucide="user" class="w-6 h-6"></i>
               </div>
             `}
-            <div>
-              <div class="flex items-center gap-2">
-                <h4 class="font-extrabold text-slate-900 text-sm">${item.name || 'Commuter'}</h4>
+            <div class="min-w-0 flex-1">
+              <div class="flex items-center gap-2 flex-wrap">
+                <h4 class="font-extrabold text-slate-900 text-sm truncate">${item.name || 'Commuter'}</h4>
                 ${statusBadge}
               </div>
-              <p class="text-[11px] font-mono text-slate-600 font-semibold">${item.phone || 'Phone hidden'}</p>
+              <p class="text-[11px] font-mono text-slate-600 font-semibold mt-0.5 flex items-center gap-1.5 flex-wrap">
+                <span>${item.phone || 'Phone hidden'}</span>
+                ${item.role ? `<span class="text-[10px] text-slate-400 uppercase font-bold">• ${item.role}</span>` : ''}
+              </p>
             </div>
           </div>
-          <span class="text-[10px] text-slate-400 font-medium">
-            ${item.kyc_submitted_at ? new Date(item.kyc_submitted_at).toLocaleDateString() : 'Recent'}
-          </span>
+          <div class="self-start sm:self-center flex items-center gap-1.5 text-[10px] text-slate-500 font-medium bg-white sm:bg-transparent px-2.5 py-1 sm:px-0 sm:py-0 rounded-full border border-slate-200 sm:border-0 flex-shrink-0">
+            <i data-lucide="calendar" class="w-3 h-3 text-slate-400"></i>
+            <span>${item.kyc_submitted_at ? new Date(item.kyc_submitted_at).toLocaleDateString() : 'Recent Submission'}</span>
+          </div>
         </div>
 
         <!-- Blocked Account Warning Banner -->
@@ -6081,63 +6190,98 @@ function renderAdminSubmissions() {
           </div>
         ` : ''}
 
-        <!-- Submitted Text Details -->
-        <div class="grid grid-cols-3 gap-2 text-[11px] bg-white p-2.5 rounded-2xl border border-slate-200">
-          <div>
-            <span class="text-[9px] uppercase font-bold text-slate-400 block">Aadhaar UID</span>
-            <span class="font-mono font-bold text-slate-800">${item.aadhaar_number || 'Not provided'}</span>
+        <!-- Submitted Text Details: Responsive Grid with Non-Overlapping Blocks -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-2.5 sm:gap-3 text-xs bg-white p-3 rounded-2xl border border-slate-200 shadow-2xs">
+          <!-- Aadhaar UID Card -->
+          <div class="p-2.5 rounded-xl bg-slate-50 border border-slate-100 flex flex-col justify-between min-w-0">
+            <div class="flex items-center gap-1.5 text-slate-500 mb-1">
+              <div class="w-5 h-5 rounded-md bg-blue-100 text-blue-700 flex items-center justify-center flex-shrink-0">
+                <i data-lucide="fingerprint" class="w-3 h-3"></i>
+              </div>
+              <span class="text-[10px] uppercase font-extrabold tracking-wider text-slate-500">Aadhaar UID</span>
+            </div>
+            <span class="font-mono font-bold text-slate-900 text-xs sm:text-sm break-all select-all tracking-wide mt-1">
+              ${item.aadhaar_number || '<span class="text-slate-400 font-normal italic text-[11px]">Not provided</span>'}
+            </span>
           </div>
-          <div>
-            <span class="text-[9px] uppercase font-bold text-slate-400 block">Driving License</span>
-            <span class="font-mono font-bold text-slate-800">${item.dl_number || 'Not provided'}</span>
-            ${item.dl_expiry ? `<span class="text-[9px] text-slate-500 block">Exp: ${item.dl_expiry}</span>` : ''}
+
+          <!-- Driving License Card -->
+          <div class="p-2.5 rounded-xl bg-slate-50 border border-slate-100 flex flex-col justify-between min-w-0">
+            <div>
+              <div class="flex items-center gap-1.5 text-slate-500 mb-1">
+                <div class="w-5 h-5 rounded-md bg-emerald-100 text-emerald-700 flex items-center justify-center flex-shrink-0">
+                  <i data-lucide="award" class="w-3 h-3"></i>
+                </div>
+                <span class="text-[10px] uppercase font-extrabold tracking-wider text-slate-500">Driving License</span>
+              </div>
+              <span class="font-mono font-bold text-slate-900 text-xs sm:text-sm break-all select-all tracking-wide block mt-1">
+                ${item.dl_number || '<span class="text-slate-400 font-normal italic text-[11px]">Not provided</span>'}
+              </span>
+            </div>
+            ${item.dl_expiry ? `<div class="mt-1.5"><span class="inline-block px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-800 border border-emerald-200 text-[10px] font-bold">Valid Thru: ${item.dl_expiry}</span></div>` : ''}
           </div>
-          <div>
-            <span class="text-[9px] uppercase font-bold text-slate-400 block">Vehicle RC</span>
-            <span class="font-mono font-bold text-slate-800">${item.rc_number || 'Not provided'}</span>
-            ${item.rc_vehicle_name ? `<span class="text-[9px] text-slate-500 block truncate font-medium">${item.rc_vehicle_name}</span>` : ''}
-            ${item.rc_chassis_number ? `<span class="text-[9px] font-mono text-purple-700 block truncate font-bold">Chassis: ${item.rc_chassis_number}</span>` : ''}
+
+          <!-- Vehicle RC & Chassis Card -->
+          <div class="p-2.5 rounded-xl bg-slate-50 border border-slate-100 flex flex-col justify-between min-w-0">
+            <div>
+              <div class="flex items-center gap-1.5 text-slate-500 mb-1">
+                <div class="w-5 h-5 rounded-md bg-purple-100 text-purple-700 flex items-center justify-center flex-shrink-0">
+                  <i data-lucide="truck" class="w-3 h-3"></i>
+                </div>
+                <span class="text-[10px] uppercase font-extrabold tracking-wider text-slate-500">Vehicle Registration</span>
+              </div>
+              <span class="font-mono font-bold text-slate-900 text-xs sm:text-sm break-all select-all tracking-wide block mt-1">
+                ${item.rc_number || '<span class="text-slate-400 font-normal italic text-[11px]">Not provided</span>'}
+              </span>
+              ${item.rc_vehicle_name ? `<span class="text-[11px] text-slate-600 font-medium block mt-1 break-words">${item.rc_vehicle_name}</span>` : ''}
+            </div>
+            ${item.rc_chassis_number ? `
+              <div class="mt-2 pt-2 border-t border-purple-100 flex flex-wrap items-center gap-1.5">
+                <span class="text-[9px] uppercase font-black text-purple-700 tracking-wider bg-purple-100 px-1.5 py-0.5 rounded border border-purple-200 flex-shrink-0">Chassis</span>
+                <span class="font-mono font-bold text-purple-950 text-[11px] sm:text-xs break-all select-all">${item.rc_chassis_number}</span>
+              </div>
+            ` : ''}
           </div>
         </div>
 
         <!-- Uploaded Document Images Thumbnail Bar -->
         <div>
-          <label class="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">Submitted Documents (Click to inspect)</label>
+          <label class="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">Submitted Documents (Click to inspect full size)</label>
           <div class="grid grid-cols-3 gap-2">
             <!-- Aadhaar Photo -->
-            <div onclick="openAdminDocViewer('${item.aadhaar_card_photo || ''}', 'Aadhaar Card Scan - ${item.name}')" class="relative group h-20 bg-white border border-slate-200 rounded-xl overflow-hidden cursor-pointer flex flex-col items-center justify-center p-1 hover:border-blue-500 transition shadow-2xs">
+            <div onclick="openAdminDocViewer('${item.aadhaar_card_photo || ''}', 'Aadhaar Card Scan - ${item.name || 'Driver'}')" class="relative group h-20 sm:h-24 bg-white border border-slate-200 rounded-xl overflow-hidden cursor-pointer flex flex-col items-center justify-center p-1 hover:border-blue-500 transition shadow-2xs">
               ${item.aadhaar_card_photo ? `
                 <img src="${item.aadhaar_card_photo}" class="w-full h-full object-cover rounded-lg" />
                 <div class="absolute inset-0 bg-slate-900/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition text-white text-[10px] font-bold">Inspect</div>
               ` : `
                 <i data-lucide="file-text" class="w-5 h-5 text-slate-400 mb-1"></i>
-                <span class="text-[9px] text-slate-400 font-medium">No Aadhaar</span>
+                <span class="text-[9px] text-slate-400 font-medium text-center">No Aadhaar</span>
               `}
-              <span class="absolute bottom-1 left-1 bg-black/70 text-white text-[8px] font-mono px-1 rounded">Aadhaar</span>
+              <span class="absolute bottom-1 left-1 bg-black/75 text-white text-[8px] font-mono px-1.5 py-0.5 rounded">Aadhaar</span>
             </div>
 
             <!-- Driving License Photo -->
-            <div onclick="openAdminDocViewer('${item.dl_photo || ''}', 'Driving License Scan - ${item.name}')" class="relative group h-20 bg-white border border-slate-200 rounded-xl overflow-hidden cursor-pointer flex flex-col items-center justify-center p-1 hover:border-blue-500 transition shadow-2xs">
+            <div onclick="openAdminDocViewer('${item.dl_photo || ''}', 'Driving License Scan - ${item.name || 'Driver'}')" class="relative group h-20 sm:h-24 bg-white border border-slate-200 rounded-xl overflow-hidden cursor-pointer flex flex-col items-center justify-center p-1 hover:border-blue-500 transition shadow-2xs">
               ${item.dl_photo ? `
                 <img src="${item.dl_photo}" class="w-full h-full object-cover rounded-lg" />
                 <div class="absolute inset-0 bg-slate-900/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition text-white text-[10px] font-bold">Inspect</div>
               ` : `
                 <i data-lucide="award" class="w-5 h-5 text-slate-400 mb-1"></i>
-                <span class="text-[9px] text-slate-400 font-medium">No DL</span>
+                <span class="text-[9px] text-slate-400 font-medium text-center">No License</span>
               `}
-              <span class="absolute bottom-1 left-1 bg-black/70 text-white text-[8px] font-mono px-1 rounded">License</span>
+              <span class="absolute bottom-1 left-1 bg-black/75 text-white text-[8px] font-mono px-1.5 py-0.5 rounded">License</span>
             </div>
 
             <!-- Vehicle RC Photo -->
-            <div onclick="openAdminDocViewer('${item.rc_photo || ''}', 'Vehicle RC Certificate - ${item.name}')" class="relative group h-20 bg-white border border-slate-200 rounded-xl overflow-hidden cursor-pointer flex flex-col items-center justify-center p-1 hover:border-blue-500 transition shadow-2xs">
+            <div onclick="openAdminDocViewer('${item.rc_photo || ''}', 'Vehicle RC Certificate - ${item.name || 'Driver'}')" class="relative group h-20 sm:h-24 bg-white border border-slate-200 rounded-xl overflow-hidden cursor-pointer flex flex-col items-center justify-center p-1 hover:border-blue-500 transition shadow-2xs">
               ${item.rc_photo ? `
                 <img src="${item.rc_photo}" class="w-full h-full object-cover rounded-lg" />
                 <div class="absolute inset-0 bg-slate-900/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition text-white text-[10px] font-bold">Inspect</div>
               ` : `
                 <i data-lucide="truck" class="w-5 h-5 text-slate-400 mb-1"></i>
-                <span class="text-[9px] text-slate-400 font-medium">No RC</span>
+                <span class="text-[9px] text-slate-400 font-medium text-center">No RC</span>
               `}
-              <span class="absolute bottom-1 left-1 bg-black/70 text-white text-[8px] font-mono px-1 rounded">Vehicle RC</span>
+              <span class="absolute bottom-1 left-1 bg-black/75 text-white text-[8px] font-mono px-1.5 py-0.5 rounded">Vehicle RC</span>
             </div>
           </div>
         </div>
@@ -6149,10 +6293,10 @@ function renderAdminSubmissions() {
         ` : ''}
 
         <!-- Admin Decision & Enforcement Actions -->
-        <div class="pt-2 border-t border-slate-200/80 flex items-center gap-2 flex-wrap">
+        <div class="pt-2.5 border-t border-slate-200/80 flex items-center gap-2 flex-wrap">
           <!-- Approval Action -->
           ${!isApproved && !isBlocked ? `
-            <button type="button" onclick="handleAdminApproveKyc('${identifier}')" class="flex-1 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition shadow-xs flex items-center justify-center gap-1.5 cursor-pointer active:scale-95">
+            <button type="button" onclick="handleAdminApproveKyc('${identifier}')" class="flex-1 min-w-[130px] py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition shadow-xs flex items-center justify-center gap-1.5 cursor-pointer active:scale-95">
               <i data-lucide="check-circle" class="w-4 h-4"></i>
               <span>Approve KYC</span>
             </button>
@@ -6160,7 +6304,7 @@ function renderAdminSubmissions() {
 
           <!-- Rejection Action -->
           ${!isRejected && !isBlocked ? `
-            <button type="button" onclick="openAdminRejectModal('${identifier}')" class="py-2 px-3 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1 cursor-pointer active:scale-95">
+            <button type="button" onclick="openAdminRejectModal('${identifier}')" class="py-2.5 px-3.5 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1 cursor-pointer active:scale-95">
               <i data-lucide="x-circle" class="w-3.5 h-3.5"></i>
               <span>Reject</span>
             </button>
@@ -6168,12 +6312,12 @@ function renderAdminSubmissions() {
 
           <!-- BLOCK / UNBLOCK ACCOUNT BUTTON -->
           ${!isBlocked ? `
-            <button type="button" onclick="openAdminBlockModal('${identifier}')" class="py-2 px-3 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold transition shadow-xs flex items-center justify-center gap-1.5 cursor-pointer active:scale-95" title="Suspend or block this driver">
+            <button type="button" onclick="openAdminBlockModal('${identifier}')" class="py-2.5 px-3.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold transition shadow-xs flex items-center justify-center gap-1.5 cursor-pointer active:scale-95" title="Suspend or block this driver">
               <i data-lucide="shield-alert" class="w-3.5 h-3.5"></i>
               <span>Block Driver</span>
             </button>
           ` : `
-            <button type="button" onclick="handleAdminUnblockDriver('${identifier}')" class="flex-1 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition shadow-xs flex items-center justify-center gap-1.5 cursor-pointer active:scale-95">
+            <button type="button" onclick="handleAdminUnblockDriver('${identifier}')" class="flex-1 min-w-[150px] py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition shadow-xs flex items-center justify-center gap-1.5 cursor-pointer active:scale-95">
               <i data-lucide="check-circle" class="w-4 h-4"></i>
               <span>Unblock & Restore Account</span>
             </button>
@@ -6181,8 +6325,8 @@ function renderAdminSubmissions() {
 
           <!-- Direct Phone Call Helper -->
           ${item.phone ? `
-            <a href="tel:${item.phone}" class="p-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl transition cursor-pointer flex items-center justify-center" title="Call Driver Directly">
-              <i data-lucide="phone" class="w-3.5 h-3.5"></i>
+            <a href="tel:${item.phone}" class="p-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl transition cursor-pointer flex items-center justify-center" title="Call Driver Directly">
+              <i data-lucide="phone" class="w-4 h-4"></i>
             </a>
           ` : ''}
         </div>
