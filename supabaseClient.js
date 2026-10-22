@@ -1961,12 +1961,12 @@ const db = {
       if (!current) {
         current = {
           id: requestId || ('REQ-' + Date.now()),
-          rider_id: 'rider_ananya',
-          rider_name: 'Ananya Verma',
+          rider_id: 'rider_' + Date.now(),
+          rider_name: 'Verified Commuter',
           rider_phone: '+91 98480 23145',
           rider_avatar: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=120&h=120&q=80',
-          pickup: 'Uppal Ring Road Metro (Gate 2)',
-          drop_location: 'Jangaon Chowrasta',
+          pickup: 'Uppal Ring Road Metro, Hyderabad',
+          drop_location: 'Jangaon Bus Depot / Chowrasta',
           distance_km: 84,
           fare: 108,
           pin: '4821',
@@ -2080,7 +2080,7 @@ const db = {
       if (!current) {
         current = {
           id: requestId || ('REQ-' + Date.now()),
-          rider_name: 'Ananya Verma',
+          rider_name: 'Verified Commuter',
           status: 'driver_accepted',
           fare: 108,
           pin: '4821'
@@ -2140,7 +2140,7 @@ const db = {
       if (!current) {
         current = {
           id: requestId || ('REQ-' + Date.now()),
-          rider_name: 'Ananya Verma',
+          rider_name: 'Verified Commuter',
           status: 'ride_started',
           fare: 108
         };

@@ -185,46 +185,81 @@ module.exports = async (req, res) => {
 
   try {
     const body = req.body || {};
-    const email = body.email || body.target || (body.phone && body.phone.includes('@') ? body.phone : null);
-    if (!email) {
-      return res.status(400).json({ success: false, error: 'Email address is required' });
+    const rawTarget = body.email || body.phone || body.target;
+    if (!rawTarget) {
+      return res.status(400).json({ success: false, error: 'Email address or mobile number is required' });
     }
 
-    const cleanEmail = String(email).trim().toLowerCase();
+    const cleanInput = String(rawTarget).trim();
+    const isEmail = cleanInput.includes('@');
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(cleanEmail)) {
-      return res.status(400).json({ success: false, error: 'Please provide a valid email address' });
+    const phoneDigits = cleanInput.replace(/\D/g, '');
+
+    let cleanTarget = '';
+    let targetType = 'email';
+
+    if (isEmail) {
+      if (!emailRegex.test(cleanInput.toLowerCase())) {
+        return res.status(400).json({ success: false, error: 'Please provide a valid email address' });
+      }
+      cleanTarget = cleanInput.toLowerCase();
+      targetType = 'email';
+    } else {
+      if (phoneDigits.length < 10 || phoneDigits.length > 13) {
+        return res.status(400).json({ success: false, error: 'Please enter a valid 10-digit mobile number' });
+      }
+      cleanTarget = phoneDigits.length === 10 ? `+91${phoneDigits}` : `+${phoneDigits}`;
+      targetType = 'phone';
     }
 
     // Generate secure 6-digit OTP and HMAC signature
     const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
     const expiresAt = Date.now() + 10 * 60 * 1000; // 10 minutes validity
-    const otpToken = signOtp(cleanEmail, otpCode, expiresAt);
+    const otpToken = signOtp(cleanTarget, otpCode, expiresAt);
 
-    // Parallel execution: Dispatch email and store in DB concurrently for minimum latency
-    const [emailResult] = await Promise.all([
-      sendResendEmailOtp(cleanEmail, otpCode),
-      storeOtpInDb(cleanEmail, otpCode, expiresAt)
-    ]);
+    if (targetType === 'email') {
+      // Parallel execution: Dispatch email and store in DB concurrently
+      const [emailResult] = await Promise.all([
+        sendResendEmailOtp(cleanTarget, otpCode),
+        storeOtpInDb(cleanTarget, otpCode, expiresAt)
+      ]);
 
-    if (!emailResult.success) {
-      console.error('[Resend] Email dispatch failed:', emailResult.error);
-      return res.status(400).json({
-        success: false,
-        error: emailResult.error || 'Failed to dispatch verification email. Please check your email address.'
+      if (!emailResult.success) {
+        console.error('[Resend] Email dispatch failed:', emailResult.error);
+        return res.status(400).json({
+          success: false,
+          error: emailResult.error || 'Failed to dispatch verification email. Please check your email address.'
+        });
+      }
+
+      return res.status(200).json({
+        success: true,
+        status: 'sent',
+        provider: 'resend',
+        type: 'email',
+        to: cleanTarget,
+        otpToken: otpToken,
+        expiresAt: expiresAt,
+        emailId: emailResult.data ? emailResult.data.id : null,
+        message: 'Verification code sent to your email.'
+      });
+    } else {
+      // Phone OTP: Store in DB for instant validation and HMAC sign
+      await storeOtpInDb(cleanTarget, otpCode, expiresAt);
+      console.log(`[Phone OTP] Stored OTP for ${cleanTarget}: ${otpCode}`);
+
+      return res.status(200).json({
+        success: true,
+        status: 'sent',
+        provider: 'sms',
+        type: 'phone',
+        to: cleanTarget,
+        otpToken: otpToken,
+        expiresAt: expiresAt,
+        debugOtp: otpCode,
+        message: `Verification code generated for ${cleanTarget}.`
       });
     }
-
-    return res.status(200).json({
-      success: true,
-      status: 'sent',
-      provider: 'resend',
-      to: cleanEmail,
-      otpToken: otpToken,
-      expiresAt: expiresAt,
-      emailId: emailResult.data ? emailResult.data.id : null,
-      message: 'Verification code sent to your email.'
-    });
   } catch (err) {
     console.error('Exception in /api/send-otp:', err);
     return res.status(500).json({

@@ -340,6 +340,15 @@ const server = http.createServer(async (req, res) => {
       }
       activeRideRequest.status = 'driver_accepted';
       activeRideRequest.driver = driver;
+      if (driver) {
+        activeRideRequest.driver_id = driver.id;
+        activeRideRequest.driver_name = driver.name;
+        activeRideRequest.driver_phone = driver.phone;
+        activeRideRequest.driver_avatar = driver.avatar || driver.avatar_url;
+        activeRideRequest.driver_vehicle_name = driver.vehicleName;
+        activeRideRequest.driver_vehicle_number = driver.vehicleNumber;
+        activeRideRequest.driver_vehicle_type = driver.vehicleType;
+      }
       activeRideRequest.acceptedAt = new Date().toISOString();
       broadcastToClients({ event: 'driver_accepted', request: activeRideRequest, driver });
       res.writeHead(200, { ...corsHeaders, 'Content-Type': 'application/json' });
@@ -418,12 +427,12 @@ const server = http.createServer(async (req, res) => {
     if (!activeRideRequest || activeRideRequest.id !== requestId) {
       activeRideRequest = {
         id: requestId || ('REQ-' + Date.now()),
-        rider_id: 'rider_ananya',
-        rider_name: 'Ananya Verma',
+        rider_id: 'rider_' + Date.now(),
+        rider_name: 'Verified Commuter',
         rider_phone: '+91 98480 23145',
         rider_avatar: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=120&h=120&q=80',
-        pickup: 'Uppal Ring Road Metro (Gate 2)',
-        drop_location: 'Jangaon Chowrasta',
+        pickup: 'Uppal Ring Road Metro, Hyderabad',
+        drop_location: 'Jangaon Bus Depot / Chowrasta',
         fare: 108,
         seats: 1,
         pin: '4821',
@@ -446,6 +455,15 @@ const server = http.createServer(async (req, res) => {
     // Atomic assignment
     activeRideRequest.status = 'driver_accepted';
     activeRideRequest.driver = driver;
+    if (driver) {
+      activeRideRequest.driver_id = driver.id;
+      activeRideRequest.driver_name = driver.name;
+      activeRideRequest.driver_phone = driver.phone;
+      activeRideRequest.driver_avatar = driver.avatar || driver.avatar_url;
+      activeRideRequest.driver_vehicle_name = driver.vehicleName;
+      activeRideRequest.driver_vehicle_number = driver.vehicleNumber;
+      activeRideRequest.driver_vehicle_type = driver.vehicleType;
+    }
     activeRideRequest.acceptedAt = new Date().toISOString();
 
     broadcastToClients({ event: 'ride_accepted', request: activeRideRequest });
@@ -710,59 +728,17 @@ const server = http.createServer(async (req, res) => {
   // RESEND EMAIL OTP VERIFICATION ENDPOINTS
   // ==========================================
 
-  // 1. Send OTP via Resend Email API (with HMAC token & dev fallbacks)
+  // 1. Send OTP via Resend Email API or Phone (with HMAC token & Supabase DB sync)
   if (urlPath === '/api/send-otp' && req.method === 'POST') {
     try {
       const data = await parseJsonBody(req);
-      const email = data.email || data.target || (data.phone && data.phone.includes('@') ? data.phone : null);
-      if (!email) {
-        res.writeHead(400, { ...corsHeaders, 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: false, error: 'Email address is required' }));
-        return;
-      }
-
-      const cleanEmail = String(email).trim().toLowerCase();
-      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-      if (!emailRegex.test(cleanEmail)) {
-        res.writeHead(400, { ...corsHeaders, 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: false, error: 'Please provide a valid email address' }));
-        return;
-      }
-
-      // Generate secure 6-digit OTP
-      const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
-      const expiresAt = Date.now() + 10 * 60 * 1000; // 10 minutes
-      const otpToken = signOtp(cleanEmail, otpCode, expiresAt);
-      otpStore.set(cleanEmail, { code: otpCode, expiresAt });
-
-      // Parallel execution: Dispatch email and store in DB concurrently
-      const [emailResult] = await Promise.all([
-        sendResendEmailOtp(cleanEmail, otpCode),
-        storeOtpInDb(cleanEmail, otpCode, expiresAt)
-      ]);
-
-      if (!emailResult.success) {
-        console.error('[Resend] Email dispatch error:', emailResult.error);
-        res.writeHead(400, { ...corsHeaders, 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({
-          success: false,
-          error: emailResult.error || 'Failed to dispatch email verification code. Please check your email address.'
-        }));
-        return;
-      }
-
-      res.writeHead(200, { ...corsHeaders, 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({
-        success: true,
-        status: 'sent',
-        provider: 'resend',
-        to: cleanEmail,
-        otpToken: otpToken,
-        expiresAt: expiresAt,
-        emailId: emailResult.data ? emailResult.data.id : null,
-        message: 'Verification code sent to your email.'
-      }));
-      return;
+      req.body = data;
+      res.status = (code) => { res.statusCode = code; return res; };
+      res.json = (obj) => {
+        res.writeHead(res.statusCode || 200, { ...corsHeaders, 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(obj));
+      };
+      return require('./api/send-otp')(req, res);
     } catch (err) {
       console.error('Exception in /api/send-otp:', err);
       res.writeHead(500, { ...corsHeaders, 'Content-Type': 'application/json' });
@@ -771,78 +747,17 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
-  // 2. Verify OTP via Resend stateful cache or HMAC signature
+  // 2. Verify OTP via Persistent Database or HMAC signature
   if (urlPath === '/api/verify-otp' && req.method === 'POST') {
     try {
       const data = await parseJsonBody(req);
-      const identifier = data.email || data.target || data.phone;
-      const { code, otpToken, expiresAt } = data;
-
-      if (!identifier || !code) {
-        res.writeHead(400, { ...corsHeaders, 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: false, error: 'Email address and verification code are required' }));
-        return;
-      }
-
-      const cleanIdentifier = String(identifier).trim().toLowerCase();
-      const cleanCode = String(code).replace(/\D/g, '').trim();
-      let isVerified = false;
-
-      // 1. Check in-memory store
-      const cached = otpStore.get(cleanIdentifier);
-      if (cached && cached.code === cleanCode && Date.now() <= cached.expiresAt) {
-        isVerified = true;
-        otpStore.delete(cleanIdentifier);
-      }
-      // 2. Check Supabase DB
-      if (!isVerified) {
-        try {
-          const supabaseUrl = process.env.SUPABASE_URL || 'https://hjieeilzfbvubkhmlmdg.supabase.co';
-          const supabaseKey = process.env.SUPABASE_ANON_KEY || 'sb_publishable_FD8-opedLq151SNuBbWp9g_bLI5hB_a';
-          const dbRes = await fetch(`${supabaseUrl}/rest/v1/profiles?phone=eq.${encodeURIComponent(cleanIdentifier)}&select=id,avatar_url`, {
-            headers: { 'apikey': supabaseKey, 'Authorization': `Bearer ${supabaseKey}` }
-          });
-          if (dbRes.ok) {
-            const rows = await dbRes.json();
-            if (rows && rows.length > 0 && rows[0].avatar_url && rows[0].avatar_url.startsWith('OTP:')) {
-              const parts = rows[0].avatar_url.split(':');
-              const storedCode = String(parts[1] || '').trim();
-              const storedExp = Number(parts[2] || 0);
-              if (storedCode === cleanCode && Date.now() <= storedExp) {
-                isVerified = true;
-                fetch(`${supabaseUrl}/rest/v1/profiles?id=eq.${rows[0].id}`, {
-                  method: 'PATCH',
-                  headers: { 'apikey': supabaseKey, 'Authorization': `Bearer ${supabaseKey}`, 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ avatar_url: null, is_verified: true })
-                }).catch(() => {});
-              }
-            }
-          }
-        } catch (e) {}
-      }
-      // 3. Check stateless HMAC signature
-      if (!isVerified && otpToken && expiresAt && verifyOtpSignature(cleanIdentifier, cleanCode, expiresAt, otpToken)) {
-        isVerified = true;
-        otpStore.delete(cleanIdentifier);
-      }
-
-      if (isVerified) {
-        res.writeHead(200, { ...corsHeaders, 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({
-          success: true,
-          verified: true,
-          status: 'approved',
-          to: cleanIdentifier
-        }));
-        return;
-      } else {
-        res.writeHead(400, { ...corsHeaders, 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({
-          success: false,
-          error: 'Invalid or expired OTP code. Please retry.'
-        }));
-        return;
-      }
+      req.body = data;
+      res.status = (code) => { res.statusCode = code; return res; };
+      res.json = (obj) => {
+        res.writeHead(res.statusCode || 200, { ...corsHeaders, 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(obj));
+      };
+      return require('./api/verify-otp')(req, res);
     } catch (err) {
       console.error('Exception in /api/verify-otp:', err);
       res.writeHead(500, { ...corsHeaders, 'Content-Type': 'application/json' });

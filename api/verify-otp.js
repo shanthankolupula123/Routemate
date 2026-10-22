@@ -71,39 +71,55 @@ module.exports = async (req, res) => {
     let isVerified = false;
     let isExpired = false;
 
+    // Build candidate variations for phone/email
+    const candidates = [cleanIdentifier];
+    if (!cleanIdentifier.includes('@')) {
+      const digits = cleanIdentifier.replace(/\D/g, '');
+      if (digits.length === 10) {
+        candidates.push(`+91${digits}`, `+91 ${digits}`, digits);
+      } else if (digits.length > 10) {
+        candidates.push(`+${digits}`, digits.slice(-10), `+91 ${digits.slice(-10)}`, `+91${digits.slice(-10)}`);
+      }
+    }
+
     // 1. Primary Check: Supabase Persistent Database
     try {
       const supabaseUrl = process.env.SUPABASE_URL || 'https://hjieeilzfbvubkhmlmdg.supabase.co';
       const supabaseKey = process.env.SUPABASE_ANON_KEY || 'sb_publishable_FD8-opedLq151SNuBbWp9g_bLI5hB_a';
-      const dbRes = await fetch(`${supabaseUrl}/rest/v1/profiles?phone=eq.${encodeURIComponent(cleanIdentifier)}&select=id,phone,avatar_url`, {
-        headers: {
-          'apikey': supabaseKey,
-          'Authorization': `Bearer ${supabaseKey}`
-        }
-      });
-      if (dbRes.ok) {
-        const rows = await dbRes.json();
-        if (rows && rows.length > 0 && rows[0].avatar_url && rows[0].avatar_url.startsWith('OTP:')) {
-          const parts = rows[0].avatar_url.split(':');
-          const storedCode = String(parts[1] || '').trim();
-          const storedExpires = Number(parts[2] || 0);
+      
+      for (const cand of candidates) {
+        if (isVerified) break;
+        const dbRes = await fetch(`${supabaseUrl}/rest/v1/profiles?phone=eq.${encodeURIComponent(cand)}&select=id,phone,avatar_url`, {
+          headers: {
+            'apikey': supabaseKey,
+            'Authorization': `Bearer ${supabaseKey}`
+          }
+        });
+        if (dbRes.ok) {
+          const rows = await dbRes.json();
+          if (rows && rows.length > 0 && rows[0].avatar_url && rows[0].avatar_url.startsWith('OTP:')) {
+            const parts = rows[0].avatar_url.split(':');
+            const storedCode = String(parts[1] || '').trim();
+            const storedExpires = Number(parts[2] || 0);
 
-          if (storedCode === cleanCode) {
-            if (Date.now() <= storedExpires) {
-              isVerified = true;
-              console.log(`[Verify] OTP successfully verified via database for ${cleanIdentifier}`);
-              // Clear stored code to prevent replay attacks
-              fetch(`${supabaseUrl}/rest/v1/profiles?id=eq.${rows[0].id}`, {
-                method: 'PATCH',
-                headers: {
-                  'apikey': supabaseKey,
-                  'Authorization': `Bearer ${supabaseKey}`,
-                  'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ avatar_url: null, is_verified: true })
-              }).catch(() => {});
-            } else {
-              isExpired = true;
+            if (storedCode === cleanCode) {
+              if (Date.now() <= storedExpires) {
+                isVerified = true;
+                console.log(`[Verify] OTP successfully verified via database for ${cand}`);
+                // Clear stored code to prevent replay attacks
+                fetch(`${supabaseUrl}/rest/v1/profiles?id=eq.${rows[0].id}`, {
+                  method: 'PATCH',
+                  headers: {
+                    'apikey': supabaseKey,
+                    'Authorization': `Bearer ${supabaseKey}`,
+                    'Content-Type': 'application/json'
+                  },
+                  body: JSON.stringify({ avatar_url: null, is_verified: true })
+                }).catch(() => {});
+                break;
+              } else {
+                isExpired = true;
+              }
             }
           }
         }
@@ -117,9 +133,14 @@ module.exports = async (req, res) => {
       const expNum = Number(expiresAt);
       if (Date.now() > expNum) {
         isExpired = true;
-      } else if (verifyOtpSignature(cleanIdentifier, cleanCode, expNum, otpToken)) {
-        isVerified = true;
-        console.log(`[Verify] OTP successfully verified via HMAC signature for ${cleanIdentifier}`);
+      } else {
+        for (const cand of candidates) {
+          if (verifyOtpSignature(cand, cleanCode, expNum, otpToken)) {
+            isVerified = true;
+            console.log(`[Verify] OTP successfully verified via HMAC signature for ${cand}`);
+            break;
+          }
+        }
       }
     }
 
