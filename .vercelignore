@@ -7,3 +7,4 @@ android/
 generate-icons.py
 schema.sql
 www/
+server.js
