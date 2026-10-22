@@ -753,7 +753,7 @@ function switchMode(newMode) {
   }
 }
 
-// Render Driver Mode View with Strict Admin KYC Gate
+// Render Driver Mode View with complete interactive controls & options
 function renderDriverModeView() {
   const driverView = document.getElementById('driverModeView');
   if (!driverView) return;
@@ -764,32 +764,29 @@ function renderDriverModeView() {
   const kycBlockedCard = document.getElementById('driverKycBlockedCard');
   const activeDutyContent = document.getElementById('driverActiveDutyContent');
 
+  // ALWAYS display the duty interface so all buttons, corridors, vehicle selection & fuel math are accessible
+  if (kycBlockedCard) kycBlockedCard.classList.add('hidden');
+  if (activeDutyContent) activeDutyContent.classList.remove('hidden');
+
   if (!isKycApproved) {
-    // 1. Unverified or Pending KYC: Strictly lock driver broadcasting
+    // Unverified: strictly keep driver broadcasting OFFLINE
     state.driverOnline = false;
-    if (kycBlockedCard) kycBlockedCard.classList.remove('hidden');
-    if (activeDutyContent) activeDutyContent.classList.add('hidden');
-
-    renderDriverKycBlockedState(user);
-    showToast('🛡️ Driver duty locked: Admin KYC verification is required to offer rides.', 'warning');
+    showToast('🛡️ Driver Mode: Complete KYC verification to turn on broadcasting.', 'warning');
   } else {
-    // 2. Verified Driver: Render full broadcast duty console
-    if (kycBlockedCard) kycBlockedCard.classList.add('hidden');
-    if (activeDutyContent) activeDutyContent.classList.remove('hidden');
-
+    // Verified driver: enable broadcasting duty by default
     if (state.driverOnline === undefined) {
       state.driverOnline = true;
     }
-
-    syncDriverOnlineToggleUI();
-    syncDriverCorridorInputs();
-    renderDriverIncomingRequest();
-    renderKycStatus();
-
-    if (window.db && window.db.matching) {
-      window.db.matching.syncActiveRequest();
-    }
     showToast('Driver Mode active. Live corridor listening enabled.', 'info');
+  }
+
+  syncDriverOnlineToggleUI();
+  syncDriverCorridorInputs();
+  renderDriverIncomingRequest();
+  renderKycStatus();
+
+  if (window.db && window.db.matching && isKycApproved && state.driverOnline) {
+    window.db.matching.syncActiveRequest();
   }
 
   if (window.lucide) lucide.createIcons();
@@ -1620,7 +1617,10 @@ function syncDriverOnlineToggleUI() {
   const beaconRing = document.getElementById('driverOnlineBeaconRing');
   const statusIcon = document.getElementById('driverOnlineStatusIcon');
 
-  if (state.driverOnline) {
+  const user = state.currentUser;
+  const isKycApproved = (typeof isDriverKycApproved === 'function') ? isDriverKycApproved(user) : false;
+
+  if (state.driverOnline && isKycApproved) {
     if (btn) btn.className = 'w-16 h-9 rounded-full bg-emerald-500 p-1 flex items-center transition-colors shadow-inner flex-shrink-0 cursor-pointer';
     if (pill) pill.className = 'w-7 h-7 rounded-full bg-white shadow-md transform translate-x-7 driver-toggle-thumb flex items-center justify-center';
     if (dot) dot.className = 'w-2.5 h-2.5 rounded-full bg-emerald-500';
@@ -1630,8 +1630,8 @@ function syncDriverOnlineToggleUI() {
       statusPill.className = 'text-[10px] font-extrabold uppercase tracking-wider bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full';
     }
     if (subtitle) {
-      const p = (state.pickup || 'Pickup').split(',')[0].trim();
-      const d = (state.drop || 'Destination').split(',')[0].trim();
+      const p = (state.pickup || state.driverCorridorPickup || 'Uppal').split(',')[0].trim();
+      const d = (state.drop || state.driverCorridorDrop || 'Jangaon').split(',')[0].trim();
       subtitle.textContent = `${p} ➔ ${d} • Ready for passenger requests`;
     }
     if (badgeIcon) {
@@ -1640,15 +1640,29 @@ function syncDriverOnlineToggleUI() {
     if (beaconRing) beaconRing.classList.remove('hidden');
     if (statusIcon) statusIcon.setAttribute('data-lucide', 'radio');
   } else {
+    state.driverOnline = false;
     if (btn) btn.className = 'w-16 h-9 rounded-full bg-slate-300 p-1 flex items-center transition-colors shadow-inner flex-shrink-0 cursor-pointer';
     if (pill) pill.className = 'w-7 h-7 rounded-full bg-white shadow-md transform translate-x-0 driver-toggle-thumb flex items-center justify-center';
     if (dot) dot.className = 'w-2.5 h-2.5 rounded-full bg-slate-400';
     if (title) title.textContent = 'You are Offline';
     if (statusPill) {
-      statusPill.textContent = 'Off-Duty';
-      statusPill.className = 'text-[10px] font-extrabold uppercase tracking-wider bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full';
+      if (!isKycApproved) {
+        statusPill.textContent = 'KYC Required';
+        statusPill.className = 'text-[10px] font-extrabold uppercase tracking-wider bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full';
+      } else {
+        statusPill.textContent = 'Off-Duty';
+        statusPill.className = 'text-[10px] font-extrabold uppercase tracking-wider bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full';
+      }
     }
-    if (subtitle) subtitle.textContent = 'Toggle Go Online above to start accepting passenger splits';
+    if (subtitle) {
+      if (!isKycApproved) {
+        subtitle.textContent = 'Complete KYC verification above to turn on broadcasting';
+      } else {
+        const p = (state.pickup || state.driverCorridorPickup || 'Uppal').split(',')[0].trim();
+        const d = (state.drop || state.driverCorridorDrop || 'Jangaon').split(',')[0].trim();
+        subtitle.textContent = `${p} ➔ ${d} • Toggle Go Online above to start accepting passenger splits`;
+      }
+    }
     if (badgeIcon) {
       badgeIcon.className = 'relative z-10 w-12 h-12 rounded-2xl bg-slate-400 text-white flex items-center justify-center shadow-md transition-all';
     }
@@ -1718,15 +1732,34 @@ function renderDriverIncomingRequest() {
   if (!container) return;
 
   if (!state.driverOnline) {
-    container.innerHTML = `
-      <div class="bg-white rounded-3xl p-6 border border-slate-200 text-center shadow-sm">
-        <div class="w-12 h-12 rounded-2xl bg-slate-100 text-slate-400 flex items-center justify-center mx-auto mb-3">
-          <i data-lucide="power-off" class="w-6 h-6"></i>
+    const user = state.currentUser;
+    const isApproved = (typeof isDriverKycApproved === 'function') ? isDriverKycApproved(user) : false;
+
+    if (!isApproved) {
+      container.innerHTML = `
+        <div class="bg-white rounded-3xl p-6 border border-amber-200 text-center shadow-sm">
+          <div class="w-12 h-12 rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center mx-auto mb-3">
+            <i data-lucide="shield-alert" class="w-6 h-6"></i>
+          </div>
+          <h4 class="font-bold text-slate-800 text-sm">Driver Duty on Standby</h4>
+          <p class="text-xs text-slate-500 mt-1 max-w-xs mx-auto">Admin KYC verification is required before receiving passenger requests along this highway corridor.</p>
+          <button type="button" onclick="openKycModal()" class="mt-3 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition shadow-xs cursor-pointer active:scale-95 inline-flex items-center gap-1.5">
+            <i data-lucide="upload" class="w-3.5 h-3.5"></i>
+            <span>Upload KYC Documents</span>
+          </button>
         </div>
-        <h4 class="font-bold text-slate-800 text-sm">You are currently Offline</h4>
-        <p class="text-xs text-slate-400 mt-1 max-w-xs mx-auto">Toggle "Go Online" above to start receiving live passenger requests along your corridor.</p>
-      </div>
-    `;
+      `;
+    } else {
+      container.innerHTML = `
+        <div class="bg-white rounded-3xl p-6 border border-slate-200 text-center shadow-sm">
+          <div class="w-12 h-12 rounded-2xl bg-slate-100 text-slate-400 flex items-center justify-center mx-auto mb-3">
+            <i data-lucide="power-off" class="w-6 h-6"></i>
+          </div>
+          <h4 class="font-bold text-slate-800 text-sm">You are currently Offline</h4>
+          <p class="text-xs text-slate-400 mt-1 max-w-xs mx-auto">Toggle "Go Online" above to start receiving live passenger requests along your corridor.</p>
+        </div>
+      `;
+    }
     if (window.lucide) lucide.createIcons();
     return;
   }
