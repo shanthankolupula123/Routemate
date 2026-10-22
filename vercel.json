@@ -4,13 +4,13 @@
   "buildCommand": "node prepare-www.js",
   "outputDirectory": "www",
   "rewrites": [
-    { "source": "/api/ride-requests/(.*)", "destination": "/api/ride-requests" },
-    { "source": "/api/kyc/(.*)", "destination": "/api/kyc" },
-    { "source": "/api/feedbacks/(.*)", "destination": "/api/feedbacks" }
+    { "source": "/api/ride-requests/:match*", "destination": "/api/ride-requests" },
+    { "source": "/api/kyc/:match*", "destination": "/api/kyc" },
+    { "source": "/api/feedbacks/:match*", "destination": "/api/feedbacks" }
   ],
   "headers": [
     {
-      "source": "/api/(.*)",
+      "source": "/api/:match*",
       "headers": [
         { "key": "Access-Control-Allow-Credentials", "value": "true" },
         { "key": "Access-Control-Allow-Origin", "value": "*" },
@@ -19,7 +19,7 @@
       ]
     },
     {
-      "source": "/(.*)",
+      "source": "/:match*",
       "headers": [
         { "key": "Cache-Control", "value": "public, max-age=0, must-revalidate" },
         { "key": "Pragma", "value": "no-cache" }
