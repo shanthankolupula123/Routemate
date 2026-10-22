@@ -1,0 +1,8 @@
+android/
+*.apk
+*.aab
+*.bat
+*.cer
+*.jks
+generate-icons.py
+schema.sql
