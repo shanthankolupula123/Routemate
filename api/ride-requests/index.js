@@ -1,4 +1,4 @@
-const { getActiveRide, saveActiveRide, clearActiveRide } = require('./store');
+const { getActiveRide, saveActiveRide, clearActiveRide } = require('./_store');
 
 module.exports = async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
