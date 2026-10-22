@@ -2,7 +2,6 @@
   "name": "routemate",
   "version": "1.0.0",
   "description": "> **\"Share the Ride, Split the Cost\"**",
-  "main": "app.js",
   "scripts": {
     "dev": "node --use-system-ca server.js",
     "start": "node server.js",
