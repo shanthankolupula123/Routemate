@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "> **\"Share the Ride, Split the Cost\"**",
   "engines": {
-    "node": "20.x"
+    "node": "24.x"
   },
   "scripts": {
     "dev": "node --use-system-ca server.js",
