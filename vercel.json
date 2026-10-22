@@ -1,9 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "framework": null,
   "cleanUrls": true,
-  "buildCommand": "node prepare-www.js",
-  "outputDirectory": "www",
   "headers": [
     {
       "source": "/api/(.*)",
