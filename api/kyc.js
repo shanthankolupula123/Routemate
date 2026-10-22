@@ -1,13 +1,15 @@
-const { getStore, saveStore } = require('../_kyc-store');
+const { getStore, saveStore } = require('./_kyc-store');
 
 module.exports = async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, apikey');
 
   if (req.method === 'OPTIONS') {
     return res.status(204).end();
   }
+
+  const url = req.url || '';
 
   if (req.method === 'GET') {
     const submissions = getStore();
@@ -70,8 +72,14 @@ module.exports = async (req, res) => {
     }
     data = data || {};
 
+    let action = data.action;
+    if (!action) {
+      if (url.includes('/decision')) action = 'decision';
+      else if (url.includes('/notify')) action = 'notify';
+    }
+
     const list = getStore();
-    if (data.action === 'decision') {
+    if (action === 'decision') {
       const target = list.find(s => 
         s.id === data.id || 
         (s.phone && s.phone === data.id) || 

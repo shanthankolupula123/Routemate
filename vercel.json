@@ -3,6 +3,11 @@
   "cleanUrls": true,
   "buildCommand": "node prepare-www.js",
   "outputDirectory": "www",
+  "rewrites": [
+    { "source": "/api/ride-requests/(.*)", "destination": "/api/ride-requests" },
+    { "source": "/api/kyc/(.*)", "destination": "/api/kyc" },
+    { "source": "/api/feedbacks/(.*)", "destination": "/api/feedbacks" }
+  ],
   "headers": [
     {
       "source": "/api/(.*)",

@@ -9,6 +9,8 @@ module.exports = async (req, res) => {
     return res.status(204).end();
   }
 
+  const url = req.url || '';
+
   // GET: Fetch currently active ride request
   if (req.method === 'GET') {
     let active = getActiveRide();
@@ -63,7 +65,14 @@ module.exports = async (req, res) => {
     }
     data = data || {};
 
-    const action = data.action || (req.query && req.query.action) || 'create';
+    let action = data.action || (req.query && req.query.action);
+    if (!action) {
+      if (url.includes('/accept')) action = 'accept';
+      else if (url.includes('/start')) action = 'start';
+      else if (url.includes('/complete')) action = 'complete';
+      else if (url.includes('/cancel')) action = 'cancel';
+      else action = 'create';
+    }
 
     // 1. Create Ride Request
     if (action === 'create' || (!action && data.fromText)) {
@@ -78,7 +87,7 @@ module.exports = async (req, res) => {
       return res.status(200).json({ success: true, request: activeRideRequest });
     }
 
-    // 2. Accept Ride Request (Atomic lock for first responding driver)
+    // 2. Accept Ride Request
     if (action === 'accept') {
       const active = getActiveRide();
       const requestId = data.requestId || (active ? active.id : null);

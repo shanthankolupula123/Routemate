@@ -1,4 +1,4 @@
-const { getStore, saveStore } = require('../_feedbacks-store');
+const { getStore, saveStore } = require('./_feedbacks-store');
 
 module.exports = async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -8,6 +8,8 @@ module.exports = async (req, res) => {
   if (req.method === 'OPTIONS') {
     return res.status(204).end();
   }
+
+  const url = req.url || '';
 
   if (req.method === 'GET') {
     const feedbacks = getStore();
@@ -21,10 +23,16 @@ module.exports = async (req, res) => {
     }
     data = data || {};
 
+    let action = data.action;
+    if (!action) {
+      if (url.includes('/flag')) action = 'flag';
+      else if (url.includes('/adjust-rating')) action = 'adjust-rating';
+    }
+
     const list = getStore();
 
     // 1. Action: Flag / Unflag Feedback Review
-    if (data.action === 'flag') {
+    if (action === 'flag') {
       const feedbackId = data.feedbackId || data.id;
       const fb = list.find(f => f.id === feedbackId);
       if (fb) {
@@ -38,7 +46,7 @@ module.exports = async (req, res) => {
     }
 
     // 2. Action: Adjust Driver Rating
-    if (data.action === 'adjust-rating') {
+    if (action === 'adjust-rating') {
       const feedbackId = data.feedbackId || data.id;
       const newRating = parseFloat(data.newRating || data.rating);
       const reason = data.reason || 'Rating moderated by administrator';
@@ -58,21 +66,24 @@ module.exports = async (req, res) => {
     // 3. New Customer Rating & Feedback Submission
     const feedback = {
       id: data.id || ('FB-' + Date.now().toString(36).toUpperCase()),
-      rideId: data.rideId || data.ride_id || null,
-      driverId: data.driverId || data.driver_id || null,
-      driverName: data.driverName || data.driver_name || 'Verified Commuter',
-      driverPhone: data.driverPhone || data.driver_phone || null,
-      driverAvatar: data.driverAvatar || data.driver_avatar || null,
-      driverVehicle: data.driverVehicle || data.driver_vehicle || 'Commuter Vehicle',
-      riderId: data.riderId || data.rider_id || null,
-      riderName: data.riderName || data.rider_name || 'Commuter',
-      riderPhone: data.riderPhone || data.rider_phone || null,
-      rating: parseFloat(data.rating || 5.0),
-      tags: Array.isArray(data.tags) ? data.tags : [],
-      feedbackText: data.feedbackText || data.feedback_text || '',
-      hasSafetyConcern: Boolean(data.hasSafetyConcern || data.has_safety_concern),
-      route: data.route || 'Uppal ➔ Jangaon',
-      createdAt: data.createdAt || data.created_at || new Date().toISOString()
+      rideId: data.rideId || ('RIDE-' + Date.now().toString(36).toUpperCase()),
+      passengerName: data.passengerName || 'Passenger',
+      passengerAvatar: data.passengerAvatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=120&h=120&q=80',
+      driverId: data.driverId || 'DRV-UNKNOWN',
+      driverName: data.driverName || 'Verified Commuter',
+      rating: parseFloat(data.rating) || 5,
+      cleanlinessRating: parseInt(data.cleanlinessRating, 10) || 5,
+      punctualityRating: parseInt(data.punctualityRating, 10) || 5,
+      safetyRating: parseInt(data.safetyRating, 10) || 5,
+      feedbackText: data.feedbackText || '',
+      compliments: Array.isArray(data.compliments) ? data.compliments : [],
+      submittedAt: data.submittedAt || new Date().toISOString(),
+      is_flagged: false,
+      flagged_at: null,
+      flag_reason: null,
+      is_moderated: false,
+      moderated_at: null,
+      moderation_reason: null
     };
 
     list.unshift(feedback);
