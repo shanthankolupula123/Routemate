@@ -44,7 +44,7 @@
   <meta http-equiv="Expires" content="0" />
 
   <!-- Custom Styles -->
-  <link rel="stylesheet" href="styles.css?v=20261022_live" />
+  <link rel="stylesheet" href="styles.css?v=20261022_v26" />
 </head>
 <body class="bg-slate-100 min-h-screen text-slate-800 antialiased pb-36 md:pb-24">
 
@@ -848,6 +848,7 @@
             <!-- Injected dynamically via app.js -->
           </div>
         </div>
+      </div> <!-- /riderModeView -->
 
         <!-- 5. DRIVER MODE UI COMPONENT & INTERACTION BLOCK -->
         <div id="driverModeView" class="hidden space-y-4 pt-1 pb-24">
@@ -946,7 +947,13 @@
                   Uppal ➔ Bhongir (38km)
                 </button>
                 <button type="button" onclick="setDriverRoutePreset('LB Nagar', 'Suryapet')" class="flex-shrink-0 px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium rounded-lg transition cursor-pointer">
-                  LB Nagar ➔ Suryapet
+                  LB Nagar ➔ Suryapet (135km)
+                </button>
+                <button type="button" onclick="setDriverRoutePreset('Secunderabad', 'Siddipet')" class="flex-shrink-0 px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium rounded-lg transition cursor-pointer">
+                  Secunderabad ➔ Siddipet (102km)
+                </button>
+                <button type="button" onclick="setDriverRoutePreset('Mehdipatnam', 'Shadnagar')" class="flex-shrink-0 px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium rounded-lg transition cursor-pointer">
+                  Mehdipatnam ➔ Shadnagar (50km)
                 </button>
               </div>
             </div>
@@ -1050,6 +1057,18 @@
                 <p class="text-[9px] text-blue-100" id="driverLiveSplitSubtitle">Exact Fuel Split</p>
               </div>
             </div>
+          </div>
+
+          <!-- 5. Broadcast & Publish Corridor Pool CTA Button -->
+          <div class="pt-1">
+            <button id="btnBroadcastDriverRide" type="button" onclick="publishDriverCorridorRide()" class="w-full py-4 gradient-brand hover:brightness-105 text-white rounded-2xl text-xs font-black shadow-lg shadow-blue-500/25 active:scale-[0.98] transition-all flex items-center justify-center gap-2 cursor-pointer">
+              <i data-lucide="radio" class="w-4 h-4"></i>
+              <span>Broadcast Corridor Ride (<span id="driverPublishBtnFare">₹108</span> / seat)</span>
+            </button>
+            <p class="text-[10px] text-center text-slate-400 mt-1.5 flex items-center justify-center gap-1">
+              <i data-lucide="shield-check" class="w-3.5 h-3.5 text-emerald-600"></i>
+              <span>Admin KYC Verified Drivers Only • 0% Platform Commission</span>
+            </p>
           </div>
 
           <!-- Active Incoming Passenger Request Card Section -->
@@ -1300,6 +1319,7 @@
                 </div>
               </div>
               <i data-lucide="chevron-right" class="w-4 h-4 text-slate-400 group-hover:translate-x-0.5 transition"></i>
+            </button>
           </div>
         </div>
 
@@ -3332,16 +3352,16 @@
     };
   </script>
   <!-- Interactive Maps Engine (Leaflet + OSM with Google Maps fallback) -->
-  <script src="maps.js?v=20261021_rev15"></script>
+  <script src="maps.js?v=20261022_v26"></script>
   <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCpZp3uUEEPF5ZJeVuuQRSGZxBDIgPuMqA&libraries=places,geometry&callback=initGoogleMap" async defer></script>
   <!-- Razorpay Standard Checkout SDK -->
   <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
-  <script src="payment.js?v=20261021_rev15"></script>
+  <script src="payment.js?v=20261022_v26"></script>
   <!-- Tesseract.js Pure Client-Side WebAssembly OCR Engine v5 -->
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
   <!-- Supabase JS Client SDK v2 -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="supabaseClient.js?v=20261022_live"></script>
-  <script src="app.js?v=20261022_live"></script>
+  <script src="supabaseClient.js?v=20261022_v26"></script>
+  <script src="app.js?v=20261022_v26"></script>
 </body>
 </html>

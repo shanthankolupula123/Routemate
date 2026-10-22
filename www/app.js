@@ -907,6 +907,8 @@ function syncDriverCorridorInputs() {
     const calc = calculateFuelShare(dist, state.driverVehicleType || 'bike');
     const costEl = document.getElementById('driverRecCostPerSeat');
     if (costEl) costEl.textContent = calc.perSeat || 108;
+    const btnFare = document.getElementById('driverPublishBtnFare');
+    if (btnFare) btnFare.textContent = `₹${calc.perSeat || 108}`;
   }
 }
 
@@ -991,6 +993,8 @@ function setDriverVehicleType(type) {
 
   const costEl = document.getElementById('driverRecCostPerSeat');
   if (costEl) costEl.textContent = calc.perSeat || (type === 'bike' ? 108 : 185);
+  const btnFare = document.getElementById('driverPublishBtnFare');
+  if (btnFare) btnFare.textContent = `₹${calc.perSeat || (type === 'bike' ? 108 : 185)}`;
 
   updateUI();
   showToast(`Vehicle type set to ${type === 'bike' ? 'Motorcycle (1 Seat)' : 'Car (Multi-Seat)'}`, 'info');
@@ -1018,6 +1022,8 @@ function setDriverRoutePreset(pickup, drop) {
   const calc = calculateFuelShare(dist, state.driverVehicleType || 'bike');
   const costEl = document.getElementById('driverRecCostPerSeat');
   if (costEl) costEl.textContent = calc.perSeat || 108;
+  const btnFare = document.getElementById('driverPublishBtnFare');
+  if (btnFare) btnFare.textContent = `₹${calc.perSeat || 108}`;
   const subtitle = document.getElementById('driverOnlineSubtitle');
   if (subtitle) subtitle.textContent = `${pickup.split(',')[0]} ➔ ${drop.split(',')[0]} corridor • Ready for passenger requests`;
   showToast(`Driver corridor set to ${pickup.split(',')[0]} ➔ ${drop.split(',')[0]} (${dist} km)`, 'info');
@@ -1035,7 +1041,79 @@ function handleDriverCorridorChange() {
   const calc = calculateFuelShare(dist, state.driverVehicleType || 'bike');
   const costEl = document.getElementById('driverRecCostPerSeat');
   if (costEl) costEl.textContent = calc.perSeat || 108;
+  const btnFare = document.getElementById('driverPublishBtnFare');
+  if (btnFare) btnFare.textContent = `₹${calc.perSeat || 108}`;
 }
+
+// Broadcast and Publish Highway Corridor Ride
+async function publishDriverCorridorRide() {
+  const user = state.currentUser;
+  const isApproved = (typeof isDriverKycApproved === 'function') ? isDriverKycApproved(user) : false;
+
+  if (!isApproved) {
+    showToast('🛡️ Admin KYC verification is required before offering corridor rides.', 'error');
+    openKycModal();
+    return;
+  }
+
+  const pickup = document.getElementById('driverCorridorPickup')?.value || state.driverCorridorPickup || 'Uppal Ring Road Metro, Hyderabad';
+  const drop = document.getElementById('driverCorridorDrop')?.value || state.driverCorridorDrop || 'Jangaon Bus Depot / Chowrasta';
+  const vehicleType = state.driverVehicleType || 'bike';
+  const seats = state.driverSeatsOffered || (vehicleType === 'car' ? 3 : 1);
+  const fare = parseInt(document.getElementById('driverRecCostPerSeat')?.textContent || '108', 10);
+
+  const regVehicle = state.registeredVehicles?.find(v => v.type === vehicleType) || {};
+  const vehicleName = regVehicle.name || (vehicleType === 'bike' ? 'Hero Splendor / Pulsar' : 'Swift Dzire');
+  const vehicleNumber = regVehicle.plate || (vehicleType === 'bike' ? 'TS 08 HG 8421' : 'TS 08 AB 1234');
+
+  const now = new Date();
+  const timeStr = `Today, ${now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+
+  const rideData = {
+    driverName: user.name || 'Verified Driver',
+    driverRole: user.role || 'Verified Corridor Driver',
+    rating: user.rating || 4.9,
+    avatar: user.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=120&h=120&q=80',
+    vehicleType: vehicleType,
+    vehicleName: vehicleName,
+    vehicleNumber: vehicleNumber,
+    pickup: pickup,
+    drop: drop,
+    departureTime: timeStr,
+    seatsAvailable: seats,
+    perSeatPrice: fare,
+    paymentPreference: state.driverPayPreference || 'both',
+    verified: true,
+    helmetProvided: vehicleType === 'bike',
+    ac: vehicleType === 'car',
+    status: 'active',
+    notes: `Highway corridor fuel-share ride (${state.distance || 84} km). 0% platform fee.`
+  };
+
+  showToast('Broadcasting your corridor ride...', 'info');
+
+  if (window.db && window.db.rides) {
+    const res = await window.db.rides.create(rideData);
+    if (res && res.error) {
+      showToast('⚠️ Note: Broadcast queued (' + (res.error.message || 'database queue') + ')', 'warning');
+    } else {
+      showToast('✅ Corridor ride successfully published to live pool!', 'success');
+    }
+  }
+
+  // Set driver online
+  state.driverOnline = true;
+  syncDriverOnlineToggleUI();
+  if (window.db && window.db.matching) {
+    window.db.matching.syncActiveRequest();
+  }
+
+  // Re-sync rides list
+  if (typeof syncRidesFromDatabase === 'function') {
+    syncRidesFromDatabase();
+  }
+}
+window.publishDriverCorridorRide = publishDriverCorridorRide;
 
 // ------------------------------------------
 // AUTH MODE SWITCHER (SIGN IN VS SIGN UP)
