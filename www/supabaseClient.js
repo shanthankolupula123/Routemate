@@ -971,11 +971,11 @@ const db = {
                   rc_vehicle_name: extra.rc_vehicle_name || '',
                   rc_chassis_number: extra.rc_chassis_number || '',
                   rc_photo: extra.rc_photo || '',
-                  kyc_status: extra.kyc_status || (p.is_verified ? 'verified_success' : 'verification_pending'),
-                  is_kyc_verified: Boolean(p.is_verified || extra.is_kyc_verified),
+                  kyc_status: extra.kyc_status || (extra.is_kyc_verified ? 'verified_success' : 'verification_pending'),
+                  is_kyc_verified: Boolean(extra.is_kyc_verified || p.is_kyc_verified),
                   kyc_submitted_at: extra.kyc_submitted_at || p.created_at || new Date().toISOString()
                 });
-              } else if (p.role && typeof p.role === 'string' && (p.role.toLowerCase().includes('driver') || p.is_verified)) {
+              } else if (p.role && typeof p.role === 'string' && (p.role.toLowerCase().includes('driver') || p.is_kyc_verified)) {
                 submissions.push({
                   id: p.id,
                   name: p.name || 'Commuter',
@@ -991,8 +991,8 @@ const db = {
                   rc_vehicle_name: '',
                   rc_chassis_number: '',
                   rc_photo: '',
-                  kyc_status: p.is_verified ? 'verified_success' : 'verification_pending',
-                  is_kyc_verified: Boolean(p.is_verified),
+                  kyc_status: p.kyc_status || (p.is_kyc_verified ? 'verified_success' : 'unverified'),
+                  is_kyc_verified: Boolean(p.is_kyc_verified),
                   kyc_submitted_at: p.created_at || new Date().toISOString()
                 });
               }

@@ -700,6 +700,12 @@ function setRideFilter(filterKey) {
   renderRideListings();
 }
 
+// Helper: Check if a user has approved Admin KYC verification
+function isDriverKycApproved(user = state.currentUser) {
+  if (!user) return false;
+  return Boolean(user.is_kyc_verified === true || user.kyc_status === 'verified_success');
+}
+
 // Mode Switcher handler (Rider / Driver)
 function switchMode(newMode) {
   state.mode = newMode;
@@ -709,33 +715,201 @@ function switchMode(newMode) {
   const riderView = document.getElementById('riderModeView');
   const driverView = document.getElementById('driverModeView');
 
-  if (newMode === 'rider') {
-    pill.style.transform = 'translateX(0%)';
-    riderBtn.classList.add('text-blue-700', 'font-bold');
-    riderBtn.classList.remove('text-slate-600', 'font-medium');
-    driverBtn.classList.remove('text-blue-700', 'font-bold');
-    driverBtn.classList.add('text-slate-600', 'font-medium');
+  // Ensure explore tab is active so mainAppView is not hidden
+  const mainView = document.getElementById('mainAppView');
+  if (mainView && mainView.classList.contains('hidden')) {
+    switchTab('explore');
+  }
 
-    riderView.classList.remove('hidden');
-    driverView.classList.add('hidden');
+  if (newMode === 'rider') {
+    if (pill) pill.style.transform = 'translateX(0%)';
+    if (riderBtn) {
+      riderBtn.classList.add('text-blue-700', 'font-bold');
+      riderBtn.classList.remove('text-slate-600', 'font-medium');
+    }
+    if (driverBtn) {
+      driverBtn.classList.remove('text-blue-700', 'font-bold');
+      driverBtn.classList.add('text-slate-600', 'font-medium');
+    }
+
+    if (riderView) riderView.classList.remove('hidden');
+    if (driverView) driverView.classList.add('hidden');
     showToast('Switched to Rider Mode. Find fuel-split rides near you.', 'info');
   } else {
-    pill.style.transform = 'translateX(100%)';
-    driverBtn.classList.add('text-blue-700', 'font-bold');
-    driverBtn.classList.remove('text-slate-600', 'font-medium');
-    riderBtn.classList.remove('text-blue-700', 'font-bold');
-    riderBtn.classList.add('text-slate-600', 'font-medium');
+    if (pill) pill.style.transform = 'translateX(100%)';
+    if (driverBtn) {
+      driverBtn.classList.add('text-blue-700', 'font-bold');
+      driverBtn.classList.remove('text-slate-600', 'font-medium');
+    }
+    if (riderBtn) {
+      riderBtn.classList.remove('text-blue-700', 'font-bold');
+      riderBtn.classList.add('text-slate-600', 'font-medium');
+    }
 
-    riderView.classList.add('hidden');
-    driverView.classList.remove('hidden');
-    state.driverOnline = true;
+    if (riderView) riderView.classList.add('hidden');
+    if (driverView) driverView.classList.remove('hidden');
+
+    renderDriverModeView();
+  }
+}
+
+// Render Driver Mode View with Strict Admin KYC Gate
+function renderDriverModeView() {
+  const driverView = document.getElementById('driverModeView');
+  if (!driverView) return;
+
+  const user = state.currentUser;
+  const isKycApproved = isDriverKycApproved(user);
+
+  const kycBlockedCard = document.getElementById('driverKycBlockedCard');
+  const activeDutyContent = document.getElementById('driverActiveDutyContent');
+
+  if (!isKycApproved) {
+    // 1. Unverified or Pending KYC: Strictly lock driver broadcasting
+    state.driverOnline = false;
+    if (kycBlockedCard) kycBlockedCard.classList.remove('hidden');
+    if (activeDutyContent) activeDutyContent.classList.add('hidden');
+
+    renderDriverKycBlockedState(user);
+    showToast('🛡️ Driver duty locked: Admin KYC verification is required to offer rides.', 'warning');
+  } else {
+    // 2. Verified Driver: Render full broadcast duty console
+    if (kycBlockedCard) kycBlockedCard.classList.add('hidden');
+    if (activeDutyContent) activeDutyContent.classList.remove('hidden');
+
+    if (state.driverOnline === undefined) {
+      state.driverOnline = true;
+    }
+
     syncDriverOnlineToggleUI();
+    syncDriverCorridorInputs();
+    renderDriverIncomingRequest();
+    renderKycStatus();
+
     if (window.db && window.db.matching) {
       window.db.matching.syncActiveRequest();
     }
-    renderDriverIncomingRequest();
-    renderKycStatus();
     showToast('Driver Mode active. Live corridor listening enabled.', 'info');
+  }
+
+  if (window.lucide) lucide.createIcons();
+}
+
+// Render KYC Restriction Barrier for Unverified Drivers
+function renderDriverKycBlockedState(user) {
+  const container = document.getElementById('driverKycBlockedCard');
+  if (!container) return;
+
+  const status = (user && user.kyc_status) || (user && user.is_kyc_verified ? 'verified_success' : 'unverified');
+  let badgeHtml = '';
+  let title = 'Admin KYC Verification Required';
+  let desc = 'Under Motor Vehicles Act & Telangana State commuter safety regulations, all vehicle owners must complete Admin Government ID (Aadhaar), Driving License, and Vehicle RC verification before offering corridor rides.';
+  let actionBtnText = 'Upload KYC Documents';
+  let actionBtnIcon = 'upload-cloud';
+  let actionFn = 'openKycModal()';
+
+  if (!user) {
+    title = 'Please Log In to Offer Rides';
+    desc = 'You must have a verified Routemate commuter profile with approved KYC documents to broadcast your vehicle corridor.';
+    actionBtnText = 'Log In / Register';
+    actionBtnIcon = 'log-in';
+    actionFn = 'showAuthView()';
+    badgeHtml = '<span class="px-2.5 py-0.5 rounded-full text-xs font-bold bg-slate-100 text-slate-700 border border-slate-300">Session Required</span>';
+  } else if (status === 'verification_pending') {
+    title = 'KYC Documents Under Admin Review';
+    desc = 'Your Aadhaar, Driving License, and Vehicle RC documents have been received and are currently queued for verification by Routemate Administration. Driver duty broadcasting will unlock automatically once approved.';
+    actionBtnText = 'Check Verification Status';
+    actionBtnIcon = 'clock';
+    actionFn = 'openKycModal()';
+    badgeHtml = '<span class="px-2.5 py-0.5 rounded-full text-xs font-bold bg-blue-100 text-blue-800 border border-blue-300">Under Admin Review</span>';
+  } else if (status === 'rejected') {
+    const reason = user.rejection_reason || 'Document scan was blurry or details did not match.';
+    title = 'KYC Verification Rejected by Admin';
+    desc = `Reason: "${reason}". Please upload clear, original photos of your Government Aadhaar ID, Driving License, and Vehicle RC to unlock driver duty.`;
+    actionBtnText = 'Fix & Re-Submit Documents';
+    actionBtnIcon = 'refresh-cw';
+    actionFn = 'openKycModal()';
+    badgeHtml = '<span class="px-2.5 py-0.5 rounded-full text-xs font-bold bg-rose-100 text-rose-800 border border-rose-300">Submission Rejected</span>';
+  } else {
+    badgeHtml = '<span class="px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-100 text-amber-800 border border-amber-300">KYC Not Completed</span>';
+  }
+
+  container.innerHTML = `
+    <div class="bg-white rounded-3xl p-6 border-2 border-amber-400/80 shadow-lg text-center space-y-4 animate-in fade-in duration-200">
+      <div class="relative w-16 h-16 mx-auto">
+        <div class="absolute inset-0 rounded-2xl bg-amber-400/20 animate-pulse"></div>
+        <div class="relative w-16 h-16 rounded-2xl bg-amber-500 text-white flex items-center justify-center shadow-md shadow-amber-500/25">
+          <i data-lucide="shield-alert" class="w-8 h-8 stroke-[2.5]"></i>
+        </div>
+      </div>
+
+      <div>
+        <div class="mb-2">
+          ${badgeHtml}
+        </div>
+        <h3 class="text-base font-extrabold text-slate-900">${title}</h3>
+        <p class="text-xs text-slate-600 mt-2 max-w-sm mx-auto leading-relaxed">
+          ${desc}
+        </p>
+      </div>
+
+      <!-- Compliance summary bullet points -->
+      <div class="bg-amber-50/70 border border-amber-200 rounded-2xl p-3.5 text-left text-xs space-y-2">
+        <p class="text-[10px] font-extrabold uppercase tracking-wider text-amber-900">Mandatory Driver Requirements:</p>
+        <div class="flex items-center gap-2 text-slate-700">
+          <i data-lucide="check" class="w-3.5 h-3.5 text-emerald-600 flex-shrink-0"></i>
+          <span>Original Government Aadhaar Card (Front/Back)</span>
+        </div>
+        <div class="flex items-center gap-2 text-slate-700">
+          <i data-lucide="check" class="w-3.5 h-3.5 text-emerald-600 flex-shrink-0"></i>
+          <span>Valid Indian Driving License (DL)</span>
+        </div>
+        <div class="flex items-center gap-2 text-slate-700">
+          <i data-lucide="check" class="w-3.5 h-3.5 text-emerald-600 flex-shrink-0"></i>
+          <span>Active Vehicle Registration Certificate (RC)</span>
+        </div>
+      </div>
+
+      <!-- Action buttons -->
+      <div class="space-y-2 pt-1">
+        <button type="button" onclick="${actionFn}" class="w-full py-3.5 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl text-xs font-black shadow-md shadow-blue-500/25 active:scale-95 transition-all flex items-center justify-center gap-2 cursor-pointer">
+          <i data-lucide="${actionBtnIcon}" class="w-4 h-4"></i>
+          <span>${actionBtnText}</span>
+        </button>
+        <button type="button" onclick="switchMode('rider')" class="w-full py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold active:scale-95 transition flex items-center justify-center gap-1 cursor-pointer">
+          <i data-lucide="arrow-left" class="w-3.5 h-3.5"></i>
+          <span>Back to Rider Mode</span>
+        </button>
+      </div>
+    </div>
+  `;
+}
+
+// Synchronize Corridor Route and Fuel Calculation Inputs for Driver Mode
+function syncDriverCorridorInputs() {
+  const pInput = document.getElementById('driverCorridorPickup');
+  const dInput = document.getElementById('driverCorridorDrop');
+  const p = state.pickup || 'Uppal Ring Road Metro, Hyderabad';
+  const d = state.drop || 'Jangaon Bus Depot / Chowrasta';
+
+  if (pInput && !pInput.value) pInput.value = p;
+  if (dInput && !dInput.value) dInput.value = d;
+
+  state.driverCorridorPickup = (pInput ? pInput.value : p);
+  state.driverCorridorDrop = (dInput ? dInput.value : d);
+
+  const dist = (typeof estimateDistance === 'function') 
+    ? estimateDistance(state.driverCorridorPickup, state.driverCorridorDrop)
+    : (state.distance || 84);
+  state.distance = dist;
+
+  const distEl = document.getElementById('driverLiveDistance');
+  if (distEl) distEl.textContent = `${dist} km`;
+
+  if (typeof calculateFuelShare === 'function') {
+    const calc = calculateFuelShare(dist, state.driverVehicleType || 'bike');
+    const costEl = document.getElementById('driverRecCostPerSeat');
+    if (costEl) costEl.textContent = calc.perSeat || 108;
   }
 }
 
@@ -1488,17 +1662,21 @@ function syncDriverOnlineToggleUI() {
 
 function toggleDriverOnline() {
   const user = state.currentUser;
-  const kycStatus = (user && user.kyc_status) || (user && user.is_kyc_verified ? 'verified_success' : 'unverified');
+  const isApproved = isDriverKycApproved(user);
+
+  if (!isApproved) {
+    state.driverOnline = false;
+    showToast('🛡️ Access Denied: Admin KYC approval is required before going online as a driver.', 'error');
+    openKycModal();
+    renderDriverModeView();
+    return;
+  }
 
   state.driverOnline = !state.driverOnline;
   syncDriverOnlineToggleUI();
 
   if (state.driverOnline) {
-    if (kycStatus !== 'verified_success') {
-      showToast('🛡️ Online in Commuter Driver Mode. Complete full KYC verification for verified badge.', 'info');
-    } else {
-      showToast('You are now Online! Receiving passenger requests on corridor.', 'success');
-    }
+    showToast('You are now Online! Receiving passenger requests on corridor.', 'success');
     if (window.db && window.db.matching) {
       window.db.matching.syncActiveRequest();
     }
@@ -1867,7 +2045,8 @@ async function requestRideAction() {
       rating: 4.95,
       avatar_url: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=120&h=120&q=80',
       is_verified: true,
-      is_kyc_verified: true
+      is_kyc_verified: false,
+      kyc_status: 'unverified'
     };
     state.currentUser = guestUser;
     try { localStorage.setItem('routemate_auth_user', JSON.stringify(guestUser)); } catch (e) {}
@@ -2038,12 +2217,9 @@ function handleRealtimeMatchingEvent(event, request) {
       rawRequest: request
     };
 
-    // Check if current user is an active online driver
-    const isOnlineDriver = Boolean(
-      state.driverOnline ||
-      state.mode === 'driver' ||
-      (currentUser && (currentUser.is_kyc_verified || currentUser.is_verified || currentUser.role === 'driver'))
-    );
+    // Check if current user is an active online driver with Admin KYC approval
+    const isApprovedDriver = isDriverKycApproved(currentUser);
+    const isOnlineDriver = Boolean(state.driverOnline && isApprovedDriver);
 
     const isDriverFree = !state.activeDriverTrip || state.activeDriverTrip.status === 'completed' || state.activeDriverTrip.status === 'cancelled';
 
