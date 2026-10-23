@@ -395,6 +395,25 @@ const db = {
       }
     },
 
+    // Helper: Unpack JSON encoded role and normalize profile data
+    _formatProfile(profile) {
+      if (!profile) return null;
+      const copy = { ...profile };
+      if (copy.role && typeof copy.role === 'string' && copy.role.trim().startsWith('{')) {
+        try {
+          const parsed = JSON.parse(copy.role);
+          Object.assign(copy, parsed);
+        } catch (e) {}
+      }
+      if (!copy.email && copy.phone && copy.phone.includes('@')) {
+        copy.email = copy.phone;
+      }
+      if (copy.is_verified && copy.is_kyc_verified === undefined) {
+        copy.is_kyc_verified = Boolean(copy.kyc_status === 'verified_success');
+      }
+      return copy;
+    },
+
     // Find existing profile by email or phone (READ ONLY - does NOT create duplicates)
     async findByEmailOrPhone(identifier) {
       if (!identifier) return null;
@@ -438,7 +457,7 @@ const db = {
             if (!error && data) existing = data;
           } catch (e) {}
         }
-        return existing;
+        return existing ? this._formatProfile(existing) : null;
       } catch (err) {
         console.warn('Error in findByEmailOrPhone:', err);
         return null;
@@ -559,7 +578,7 @@ const db = {
         }
 
         if (existing) {
-          return existing;
+          return this._formatProfile(existing);
         }
 
         const baseProfile = {
@@ -1745,7 +1764,7 @@ const db = {
       if (client && !this._channel) {
         try {
           this._channel = client.channel('routemate_matching', {
-            config: { broadcast: { ack: true } }
+            config: { broadcast: { ack: true, self: true } }
           });
           this._channel
             .on('broadcast', { event: 'ride_matching_event' }, (payload) => {
@@ -1777,10 +1796,37 @@ const db = {
                   pin: meta.pin || '4821',
                   vehicle_type: meta.vehicleType || row.vehicle_type || 'any',
                   vehicleType: meta.vehicleType || row.vehicle_type || 'any',
-                  isFlexibleVehicle: Boolean(meta.isFlexible),
+                  isFlexibleVehicle: Boolean(meta.isFlexible !== false),
                   payment_method: meta.paymentMethod || 'Direct UPI',
                   status: 'searching',
                   created_at: row.created_at
+                };
+                this._handleIncomingEvent('new_ride_request', incomingReq);
+              }
+            })
+            .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'bookings' }, (payload) => {
+              console.log('📡 [Supabase Realtime DB INSERT on bookings]:', payload.new);
+              const b = payload.new;
+              if (b) {
+                const incomingReq = {
+                  id: b.id ? `REQ-${String(b.id).replace(/[^a-zA-Z0-9]/g, '').slice(0, 8)}` : `REQ-${Date.now()}`,
+                  dbId: b.id,
+                  booking_id: b.id,
+                  rider_name: b.rider_name || 'Verified Passenger',
+                  rider_phone: b.rider_phone || '+91 98480 23145',
+                  seats: b.seats_booked || 1,
+                  fare: b.total_fare || 110,
+                  pin: b.booking_pin || '4821',
+                  pickup: 'Uppal Ring Road Metro, Hyderabad',
+                  drop: 'Jangaon Bus Depot / Chowrasta',
+                  drop_location: 'Jangaon Bus Depot / Chowrasta',
+                  distance: 84,
+                  vehicle_type: 'any',
+                  vehicleType: 'any',
+                  isFlexibleVehicle: true,
+                  payment_method: b.payment_method === 'cash' ? 'Cash on Board' : 'Direct UPI',
+                  status: 'searching',
+                  created_at: b.created_at || new Date().toISOString()
                 };
                 this._handleIncomingEvent('new_ride_request', incomingReq);
               }
@@ -2053,6 +2099,19 @@ const db = {
             console.error('❌ Supabase rides insert error:', error.message);
           } else {
             console.log('✅ Supabase rides row inserted successfully for real-time driver sync:', request.id, data);
+          }
+
+          // Also persist booking to bookings table so both rides and bookings reflect the active request
+          if (db.bookings && db.bookings.create) {
+            db.bookings.create({
+              rideId: request.id,
+              riderName: request.rider_name,
+              riderPhone: request.rider_phone,
+              seats: request.seats || 1,
+              fare: request.fare || 110,
+              paymentMethod: request.payment_method === 'cash' ? 'cash' : 'upi',
+              pin: request.pin
+            }).catch(() => {});
           }
         } catch (e) {
           console.error('❌ Supabase insert exception:', e);
@@ -2373,8 +2432,9 @@ const db = {
       const client = getSupabaseClient();
       if (client) {
         try {
-          // A. Check for new incoming rider requests for online drivers
-          const { data, error } = await client
+          // A. Check for new incoming rider requests in rides table
+          let incomingReq = null;
+          const { data: rideData, error: rideErr } = await client
             .from('rides')
             .select('*')
             .eq('status', 'active')
@@ -2382,11 +2442,11 @@ const db = {
             .order('created_at', { ascending: false })
             .limit(1);
 
-          if (!error && data && data.length > 0) {
-            const row = data[0];
+          if (!rideErr && rideData && rideData.length > 0) {
+            const row = rideData[0];
             let meta = {};
             try { meta = JSON.parse(row.notes || '{}'); } catch(e){}
-            const incomingReq = {
+            incomingReq = {
               id: row.vehicle_number,
               dbId: row.id,
               rider_id: meta.riderId || row.driver_id,
@@ -2403,12 +2463,56 @@ const db = {
               pin: meta.pin || '4821',
               vehicle_type: meta.vehicleType || row.vehicle_type || 'any',
               vehicleType: meta.vehicleType || row.vehicle_type || 'any',
-              isFlexibleVehicle: Boolean(meta.isFlexible),
+              isFlexibleVehicle: Boolean(meta.isFlexible !== false),
               payment_method: meta.paymentMethod || 'Direct UPI',
               status: 'searching',
               created_at: row.created_at
             };
-            const needsIncomingUiSync = typeof state !== 'undefined' && !state.incomingRequest && !state.activeDriverTrip;
+          }
+
+          // A2. Also check bookings table for recent active passenger bookings
+          if (!incomingReq) {
+            try {
+              const { data: bData, error: bErr } = await client
+                .from('bookings')
+                .select('*')
+                .in('status', ['confirmed', 'searching', 'pending'])
+                .order('created_at', { ascending: false })
+                .limit(1);
+
+              if (!bErr && bData && bData.length > 0) {
+                const b = bData[0];
+                const bAgeMs = b.created_at ? (Date.now() - new Date(b.created_at).getTime()) : 0;
+                // Only treat as live incoming if created within last 15 minutes
+                if (bAgeMs < 15 * 60 * 1000) {
+                  incomingReq = {
+                    id: b.id ? `REQ-${String(b.id).replace(/[^a-zA-Z0-9]/g, '').slice(0, 8)}` : `REQ-${Date.now()}`,
+                    dbId: b.id,
+                    booking_id: b.id,
+                    rider_name: b.rider_name || 'Verified Passenger',
+                    rider_phone: b.rider_phone || '+91 98480 23145',
+                    seats: b.seats_booked || 1,
+                    fare: b.total_fare || 110,
+                    pin: b.booking_pin || '4821',
+                    pickup: 'Uppal Ring Road Metro, Hyderabad',
+                    drop: 'Jangaon Bus Depot / Chowrasta',
+                    drop_location: 'Jangaon Bus Depot / Chowrasta',
+                    distance: 84,
+                    vehicle_type: 'any',
+                    vehicleType: 'any',
+                    isFlexibleVehicle: true,
+                    payment_method: b.payment_method === 'cash' ? 'Cash on Board' : 'Direct UPI',
+                    status: 'searching',
+                    created_at: b.created_at
+                  };
+                }
+              }
+            } catch (e) {}
+          }
+
+          if (incomingReq) {
+            const isDriverActive = typeof state !== 'undefined' && (state.driverOnline || state.mode === 'driver');
+            const needsIncomingUiSync = isDriverActive && !state.incomingRequest && !state.activeDriverTrip;
             if (!this._activeRequest || this._activeRequest.id !== incomingReq.id || this._activeRequest.status !== incomingReq.status || needsIncomingUiSync) {
               this._handleIncomingEvent('new_ride_request', incomingReq);
             }
