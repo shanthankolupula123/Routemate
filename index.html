@@ -933,27 +933,70 @@
               </span>
             </div>
 
-            <!-- Route Inputs -->
+            <!-- Dynamic Route Inputs with Map & GPS Controls -->
             <div class="space-y-2">
-              <div class="flex items-center gap-2.5 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs">
+              <div class="flex items-center gap-2.5 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs relative">
                 <span class="w-2.5 h-2.5 rounded-full bg-emerald-500 flex-shrink-0"></span>
-                <div class="flex-1">
-                  <label class="block text-[9px] uppercase font-bold text-slate-400">Starting From</label>
-                  <input id="driverCorridorPickup" type="text" value="Uppal Ring Road Metro, Hyderabad" oninput="handleDriverCorridorChange()" class="w-full bg-transparent font-bold text-slate-900 focus:outline-none text-xs" />
+                <div class="flex-1 pr-16 min-w-0">
+                  <label class="block text-[9px] uppercase font-bold text-slate-400">Starting From (Any Custom Location)</label>
+                  <input id="driverCorridorPickup" type="text" placeholder="Enter starting address or landmark" value="Uppal Ring Road Metro, Hyderabad" oninput="handleDriverCorridorChange()" class="w-full bg-transparent font-bold text-slate-900 focus:outline-none text-xs truncate" />
+                </div>
+                <div class="flex items-center gap-1 absolute right-2 top-1/2 -translate-y-1/2 z-10">
+                  <button type="button" onclick="detectDriverCurrentLocation()" title="Use Current GPS Location" class="p-1.5 rounded-lg bg-white hover:bg-emerald-50 text-emerald-600 border border-slate-200 shadow-xs hover:border-emerald-300 transition active:scale-95 flex items-center justify-center cursor-pointer">
+                    <i data-lucide="locate-fixed" class="w-3.5 h-3.5"></i>
+                  </button>
+                  <button type="button" onclick="openSelectOnMapModal(true, 'driver')" title="Select Starting Point on Map" class="p-1.5 rounded-lg bg-white hover:bg-blue-50 text-blue-600 border border-slate-200 shadow-xs hover:border-blue-300 transition active:scale-95 flex items-center justify-center cursor-pointer">
+                    <i data-lucide="map" class="w-3.5 h-3.5"></i>
+                  </button>
                 </div>
               </div>
-              <div class="flex items-center gap-2.5 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs">
+              <div class="flex items-center gap-2.5 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs relative">
                 <span class="w-2.5 h-2.5 rounded-full bg-blue-600 flex-shrink-0"></span>
-                <div class="flex-1">
-                  <label class="block text-[9px] uppercase font-bold text-slate-400">Heading Towards</label>
-                  <input id="driverCorridorDrop" type="text" value="Jangaon Bus Depot / Chowrasta" oninput="handleDriverCorridorChange()" class="w-full bg-transparent font-bold text-slate-900 focus:outline-none text-xs" />
+                <div class="flex-1 pr-10 min-w-0">
+                  <label class="block text-[9px] uppercase font-bold text-slate-400">Heading Towards (Any Destination)</label>
+                  <input id="driverCorridorDrop" type="text" placeholder="Enter destination town, landmark or district" value="Jangaon Bus Depot / Chowrasta" oninput="handleDriverCorridorChange()" class="w-full bg-transparent font-bold text-slate-900 focus:outline-none text-xs truncate" />
+                </div>
+                <div class="flex items-center gap-1 absolute right-2 top-1/2 -translate-y-1/2 z-10">
+                  <button type="button" onclick="openSelectOnMapModal(false, 'driver')" title="Select Destination on Map" class="p-1.5 rounded-lg bg-white hover:bg-blue-50 text-blue-600 border border-slate-200 shadow-xs hover:border-blue-300 transition active:scale-95 flex items-center justify-center cursor-pointer">
+                    <i data-lucide="map" class="w-3.5 h-3.5"></i>
+                  </button>
                 </div>
               </div>
             </div>
 
-            <!-- Preset Telangana Corridors -->
+            <!-- Driver Live Interactive GPS & Navigation Map -->
+            <div class="rounded-2xl overflow-hidden border border-slate-200 shadow-xs space-y-1.5 bg-white p-2">
+              <div class="flex items-center justify-between px-1 pt-0.5">
+                <div class="flex items-center gap-2">
+                  <span class="w-2 h-2 rounded-full bg-emerald-500 live-pulse"></span>
+                  <span class="text-[11px] font-bold text-slate-800">Driver Live GPS & Route Navigation</span>
+                </div>
+                <div class="flex items-center gap-1">
+                  <button id="btnDriverLocateMe" type="button" onclick="detectDriverCurrentLocation()" title="GPS Current Location" class="px-2 py-1 rounded-lg bg-slate-100 hover:bg-emerald-50 text-slate-700 hover:text-emerald-700 transition flex items-center gap-1 text-[10px] font-semibold cursor-pointer">
+                    <i data-lucide="crosshair" class="w-3 h-3 text-emerald-600"></i>
+                    <span>GPS</span>
+                  </button>
+                  <button id="btnDriverRecenterMap" type="button" onclick="recenterDriverMap()" title="Fit Route" class="px-2 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 transition flex items-center gap-1 text-[10px] font-semibold cursor-pointer">
+                    <i data-lucide="maximize-2" class="w-3 h-3"></i>
+                    <span>Fit</span>
+                  </button>
+                </div>
+              </div>
+              <div class="relative w-full h-48 rounded-xl overflow-hidden border border-slate-200 shadow-inner bg-slate-100">
+                <div id="driverMapContainer" class="w-full h-full"></div>
+                <!-- Floating Route Info Pill -->
+                <div id="driverMapRouteInfoPill" class="absolute top-2 left-2 z-[400] bg-white/95 backdrop-blur-md px-2.5 py-1 rounded-full border border-slate-200 shadow-sm text-[11px] font-semibold flex items-center gap-1.5 pointer-events-none">
+                  <span class="w-2 h-2 rounded-full bg-emerald-500 live-pulse"></span>
+                  <span id="driverMapRouteDistanceText" class="text-slate-800 font-bold">84 km</span>
+                  <span class="text-slate-300">•</span>
+                  <span id="driverMapRouteSummaryText" class="text-slate-600 font-medium truncate max-w-[140px]">Live Route</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Preset Quick Route Suggestions (Optional) -->
             <div>
-              <p class="text-[9.5px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">Preset Commuter Corridors:</p>
+              <p class="text-[9.5px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">Quick Route Suggestions (Optional):</p>
               <div class="flex items-center gap-1.5 overflow-x-auto pb-1 text-[11px] no-scrollbar">
                 <button type="button" onclick="setDriverRoutePreset('Uppal, Hyderabad', 'Jangaon')" class="flex-shrink-0 px-2.5 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 font-semibold rounded-lg border border-blue-200/60 transition cursor-pointer">
                   Uppal ➔ Jangaon (84km)
@@ -3370,16 +3413,16 @@
     };
   </script>
   <!-- Interactive Maps Engine (Leaflet + OSM with Google Maps fallback) -->
-  <script src="maps.js?v=20261023_instant_dispatch_v3"></script>
+  <script src="maps.js?v=20261023_driver_gps_v4"></script>
   <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCpZp3uUEEPF5ZJeVuuQRSGZxBDIgPuMqA&libraries=places,geometry&callback=initGoogleMap" async defer></script>
   <!-- Razorpay Standard Checkout SDK -->
   <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
-  <script src="payment.js?v=20261023_instant_dispatch_v3"></script>
+  <script src="payment.js?v=20261023_driver_gps_v4"></script>
   <!-- Tesseract.js Pure Client-Side WebAssembly OCR Engine v5 -->
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
   <!-- Supabase JS Client SDK v2 -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="supabaseClient.js?v=20261023_instant_dispatch_v3"></script>
-  <script src="app.js?v=20261023_instant_dispatch_v3"></script>
+  <script src="supabaseClient.js?v=20261023_driver_gps_v4"></script>
+  <script src="app.js?v=20261023_driver_gps_v4"></script>
 </body>
 </html>

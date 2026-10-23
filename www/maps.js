@@ -234,22 +234,32 @@ function attachPlacesAutocomplete() {
   const pickupInput = document.getElementById('inputPickup');
   const dropInput = document.getElementById('inputDrop');
 
-  // Attach Rapido-Style Universal Real-Time Search across Telangana
-  if (pickupInput) attachTelanganaSearchSuggest(pickupInput, true);
-  if (dropInput) attachTelanganaSearchSuggest(dropInput, false);
+  // Attach to Rider inputs
+  if (pickupInput) attachTelanganaSearchSuggest(pickupInput, true, 'rider');
+  if (dropInput) attachTelanganaSearchSuggest(dropInput, false, 'rider');
+
+  // Attach to Driver inputs for ANY dynamic location
+  const driverPickup = document.getElementById('driverCorridorPickup');
+  const driverDrop = document.getElementById('driverCorridorDrop');
+  if (driverPickup) attachTelanganaSearchSuggest(driverPickup, true, 'driver');
+  if (driverDrop) attachTelanganaSearchSuggest(driverDrop, false, 'driver');
 }
 
 // Universal Telangana Search & Geocoding Suggestion Engine (Rapido / Uber Style)
-function attachTelanganaSearchSuggest(inputEl, isPickup) {
+function attachTelanganaSearchSuggest(inputEl, isPickup, targetMode = 'rider') {
   if (!inputEl) return;
 
   const wrapper = inputEl.closest('.relative') || inputEl.parentElement;
   if (!wrapper) return;
 
-  let suggestBox = document.getElementById(isPickup ? 'pickupSuggestBox' : 'dropSuggestBox');
+  const boxId = targetMode === 'driver'
+    ? (isPickup ? 'driverPickupSuggestBox' : 'driverDropSuggestBox')
+    : (isPickup ? 'pickupSuggestBox' : 'dropSuggestBox');
+
+  let suggestBox = document.getElementById(boxId);
   if (!suggestBox) {
     suggestBox = document.createElement('div');
-    suggestBox.id = isPickup ? 'pickupSuggestBox' : 'dropSuggestBox';
+    suggestBox.id = boxId;
     suggestBox.className = 'hidden absolute left-0 right-0 top-full mt-1.5 bg-white rounded-2xl border border-slate-200/90 shadow-2xl z-50 overflow-hidden max-h-60 overflow-y-auto divide-y divide-slate-100 text-left';
     wrapper.appendChild(suggestBox);
   }
@@ -267,7 +277,7 @@ function attachTelanganaSearchSuggest(inputEl, isPickup) {
     }
 
     debounceTimer = setTimeout(() => {
-      fetchTelanganaPredictions(query, suggestBox, inputEl, isPickup);
+      fetchTelanganaPredictions(query, suggestBox, inputEl, isPickup, targetMode);
     }, 220);
   });
 
@@ -285,7 +295,7 @@ function attachTelanganaSearchSuggest(inputEl, isPickup) {
 }
 
 // Fetch predictions combining Google Places & Telangana OSM Geocoding
-async function fetchTelanganaPredictions(query, container, inputEl, isPickup) {
+async function fetchTelanganaPredictions(query, container, inputEl, isPickup, targetMode = 'rider') {
   const suggestions = [];
 
   // 1. Google Places AutocompleteService
@@ -347,7 +357,7 @@ async function fetchTelanganaPredictions(query, container, inputEl, isPickup) {
   }
 
   const mapOptionHtml = `
-    <button type="button" onclick="openSelectOnMapModal(${isPickup})" class="w-full text-left p-2.5 bg-blue-50/80 hover:bg-blue-100/90 border-b border-blue-100 transition flex items-center gap-2.5 text-blue-900 font-bold text-xs cursor-pointer group">
+    <button type="button" onclick="openSelectOnMapModal(${isPickup}, '${targetMode}')" class="w-full text-left p-2.5 bg-blue-50/80 hover:bg-blue-100/90 border-b border-blue-100 transition flex items-center gap-2.5 text-blue-900 font-bold text-xs cursor-pointer group">
       <div class="w-7 h-7 rounded-xl bg-blue-600 text-white flex items-center justify-center flex-shrink-0 group-hover:scale-105 transition shadow-xs">
         <i data-lucide="map" class="w-3.5 h-3.5"></i>
       </div>
@@ -364,7 +374,7 @@ async function fetchTelanganaPredictions(query, container, inputEl, isPickup) {
       ${mapOptionHtml}
       <div class="p-3 text-center text-xs text-slate-500">
         <p class="font-medium">No direct address match for "${query}"</p>
-        <button type="button" class="mt-1 text-blue-600 font-bold hover:underline" onclick="selectTelanganaLocation('${query.replace(/'/g, "\\'")}', ${isPickup})">Use "${query}" anyway</button>
+        <button type="button" class="mt-1 text-blue-600 font-bold hover:underline" onclick="selectTelanganaLocation('${query.replace(/'/g, "\\'")}', ${isPickup}, '${targetMode}')">Use "${query}" anyway</button>
       </div>
     `;
     container.classList.remove('hidden');
@@ -373,7 +383,7 @@ async function fetchTelanganaPredictions(query, container, inputEl, isPickup) {
   }
 
   container.innerHTML = mapOptionHtml + suggestions.map(s => `
-    <button type="button" onclick="selectTelanganaLocation('${s.fullText.replace(/'/g, "\\'")}', ${isPickup})" class="w-full text-left p-3 hover:bg-blue-50/70 transition flex items-center gap-3 group cursor-pointer">
+    <button type="button" onclick="selectTelanganaLocation('${s.fullText.replace(/'/g, "\\'")}', ${isPickup}, '${targetMode}')" class="w-full text-left p-3 hover:bg-blue-50/70 transition flex items-center gap-3 group cursor-pointer">
       <div class="w-7 h-7 rounded-lg bg-blue-50 text-blue-600 group-hover:bg-blue-600 group-hover:text-white flex items-center justify-center flex-shrink-0 transition">
         <i data-lucide="map-pin" class="w-3.5 h-3.5"></i>
       </div>
@@ -389,13 +399,43 @@ async function fetchTelanganaPredictions(query, container, inputEl, isPickup) {
   if (window.lucide) lucide.createIcons();
 }
 
-function selectTelanganaLocation(fullLocation, isPickup) {
+function selectTelanganaLocation(fullLocation, isPickup, targetMode = 'rider') {
+  const exactAddress = String(fullLocation || '').trim();
+
+  // If driver mode, update driver corridor inputs & map dynamically
+  if (targetMode === 'driver') {
+    const pickupInput = document.getElementById('driverCorridorPickup');
+    const dropInput = document.getElementById('driverCorridorDrop');
+    const suggestBox = document.getElementById(isPickup ? 'driverPickupSuggestBox' : 'driverDropSuggestBox');
+    if (suggestBox) suggestBox.classList.add('hidden');
+
+    if (isPickup) {
+      if (pickupInput) pickupInput.value = exactAddress;
+      if (typeof state !== 'undefined') state.driverCorridorPickup = exactAddress;
+    } else {
+      if (dropInput) dropInput.value = exactAddress;
+      if (typeof state !== 'undefined') state.driverCorridorDrop = exactAddress;
+    }
+
+    if (typeof handleDriverCorridorChange === 'function') {
+      handleDriverCorridorChange();
+    }
+    const currentP = document.getElementById('driverCorridorPickup')?.value || (typeof state !== 'undefined' ? state.driverCorridorPickup : 'Uppal');
+    const currentD = document.getElementById('driverCorridorDrop')?.value || (typeof state !== 'undefined' ? state.driverCorridorDrop : 'Jangaon');
+    if (currentP && currentD && typeof updateDriverRouteMap === 'function') {
+      updateDriverRouteMap(currentP, currentD);
+    }
+    if (typeof showToast === 'function') {
+      showToast(`📍 Driver ${isPickup ? 'Starting point' : 'Destination'} set: ${exactAddress}`, 'success');
+    }
+    return;
+  }
+
+  // Default: Rider Mode
   const pickupInput = document.getElementById('inputPickup');
   const dropInput = document.getElementById('inputDrop');
   const suggestBox = document.getElementById(isPickup ? 'pickupSuggestBox' : 'dropSuggestBox');
   if (suggestBox) suggestBox.classList.add('hidden');
-
-  const exactAddress = String(fullLocation || '').trim();
 
   if (isPickup) {
     if (pickupInput) pickupInput.value = exactAddress;
@@ -1028,11 +1068,13 @@ async function reverseGeocodeLatLng(lat, lng) {
 let lPickerMap = null;
 let gPickerMap = null;
 let gPickerIsPickup = false;
+let gPickerTargetMode = 'rider';
 let gPickerCurrentAddress = '';
 let gPickerDebounceTimer = null;
 
-function openSelectOnMapModal(isPickup = false) {
+function openSelectOnMapModal(isPickup = false, targetMode = 'rider') {
   gPickerIsPickup = isPickup;
+  gPickerTargetMode = targetMode;
 
   const modal = document.getElementById('selectOnMapModal');
   if (!modal) return;
@@ -1240,7 +1282,7 @@ function confirmPickerAddress() {
     return;
   }
 
-  selectTelanganaLocation(gPickerCurrentAddress, gPickerIsPickup);
+  selectTelanganaLocation(gPickerCurrentAddress, gPickerIsPickup, gPickerTargetMode);
 
   if (typeof closeModal === 'function') {
     closeModal('selectOnMapModal');
@@ -1372,6 +1414,316 @@ function animateVehicleOnPath(points, vehicleType) {
   }, 4000);
 }
 
+// ==========================================
+// DRIVER LIVE GPS & INTERACTIVE NAVIGATION MAP
+// ==========================================
+
+let lDriverMap = null;
+let lDriverRouteLayer = null;
+let lDriverStartMarker = null;
+let lDriverEndMarker = null;
+let lDriverVehicleMarker = null;
+let lDriverPassengerMarker = null;
+
+// Initialize Leaflet Live Map on #driverMapContainer
+function initDriverMap() {
+  const container = document.getElementById('driverMapContainer');
+  if (!container || !window.L) return;
+
+  if (lDriverMap) {
+    try {
+      lDriverMap.invalidateSize();
+      return;
+    } catch (e) {}
+  }
+
+  container.innerHTML = '';
+
+  try {
+    lDriverMap = L.map(container, {
+      center: [17.4024, 78.5604], // Default Uppal / Hyderabad center
+      zoom: 11,
+      zoomControl: true
+    });
+
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+      maxZoom: 19
+    }).addTo(lDriverMap);
+
+    // Click on map to set destination or pickup dynamically
+    lDriverMap.on('click', async (e) => {
+      if (e && e.latlng) {
+        if (typeof showToast === 'function') {
+          showToast('Resolving map location for driver...', 'info');
+        }
+        const resolved = await reverseGeocodeLatLng(e.latlng.lat, e.latlng.lng);
+        if (resolved) {
+          const dropInput = document.getElementById('driverCorridorDrop');
+          if (dropInput) {
+            dropInput.value = resolved;
+            if (typeof state !== 'undefined') state.driverCorridorDrop = resolved;
+            if (typeof handleDriverCorridorChange === 'function') {
+              handleDriverCorridorChange();
+            }
+          }
+        }
+      }
+    });
+
+    // Check if initial pickup & drop exist and render route
+    const p = document.getElementById('driverCorridorPickup')?.value || (typeof state !== 'undefined' ? state.driverCorridorPickup : 'Uppal');
+    const d = document.getElementById('driverCorridorDrop')?.value || (typeof state !== 'undefined' ? state.driverCorridorDrop : 'Jangaon');
+    if (p && d && p.trim() && d.trim()) {
+      updateDriverRouteMap(p, d);
+    }
+
+    console.log('✅ Driver Leaflet Live Map initialized successfully!');
+  } catch (err) {
+    console.warn('Driver map initialization error:', err);
+  }
+}
+
+// Calculate and render driver route line via OSRM Driving Engine
+async function updateDriverRouteMap(origin, destination) {
+  const container = document.getElementById('driverMapContainer');
+  if (!container || !window.L) return;
+
+  if (!lDriverMap) {
+    initDriverMap();
+  }
+
+  if (!origin || !origin.trim() || !destination || !destination.trim()) {
+    updateDriverMapInfoPill('', '', '');
+    if (lDriverRouteLayer && lDriverMap) {
+      try { lDriverMap.removeLayer(lDriverRouteLayer); } catch(e) {}
+      lDriverRouteLayer = null;
+    }
+    return;
+  }
+
+  try {
+    const pCoords = await geocodeAddressToCoords(origin);
+    const dCoords = await geocodeAddressToCoords(destination);
+
+    if (pCoords && dCoords) {
+      let coordsList = [];
+      let distKm = 0;
+      let durationMin = 0;
+
+      try {
+        const osrmUrl = `https://router.project-osrm.org/route/v1/driving/${pCoords.lng},${pCoords.lat};${dCoords.lng},${dCoords.lat}?overview=full&geometries=geojson`;
+        const res = await fetch(osrmUrl);
+        if (res.ok) {
+          const data = await res.json();
+          if (data && data.routes && data.routes[0]) {
+            const r = data.routes[0];
+            distKm = Math.round(r.distance / 1000);
+            durationMin = Math.round(r.duration / 60);
+            coordsList = r.geometry.coordinates.map(c => [c[1], c[0]]);
+          }
+        }
+      } catch (e) {
+        console.warn('Driver OSRM route error:', e);
+      }
+
+      if (coordsList.length === 0) {
+        coordsList = [[pCoords.lat, pCoords.lng], [dCoords.lat, dCoords.lng]];
+        const diffKm = Math.round(Math.hypot(pCoords.lat - dCoords.lat, pCoords.lng - dCoords.lng) * 111);
+        distKm = Math.max(12, diffKm);
+        durationMin = Math.round(distKm * 1.25);
+      }
+
+      if (lDriverRouteLayer && lDriverMap) lDriverMap.removeLayer(lDriverRouteLayer);
+      if (lDriverStartMarker && lDriverMap) lDriverMap.removeLayer(lDriverStartMarker);
+      if (lDriverEndMarker && lDriverMap) lDriverMap.removeLayer(lDriverEndMarker);
+
+      lDriverRouteLayer = L.polyline(coordsList, {
+        color: '#2563EB',
+        weight: 5,
+        opacity: 0.85
+      }).addTo(lDriverMap);
+
+      // Start Marker (Green Circle)
+      lDriverStartMarker = L.circleMarker([pCoords.lat, pCoords.lng], {
+        radius: 8,
+        fillColor: '#10B981',
+        color: '#ffffff',
+        weight: 2,
+        fillOpacity: 1
+      }).bindPopup(`<b>Pickup:</b> ${origin}`).addTo(lDriverMap);
+
+      // End Marker (Blue Circle)
+      lDriverEndMarker = L.circleMarker([dCoords.lat, dCoords.lng], {
+        radius: 8,
+        fillColor: '#2563EB',
+        color: '#ffffff',
+        weight: 2,
+        fillOpacity: 1
+      }).bindPopup(`<b>Destination:</b> ${destination}`).addTo(lDriverMap);
+
+      lDriverMap.fitBounds(lDriverRouteLayer.getBounds(), { padding: [35, 35] });
+
+      const pShort = origin.split(',')[0].trim();
+      const dShort = destination.split(',')[0].trim();
+      const durationText = durationMin >= 60
+        ? `${Math.floor(durationMin / 60)}h ${durationMin % 60}m`
+        : `${durationMin} mins`;
+
+      updateDriverMapInfoPill(`${distKm} km`, durationText, `${pShort} ➔ ${dShort}`);
+
+      // Update distance in state dynamically
+      if (typeof state !== 'undefined' && distKm > 0) {
+        state.distance = distKm;
+        const distEl = document.getElementById('driverLiveDistance');
+        if (distEl) distEl.textContent = `${distKm} km`;
+        if (typeof calculateFuelShare === 'function') {
+          const calc = calculateFuelShare(distKm, state.driverVehicleType || 'bike');
+          const costEl = document.getElementById('driverRecCostPerSeat');
+          if (costEl) costEl.textContent = calc.perSeat || 108;
+          const btnFare = document.getElementById('driverPublishBtnFare');
+          if (btnFare) btnFare.textContent = `₹${calc.perSeat || 108}`;
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('Driver Leaflet route error:', err);
+  }
+}
+
+function updateDriverMapInfoPill(distanceText, durationText, summaryText) {
+  const pill = document.getElementById('driverMapRouteInfoPill');
+  const distEl = document.getElementById('driverMapRouteDistanceText');
+  const sumEl = document.getElementById('driverMapRouteSummaryText');
+  if (!pill) return;
+  if (!distanceText) {
+    pill.classList.add('hidden');
+    return;
+  }
+  pill.classList.remove('hidden');
+  if (distEl) distEl.textContent = `${distanceText} (${durationText})`;
+  if (sumEl) sumEl.textContent = summaryText;
+}
+
+function recenterDriverMap() {
+  if (lDriverMap && lDriverRouteLayer) {
+    lDriverMap.fitBounds(lDriverRouteLayer.getBounds(), { padding: [30, 30] });
+  } else if (lDriverMap) {
+    lDriverMap.setView([17.4024, 78.5604], 11);
+  }
+}
+
+// Detect Driver GPS Current Location & Place Vehicle Pin
+function detectDriverCurrentLocation() {
+  const locateBtn = document.getElementById('btnDriverLocateMe');
+  const pickupInput = document.getElementById('driverCorridorPickup');
+
+  if (!navigator.geolocation) {
+    if (typeof showToast === 'function') {
+      showToast('Geolocation is not supported by your browser', 'error');
+    }
+    return;
+  }
+
+  if (locateBtn) {
+    locateBtn.innerHTML = `<i data-lucide="loader-2" class="w-3 h-3 text-emerald-600 animate-spin"></i><span>Locating...</span>`;
+    if (window.lucide) lucide.createIcons();
+  }
+
+  if (typeof showToast === 'function') {
+    showToast('Detecting your GPS location...', 'info');
+  }
+
+  navigator.geolocation.getCurrentPosition(
+    async (position) => {
+      const lat = position.coords.latitude;
+      const lng = position.coords.longitude;
+
+      if (!lDriverMap && window.initDriverMap) {
+        window.initDriverMap();
+      }
+
+      // Add vehicle marker on driver map
+      if (lDriverMap && window.L) {
+        if (lDriverVehicleMarker) {
+          try { lDriverMap.removeLayer(lDriverVehicleMarker); } catch(e){}
+        }
+        const vehicleIcon = L.divIcon({
+          className: 'driver-vehicle-marker',
+          html: `<div style="background:#10B981; width:34px; height:34px; border-radius:50%; border:3px solid white; box-shadow:0 4px 12px rgba(16,185,129,0.4); display:flex; align-items:center; justify-content:center; color:white;">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3" fill="currentColor"/></svg>
+          </div>`,
+          iconSize: [34, 34],
+          iconAnchor: [17, 17]
+        });
+        lDriverVehicleMarker = L.marker([lat, lng], { icon: vehicleIcon }).addTo(lDriverMap);
+        lDriverMap.setView([lat, lng], 14);
+      }
+
+      const resolvedAddress = await reverseGeocodeLatLng(lat, lng);
+      if (pickupInput) {
+        pickupInput.value = resolvedAddress;
+      }
+      if (typeof state !== 'undefined') {
+        state.driverCorridorPickup = resolvedAddress;
+      }
+
+      const currentDrop = document.getElementById('driverCorridorDrop')?.value || (typeof state !== 'undefined' ? state.driverCorridorDrop : 'Jangaon');
+      if (currentDrop) {
+        updateDriverRouteMap(resolvedAddress, currentDrop);
+      }
+
+      if (typeof handleDriverCorridorChange === 'function') {
+        handleDriverCorridorChange();
+      }
+
+      if (typeof showToast === 'function') {
+        showToast(`📍 Driver GPS location detected: ${resolvedAddress}`, 'success');
+      }
+
+      resetLocateBtn();
+    },
+    (err) => {
+      console.warn('Driver geolocation error:', err);
+      resetLocateBtn();
+      let msg = 'Unable to detect location. Please check GPS permissions.';
+      if (err.code === err.PERMISSION_DENIED) {
+        msg = 'Location permission denied. Please allow location access in your browser.';
+      }
+      if (typeof showToast === 'function') showToast(msg, 'error');
+    },
+    { enableHighAccuracy: true, timeout: 9000, maximumAge: 0 }
+  );
+
+  function resetLocateBtn() {
+    if (locateBtn) {
+      locateBtn.innerHTML = `<i data-lucide="crosshair" class="w-3 h-3 text-emerald-600"></i><span>GPS</span>`;
+      if (window.lucide) lucide.createIcons();
+    }
+  }
+}
+
+// Add passenger pickup marker to driver live map when a request arrives
+function addPassengerMarkerToDriverMap(lat, lng, name, pickup) {
+  if (!lDriverMap || !window.L || !lat || !lng) return;
+  if (lDriverPassengerMarker) {
+    try { lDriverMap.removeLayer(lDriverPassengerMarker); } catch(e){}
+  }
+  const passengerIcon = L.divIcon({
+    className: 'passenger-pickup-marker',
+    html: `<div style="background:#F59E0B; width:36px; height:36px; border-radius:50%; border:3px solid white; box-shadow:0 4px 14px rgba(245,158,11,0.5); display:flex; align-items:center; justify-content:center; color:white; animation:pulse 2s infinite;">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>
+    </div>`,
+    iconSize: [36, 36],
+    iconAnchor: [18, 18]
+  });
+  lDriverPassengerMarker = L.marker([lat, lng], { icon: passengerIcon })
+    .bindPopup(`<b>Passenger Pickup:</b><br>${name || 'Passenger'}<br><span style="font-size:11px;color:#666;">${pickup || ''}</span>`)
+    .addTo(lDriverMap);
+  lDriverMap.setView([lat, lng], 13);
+  try { lDriverPassengerMarker.openPopup(); } catch(e){}
+}
+
 // Export to window
 window.initGoogleMap = initGoogleMap;
 window.initLeafletMap = initLeafletMap;
@@ -1388,3 +1740,10 @@ window.selectTelanganaLocation = selectTelanganaLocation;
 window.promptDropQuickSelect = promptDropQuickSelect;
 window.filterQuickDestinations = filterQuickDestinations;
 window.selectDestinationArea = selectDestinationArea;
+
+// Driver Map exports
+window.initDriverMap = initDriverMap;
+window.updateDriverRouteMap = updateDriverRouteMap;
+window.recenterDriverMap = recenterDriverMap;
+window.detectDriverCurrentLocation = detectDriverCurrentLocation;
+window.addPassengerMarkerToDriverMap = addPassengerMarkerToDriverMap;

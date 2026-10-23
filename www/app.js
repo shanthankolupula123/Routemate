@@ -796,6 +796,18 @@ function renderDriverModeView() {
   }
 
   if (window.lucide) lucide.createIcons();
+
+  // Initialize interactive driver route map and draw corridor polyline
+  if (typeof window.initDriverMap === 'function') {
+    setTimeout(() => {
+      window.initDriverMap();
+      const p = document.getElementById('driverCorridorPickup')?.value || state.driverCorridorPickup || state.pickup || 'Uppal, Hyderabad';
+      const d = document.getElementById('driverCorridorDrop')?.value || state.driverCorridorDrop || state.drop || 'Jangaon';
+      if (typeof window.updateDriverRouteMap === 'function') {
+        window.updateDriverRouteMap(p, d);
+      }
+    }, 200);
+  }
 }
 
 // Render KYC Restriction Barrier for Unverified Drivers
@@ -1032,6 +1044,12 @@ function setDriverRoutePreset(pickup, drop) {
   if (btnFare) btnFare.textContent = `₹${calc.perSeat || 108}`;
   const subtitle = document.getElementById('driverOnlineSubtitle');
   if (subtitle) subtitle.textContent = `${pickup.split(',')[0]} ➔ ${drop.split(',')[0]} corridor • Ready for passenger requests`;
+
+  // Dynamically update driver route map
+  if (typeof window.updateDriverRouteMap === 'function') {
+    window.updateDriverRouteMap(pickup, drop);
+  }
+
   showToast(`Driver corridor set to ${pickup.split(',')[0]} ➔ ${drop.split(',')[0]} (${dist} km)`, 'info');
 }
 
@@ -1049,6 +1067,14 @@ function handleDriverCorridorChange() {
   if (costEl) costEl.textContent = calc.perSeat || 108;
   const btnFare = document.getElementById('driverPublishBtnFare');
   if (btnFare) btnFare.textContent = `₹${calc.perSeat || 108}`;
+
+  const subtitle = document.getElementById('driverOnlineSubtitle');
+  if (subtitle) subtitle.textContent = `${p.split(',')[0]} ➔ ${d.split(',')[0]} corridor • Ready for passenger requests`;
+
+  // Dynamically update driver route map
+  if (typeof window.updateDriverRouteMap === 'function') {
+    window.updateDriverRouteMap(p, d);
+  }
 }
 
 // Broadcast and Publish Highway Corridor Ride
@@ -1107,9 +1133,20 @@ async function publishDriverCorridorRide() {
     }
   }
 
-  // Set driver online
+  // Clear any stale driver trip lock so driver is ready to accept incoming matches
+  state.activeDriverTrip = null;
+
+  // Set driver online & update map
   state.driverOnline = true;
   syncDriverOnlineToggleUI();
+
+  if (typeof window.initDriverMap === 'function') {
+    window.initDriverMap();
+    if (typeof window.updateDriverRouteMap === 'function') {
+      window.updateDriverRouteMap(pickup, drop);
+    }
+  }
+
   if (window.db && window.db.matching) {
     window.db.matching.syncActiveRequest();
   }
@@ -2051,6 +2088,10 @@ function renderDriverIncomingRequest() {
   }
 
   // 3. Online Standby State (Radar Scanning)
+  const pShort = (state.driverCorridorPickup || state.pickup || 'Pickup').split(',')[0].trim();
+  const dShort = (state.driverCorridorDrop || state.drop || 'Drop').split(',')[0].trim();
+  const curDist = state.distance || 84;
+
   container.innerHTML = `
     <div class="bg-white rounded-3xl p-6 border border-slate-200 text-center shadow-xs space-y-3">
       <div class="relative w-14 h-14 mx-auto flex items-center justify-center">
@@ -2060,9 +2101,9 @@ function renderDriverIncomingRequest() {
         </div>
       </div>
       <div>
-        <h4 class="font-extrabold text-slate-900 text-sm">Broadcasting on Uppal ➔ Jangaon</h4>
-        <p class="text-xs text-slate-400 mt-1 max-w-xs mx-auto">
-          Listening for live commuter requests in real-time. You will be alerted the second a passenger books!
+        <h4 class="font-extrabold text-slate-900 text-sm">Broadcasting on ${pShort} ➔ ${dShort}</h4>
+        <p class="text-xs text-slate-500 mt-1 max-w-xs mx-auto">
+          Listening for live commuter requests (${curDist} km corridor) in real-time. You will be alerted the second a passenger books!
         </p>
       </div>
       <div class="pt-1 flex items-center justify-center gap-2 text-[11px] text-emerald-700 font-semibold bg-emerald-50 px-3 py-1.5 rounded-full mx-auto w-fit border border-emerald-200/60">
@@ -2419,6 +2460,13 @@ function handleRealtimeMatchingEvent(event, request) {
 
       if (typeof navigator !== 'undefined' && navigator.vibrate) {
         try { navigator.vibrate([300, 150, 300]); } catch (e) {}
+      }
+
+      // Plot incoming passenger pickup marker on the driver's interactive map
+      if (typeof window.addPassengerMarkerToDriverMap === 'function') {
+        const pLat = request.pickupLat || request.pickup_lat || (request.pickupCoords && request.pickupCoords.lat);
+        const pLng = request.pickupLng || request.pickup_lng || (request.pickupCoords && request.pickupCoords.lng);
+        window.addPassengerMarkerToDriverMap(pLat, pLng, request.rider_name || 'Passenger', request.pickup);
       }
 
       showToast(`🚗 New Ride Request: ${request.rider_name || 'Passenger'} (${request.pickup} ➔ ${request.drop_location || request.drop}) • ₹${request.fare || 110}`, 'success');
@@ -2951,6 +2999,11 @@ async function acceptDriverIncomingModal() {
   renderDriverIncomingRequest();
   renderLiveTrackingStage(acceptedTrip, 'driver');
   updateActiveRideBanner();
+
+  if (typeof window.updateDriverRouteMap === 'function') {
+    window.updateDriverRouteMap(acceptedTrip.pickup, acceptedTrip.drop_location || acceptedTrip.drop);
+  }
+
   showToast(`🎉 Ride Accepted! Navigating to ${acceptedTrip.pickup}`, 'success');
 
   // Real-time broadcast to server, Supabase, and other tabs
