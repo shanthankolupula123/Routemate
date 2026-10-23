@@ -2108,7 +2108,7 @@ function renderDriverIncomingRequest() {
       <div>
         <h4 class="font-extrabold text-slate-900 text-sm">Broadcasting on ${pShort} ➔ ${dShort}</h4>
         <p class="text-xs text-slate-500 mt-1 max-w-xs mx-auto">
-          Listening for live commuter requests (${curDist} km corridor) in real-time. You will be alerted the second a passenger books!
+          Listening for live commuter requests across all corridors in real-time. You will be alerted the second a passenger books!
         </p>
       </div>
       <div class="pt-1 flex items-center justify-center gap-2 text-[11px] text-emerald-700 font-semibold bg-emerald-50 px-3 py-1.5 rounded-full mx-auto w-fit border border-emerald-200/60">
@@ -2375,7 +2375,7 @@ function handleRealtimeMatchingEvent(event, request) {
   const currentUser = state.currentUser;
   const cleanUserPhone = currentUser ? String(currentUser.phone || '').replace(/\D/g, '').slice(-10) : '';
 
-  // Synchronize active ride state if this client is party to it
+  // Synchronize active ride state if this client is party to an accepted ride
   if (request) {
     const isRider = currentUser && ((request.rider_id && request.rider_id === currentUser.id) || (request.rider_phone && String(request.rider_phone).includes(cleanUserPhone)));
     const isAssignedDriver = currentUser && ((request.driver_id && request.driver_id === currentUser.id) || (request.driver_phone && String(request.driver_phone).includes(cleanUserPhone)));
@@ -2383,14 +2383,14 @@ function handleRealtimeMatchingEvent(event, request) {
     if (isRider && state.mode !== 'driver' && !state.driverOnline) {
       state.currentActiveRide = request;
       state.activeRideRole = 'rider';
-    } else if (isAssignedDriver) {
+    } else if (isAssignedDriver && (request.status === 'driver_accepted' || request.status === 'ride_started' || request.status === 'completed')) {
       state.currentActiveRide = request;
       state.activeDriverTrip = request;
       state.activeRideRole = 'driver';
     }
   }
 
-  // Skip if driver already declined this specific request ID on this device
+  // Skip only if driver explicitly declined this specific request ID in this session
   if (request && state.declinedRequestIds && state.declinedRequestIds.has(request.id)) {
     return;
   }
@@ -2453,16 +2453,17 @@ function handleRealtimeMatchingEvent(event, request) {
       rawRequest: request
     };
 
-    // Check if current user is an active online driver (duty loosened for live testing)
-    const tripAcceptedTime = state.activeDriverTrip ? (state.activeDriverTrip.accepted_at || state.activeDriverTrip.timestamp || state.activeDriverTrip.created_at) : null;
+    // Check if current user is actively engaged in an already-accepted ongoing trip
+    const isTripInProgress = state.activeDriverTrip && (state.activeDriverTrip.status === 'driver_accepted' || state.activeDriverTrip.status === 'ride_started');
+    const tripAcceptedTime = isTripInProgress ? (state.activeDriverTrip.accepted_at || state.activeDriverTrip.timestamp || state.activeDriverTrip.created_at) : null;
     const tripAge = tripAcceptedTime ? (Date.now() - new Date(tripAcceptedTime).getTime()) : Infinity;
-    const isStaleTrip = tripAge > 5 * 60 * 1000;
+    const isStaleTrip = tripAge > 10 * 60 * 1000;
     if (isStaleTrip && state.activeDriverTrip) {
       state.activeDriverTrip = null;
     }
-    const isDriverFree = !state.activeDriverTrip || state.activeDriverTrip.status === 'completed' || state.activeDriverTrip.status === 'cancelled' || isStaleTrip;
+    const isDriverBusy = isTripInProgress && !isStaleTrip;
 
-    if (isDriverActive && isDriverFree) {
+    if (isDriverActive && !isDriverBusy) {
       state.driverOnline = true;
       openDriverIncomingModal(state.incomingRequest);
       renderDriverIncomingRequest();
@@ -2850,7 +2851,7 @@ function escapeHtml(str) {
 // Open Driver Incoming Ride Modal with 45s countdown
 function openDriverIncomingModal(req) {
   const modal = document.getElementById('driverIncomingRideModal');
-  if (!modal) return;
+  if (!modal || !req) return;
 
   const nameEl = document.getElementById('driverIncomingRiderName');
   const roleEl = document.getElementById('driverIncomingRiderRole');
@@ -2863,21 +2864,23 @@ function openDriverIncomingModal(req) {
   const payEl = document.getElementById('driverIncomingPayMethod');
   const vehPrefEl = document.getElementById('driverIncomingVehiclePref');
 
-  if (nameEl) nameEl.textContent = req.name;
-  if (roleEl) roleEl.textContent = `${req.role} • Verified`;
-  if (avatarEl) avatarEl.src = req.avatar;
-  if (fareEl) fareEl.textContent = `₹${req.fareOffer}`;
-  if (btnFareEl) btnFareEl.textContent = `₹${req.fareOffer}`;
-  if (pickupEl) pickupEl.textContent = req.pickup;
-  if (dropEl) dropEl.textContent = req.drop;
-  if (distEl) distEl.textContent = `${req.distance} km corridor`;
-  if (payEl) payEl.textContent = req.paymentMethod;
+  const fareVal = req.fareOffer || req.fare || 110;
+  if (nameEl) nameEl.textContent = req.name || req.rider_name || 'Verified Commuter';
+  if (roleEl) roleEl.textContent = `${req.role || req.rider_role || 'Daily Commuter'} • Verified`;
+  if (avatarEl) avatarEl.src = req.avatar || req.rider_avatar || 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=120&h=120&q=80';
+  if (fareEl) fareEl.textContent = `₹${fareVal}`;
+  if (btnFareEl) btnFareEl.textContent = `₹${fareVal}`;
+  if (pickupEl) pickupEl.textContent = req.pickup || 'Pickup Location';
+  if (dropEl) dropEl.textContent = req.drop || req.drop_location || 'Drop Location';
+  if (distEl) distEl.textContent = `${req.distance || req.distance_km || 84} km route`;
+  if (payEl) payEl.textContent = req.paymentMethod || req.payment_method || 'Direct UPI';
   if (vehPrefEl) {
     vehPrefEl.textContent = req.vehiclePreference || (req.isFlexible ? 'Any / Custom' : 'Flexible Match');
   }
 
   modal.classList.remove('hidden');
   modal.style.display = 'flex';
+  modal.style.zIndex = '99999';
   if (window.lucide) lucide.createIcons();
 
   startIncomingTimer();

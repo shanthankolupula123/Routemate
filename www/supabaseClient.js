@@ -1954,7 +1954,7 @@ const db = {
       }, 100);
     },
 
-    // Dedicated channel for drivers listening to table inserts & broadcasts on rides
+    // Dedicated channel for drivers listening to table inserts, updates & broadcasts
     subscribeDriverChannel(force = false) {
       const client = getSupabaseClient();
       if (!client) return;
@@ -1973,15 +1973,16 @@ const db = {
                 this._handleIncomingEvent(payload.payload.event, payload.payload.request);
               }
             })
-            .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'rides' }, (payload) => {
-              console.log('⚡ [Driver Channel Direct DB INSERT]:', payload.new);
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'rides' }, (payload) => {
+              console.log('⚡ [Driver Channel Direct DB rides event]:', payload.eventType, payload.new);
               const row = payload.new;
               if (!row) return;
               let meta = {};
               try { meta = JSON.parse(row.notes || '{}'); } catch(e){}
               const isReq = String(row.vehicle_number || '').startsWith('REQ-') ||
                             (row.driver_name && row.driver_name.includes('(Rider Request)')) ||
-                            meta.isRequest;
+                            meta.isRequest ||
+                            row.status === 'searching';
               if (isReq && (row.status === 'active' || row.status === 'searching')) {
                 const incomingReq = {
                   id: row.vehicle_number || `REQ-${Date.now()}`,
@@ -2014,6 +2015,39 @@ const db = {
                   created_at: row.created_at
                 };
                 console.log('⚡ [Driver Channel Direct Ride Trigger]:', incomingReq.id);
+                this._handleIncomingEvent('new_ride_request', incomingReq);
+              } else if (payload.eventType === 'UPDATE' && row && String(row.vehicle_number || '').startsWith('REQ-')) {
+                let meta = {};
+                try { meta = JSON.parse(row.notes || '{}'); } catch(e){}
+                if (row.status === 'completed' || meta.status === 'driver_accepted') {
+                  this._handleIncomingEvent('ride_accepted', { id: row.vehicle_number, ...meta });
+                }
+              }
+            })
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'bookings' }, (payload) => {
+              console.log('⚡ [Driver Channel Direct DB bookings event]:', payload.eventType, payload.new);
+              const b = payload.new;
+              if (b && (b.status === 'confirmed' || b.status === 'searching' || b.status === 'pending')) {
+                const incomingReq = {
+                  id: b.id ? `REQ-${String(b.id).replace(/[^a-zA-Z0-9]/g, '').slice(0, 8)}` : `REQ-${Date.now()}`,
+                  dbId: b.id,
+                  booking_id: b.id,
+                  rider_name: b.rider_name || 'Verified Passenger',
+                  rider_phone: b.rider_phone || '+91 98480 23145',
+                  seats: b.seats_booked || 1,
+                  fare: b.total_fare || 110,
+                  pin: b.booking_pin || '4821',
+                  pickup: 'Uppal Ring Road Metro, Hyderabad',
+                  drop: 'Jangaon Bus Depot / Chowrasta',
+                  drop_location: 'Jangaon Bus Depot / Chowrasta',
+                  distance: 84,
+                  vehicle_type: 'any',
+                  vehicleType: 'any',
+                  isFlexibleVehicle: true,
+                  payment_method: b.payment_method === 'cash' ? 'Cash on Board' : 'Direct UPI',
+                  status: 'searching',
+                  created_at: b.created_at || new Date().toISOString()
+                };
                 this._handleIncomingEvent('new_ride_request', incomingReq);
               }
             })
@@ -2611,13 +2645,14 @@ const db = {
               try { meta = JSON.parse(r.notes || '{}'); } catch(e){}
               const isReq = String(r.vehicle_number || '').startsWith('REQ-') ||
                             (r.driver_name && r.driver_name.includes('(Rider Request)')) ||
-                            meta.isRequest;
-              return isReq && rAge < 15 * 60 * 1000;
+                            meta.isRequest ||
+                            r.status === 'searching';
+              return isReq && rAge < 24 * 60 * 60 * 1000;
             });
 
             if (row) {
               let meta = {};
-              try { meta = JSON.parse(row.notes || '{}'); } catch(e){}
+              try { meta = JSON.parse(r.notes || '{}'); } catch(e){}
               incomingReq = {
                 id: row.vehicle_number || `REQ-${Date.now()}`,
                 dbId: row.id,
@@ -2664,8 +2699,7 @@ const db = {
               if (!bErr && bData && bData.length > 0) {
                 const b = bData[0];
                 const bAgeMs = b.created_at ? (Date.now() - new Date(b.created_at).getTime()) : 0;
-                // Only treat as live incoming if created within last 15 minutes
-                if (bAgeMs < 15 * 60 * 1000) {
+                if (bAgeMs < 24 * 60 * 60 * 1000) {
                   incomingReq = {
                     id: b.id ? `REQ-${String(b.id).replace(/[^a-zA-Z0-9]/g, '').slice(0, 8)}` : `REQ-${Date.now()}`,
                     dbId: b.id,
@@ -2698,8 +2732,8 @@ const db = {
               (typeof document !== 'undefined' && document.getElementById('driverModeView') && !document.getElementById('driverModeView').classList.contains('hidden'))
             );
             const isModalHidden = typeof document !== 'undefined' && (!document.getElementById('driverIncomingRideModal') || document.getElementById('driverIncomingRideModal').classList.contains('hidden'));
-            const needsIncomingUiSync = isDriverActive && (!state.incomingRequest || isModalHidden) && !state.activeDriverTrip;
-            if (!this._activeRequest || this._activeRequest.id !== incomingReq.id || this._activeRequest.status !== incomingReq.status || needsIncomingUiSync) {
+            const needsIncomingUiSync = isDriverActive && (!state.incomingRequest || isModalHidden);
+            if (needsIncomingUiSync || !this._activeRequest || this._activeRequest.id !== incomingReq.id || this._activeRequest.status !== incomingReq.status) {
               this._handleIncomingEvent('new_ride_request', incomingReq);
             }
           } else if (!foundOnServer && this._activeRequest && (this._activeRequest.status === 'searching' || this._activeRequest.status === 'active')) {
@@ -2734,7 +2768,7 @@ const db = {
             } catch(e){}
 
             const ageMs = this._activeRequest.created_at ? (Date.now() - new Date(this._activeRequest.created_at).getTime()) : 999999;
-            if (ageMs > 300000) {
+            if (ageMs > 30 * 60 * 1000) {
               this._activeRequest = null;
               try { localStorage.removeItem('routemate_active_ride_request'); } catch(e){}
               this._notify('ride_cleared', null);
