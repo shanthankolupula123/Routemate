@@ -1754,6 +1754,7 @@ const db = {
   // ==========================================
   matching: {
     _channel: null,
+    _driverChannel: null,
     _broadcastChannel: null,
     _listeners: new Set(),
     _activeRequest: null,
@@ -1761,7 +1762,14 @@ const db = {
     _pollTimer: null,
 
     // Initialize Realtime Multi-Transport Bus
-    init() {
+    init(forceReconnect = false) {
+      if (forceReconnect && this._channel) {
+        try {
+          const client = getSupabaseClient();
+          if (client) client.removeChannel(this._channel);
+        } catch (e) {}
+        this._channel = null;
+      }
       // 1. Browser BroadcastChannel for 0ms inter-tab matching
       if (typeof window !== 'undefined' && window.BroadcastChannel) {
         try {
@@ -1808,32 +1816,46 @@ const db = {
             .on('postgres_changes', { event: '*', schema: 'public', table: 'rides' }, (payload) => {
               console.log('📡 [Supabase Realtime DB postgres_changes on rides]:', payload.eventType, payload.new);
               const row = payload.new;
-              if (row && (row.status === 'active' || row.status === 'searching') && String(row.vehicle_number || '').startsWith('REQ-')) {
+              if (row && (row.status === 'active' || row.status === 'searching')) {
                 let meta = {};
                 try { meta = JSON.parse(row.notes || '{}'); } catch(e){}
-                const incomingReq = {
-                  id: row.vehicle_number,
-                  dbId: row.id,
-                  rider_id: meta.riderId || row.driver_id,
-                  rider_name: meta.riderName || (row.driver_name ? row.driver_name.replace(' (Rider Request)', '') : 'Passenger'),
-                  rider_phone: meta.riderPhone || '+91 98480 23145',
-                  rider_avatar: meta.riderAvatar || row.avatar,
-                  rider_role: meta.riderRole || row.driver_role || 'Daily Commuter',
-                  pickup: row.pickup,
-                  drop: row.drop_location,
-                  drop_location: row.drop_location,
-                  seats: row.seats_available || 1,
-                  fare: row.per_seat_price || 108,
-                  distance: meta.distance || 84,
-                  pin: meta.pin || '4821',
-                  vehicle_type: meta.vehicleType || row.vehicle_type || 'any',
-                  vehicleType: meta.vehicleType || row.vehicle_type || 'any',
-                  isFlexibleVehicle: Boolean(meta.isFlexible !== false),
-                  payment_method: meta.paymentMethod || 'Direct UPI',
-                  status: 'searching',
-                  created_at: row.created_at
-                };
-                this._handleIncomingEvent('new_ride_request', incomingReq);
+                const isReq = String(row.vehicle_number || '').startsWith('REQ-') ||
+                              (row.driver_name && row.driver_name.includes('(Rider Request)')) ||
+                              meta.isRequest;
+                if (isReq) {
+                  const incomingReq = {
+                    id: row.vehicle_number || `REQ-${Date.now()}`,
+                    dbId: row.id,
+                    rider_id: meta.riderId || row.driver_id,
+                    rider_name: meta.riderName || (row.driver_name ? row.driver_name.replace(' (Rider Request)', '') : 'Passenger'),
+                    rider_phone: meta.riderPhone || '+91 98480 23145',
+                    rider_avatar: meta.riderAvatar || row.avatar,
+                    rider_role: meta.riderRole || row.driver_role || 'Daily Commuter',
+                    pickup: row.pickup,
+                    pickup_lat: meta.pickup_lat || meta.pickupLat || 17.4024,
+                    pickup_lng: meta.pickup_lng || meta.pickupLng || 78.5604,
+                    drop: row.drop_location,
+                    drop_location: row.drop_location,
+                    drop_lat: meta.drop_lat || meta.dropLat || 17.7241,
+                    drop_lng: meta.drop_lng || meta.dropLng || 79.1623,
+                    pickupLat: meta.pickupLat || meta.pickup_lat || 17.4024,
+                    pickupLng: meta.pickupLng || meta.pickup_lng || 78.5604,
+                    dropLat: meta.dropLat || meta.drop_lat || 17.7241,
+                    dropLng: meta.dropLng || meta.drop_lng || 79.1623,
+                    seats: row.seats_available || 1,
+                    fare: row.per_seat_price || 108,
+                    distance: meta.distance || 84,
+                    pin: meta.pin || '4821',
+                    vehicle_type: meta.vehicleType || row.vehicle_type || 'any',
+                    vehicleType: meta.vehicleType || row.vehicle_type || 'any',
+                    isFlexibleVehicle: Boolean(meta.isFlexible !== false),
+                    payment_method: meta.paymentMethod || 'Direct UPI',
+                    status: 'searching',
+                    created_at: row.created_at
+                  };
+                  console.log('⚡ [Instant Ride Match Dispatch] DB Event:', payload.eventType, incomingReq.id);
+                  this._handleIncomingEvent('new_ride_request', incomingReq);
+                }
               } else if (payload.eventType === 'UPDATE' && row && String(row.vehicle_number || '').startsWith('REQ-')) {
                 let meta = {};
                 try { meta = JSON.parse(row.notes || '{}'); } catch(e){}
@@ -1930,6 +1952,66 @@ const db = {
       setTimeout(() => {
         this.syncActiveRequest();
       }, 100);
+    },
+
+    // Dedicated channel for drivers listening to table inserts on rides
+    subscribeDriverChannel() {
+      const client = getSupabaseClient();
+      if (!client) return;
+      if (!this._driverChannel) {
+        try {
+          this._driverChannel = client.channel('driver_rides_stream')
+            .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'rides' }, (payload) => {
+              console.log('⚡ [Driver Channel Direct DB INSERT]:', payload.new);
+              const row = payload.new;
+              if (!row) return;
+              let meta = {};
+              try { meta = JSON.parse(row.notes || '{}'); } catch(e){}
+              const isReq = String(row.vehicle_number || '').startsWith('REQ-') ||
+                            (row.driver_name && row.driver_name.includes('(Rider Request)')) ||
+                            meta.isRequest;
+              if (isReq && (row.status === 'active' || row.status === 'searching')) {
+                const incomingReq = {
+                  id: row.vehicle_number || `REQ-${Date.now()}`,
+                  dbId: row.id,
+                  rider_id: meta.riderId || row.driver_id,
+                  rider_name: meta.riderName || (row.driver_name ? row.driver_name.replace(' (Rider Request)', '') : 'Passenger'),
+                  rider_phone: meta.riderPhone || '+91 98480 23145',
+                  rider_avatar: meta.riderAvatar || row.avatar,
+                  rider_role: meta.riderRole || row.driver_role || 'Daily Commuter',
+                  pickup: row.pickup,
+                  pickup_lat: meta.pickup_lat || meta.pickupLat || 17.4024,
+                  pickup_lng: meta.pickup_lng || meta.pickupLng || 78.5604,
+                  drop: row.drop_location,
+                  drop_location: row.drop_location,
+                  drop_lat: meta.drop_lat || meta.dropLat || 17.7241,
+                  drop_lng: meta.drop_lng || meta.dropLng || 79.1623,
+                  pickupLat: meta.pickupLat || meta.pickup_lat || 17.4024,
+                  pickupLng: meta.pickupLng || meta.pickup_lng || 78.5604,
+                  dropLat: meta.dropLat || meta.drop_lat || 17.7241,
+                  dropLng: meta.dropLng || meta.drop_lng || 79.1623,
+                  seats: row.seats_available || 1,
+                  fare: row.per_seat_price || 108,
+                  distance: meta.distance || 84,
+                  pin: meta.pin || '4821',
+                  vehicle_type: meta.vehicleType || row.vehicle_type || 'any',
+                  vehicleType: meta.vehicleType || row.vehicle_type || 'any',
+                  isFlexibleVehicle: true,
+                  payment_method: meta.paymentMethod || 'Direct UPI',
+                  status: 'searching',
+                  created_at: row.created_at
+                };
+                console.log('⚡ [Driver Channel Direct Ride Trigger]:', incomingReq.id);
+                this._handleIncomingEvent('new_ride_request', incomingReq);
+              }
+            })
+            .subscribe((status) => {
+              console.log('📡 Driver dedicated channel status:', status);
+            });
+        } catch (e) {
+          console.warn('Driver direct channel subscription warning:', e);
+        }
+      }
     },
 
     // Broadcast an event across all channels
@@ -2032,6 +2114,11 @@ const db = {
       const pin = Math.floor(1000 + Math.random() * 9000).toString();
       const requestId = 'REQ-' + Math.floor(100000 + Math.random() * 900000);
 
+      const pLat = reqData.pickupLat || reqData.pickup_lat || 17.4024;
+      const pLng = reqData.pickupLng || reqData.pickup_lng || 78.5604;
+      const dLat = reqData.dropLat || reqData.drop_lat || 17.7241;
+      const dLng = reqData.dropLng || reqData.drop_lng || 79.1623;
+
       const request = {
         id: requestId,
         rider_id: reqData.riderId || ('rider_' + Date.now()),
@@ -2041,14 +2128,22 @@ const db = {
         rider_role: reqData.riderRole || 'Daily Commuter',
         rider_rating: reqData.riderRating || 4.9,
         pickup: reqData.pickup,
-        pickup_lat: reqData.pickupLat || 17.4024,
-        pickup_lng: reqData.pickupLng || 78.5604,
-        drop_location: reqData.drop,
-        drop_lat: reqData.dropLat || 17.7241,
-        drop_lng: reqData.dropLng || 79.1623,
-        distance_km: reqData.distance || 84,
+        pickup_lat: pLat,
+        pickup_lng: pLng,
+        pickupLat: pLat,
+        pickupLng: pLng,
+        drop_location: reqData.drop_location || reqData.drop,
+        drop: reqData.drop || reqData.drop_location,
+        drop_lat: dLat,
+        drop_lng: dLng,
+        dropLat: dLat,
+        dropLng: dLng,
+        distance_km: reqData.distance || reqData.distance_km || 84,
+        distance: reqData.distance || reqData.distance_km || 84,
         vehicle_type: reqData.vehicleType || 'any',
+        vehicleType: reqData.vehicleType || 'any',
         is_flexible_vehicle: Boolean(reqData.isFlexibleVehicle || reqData.vehicleType === 'any' || reqData.vehicleType === 'custom'),
+        isFlexibleVehicle: Boolean(reqData.isFlexibleVehicle || reqData.vehicleType === 'any' || reqData.vehicleType === 'custom'),
         vehicle_preference: reqData.vehiclePreferenceLabel || (reqData.vehicleType === 'any' ? 'Any / Custom' : reqData.vehicleType),
         seats: reqData.seats || 1,
         fare: reqData.fare || 110,
@@ -2098,9 +2193,10 @@ const db = {
             per_seat_price: request.fare || 108,
             payment_preference: request.payment_method === 'cash' ? 'cash' : 'upi',
             verified: true,
-            status: 'active',
+            status: 'searching',
             notes: JSON.stringify({
               isRequest: true,
+              status: 'searching',
               riderId: request.rider_id,
               riderName: request.rider_name,
               riderPhone: request.rider_phone,
@@ -2109,10 +2205,16 @@ const db = {
               fare: request.fare,
               distance: request.distance,
               pin: request.pin,
-              pickupLat: request.pickupLat,
-              pickupLng: request.pickupLng,
-              dropLat: request.dropLat,
-              dropLng: request.dropLng,
+              pickup: request.pickup,
+              drop: request.drop_location,
+              pickup_lat: pLat,
+              pickup_lng: pLng,
+              drop_lat: dLat,
+              drop_lng: dLng,
+              pickupLat: pLat,
+              pickupLng: pLng,
+              dropLat: dLat,
+              dropLng: dLng,
               vehicleType: reqType,
               isFlexible: request.isFlexibleVehicle,
               paymentMethod: request.payment_method,
@@ -2120,7 +2222,16 @@ const db = {
             })
           };
 
-          const { data, error } = await client.from('rides').insert([dbRow]).select();
+          let { data, error } = await client.from('rides').insert([dbRow]).select();
+          // If Postgres check constraint 'rides_status_check' requires 'active', fallback gracefully
+          if (error && error.message && error.message.includes('rides_status_check')) {
+            console.warn('ℹ️ Postgres check constraint requires status active, inserting with active status');
+            dbRow.status = 'active';
+            const retry = await client.from('rides').insert([dbRow]).select();
+            data = retry.data;
+            error = retry.error;
+          }
+
           if (error) {
             console.error('❌ Supabase rides insert error:', error.message);
           } else {
@@ -2137,6 +2248,7 @@ const db = {
               seats: request.seats || 1,
               fare: request.fare || 110,
               paymentMethod: request.payment_method === 'cash' ? 'cash' : 'upi',
+              status: 'searching',
               pin: request.pin
             }).catch(() => {});
           }
@@ -2464,20 +2576,26 @@ const db = {
           const { data: rideData, error: rideErr } = await client
             .from('rides')
             .select('*')
-            .eq('status', 'active')
-            .ilike('vehicle_number', 'REQ-%')
+            .in('status', ['active', 'searching'])
             .order('created_at', { ascending: false })
-            .limit(1);
+            .limit(10);
 
           if (!rideErr && rideData && rideData.length > 0) {
-            const row = rideData[0];
-            const rowAgeMs = row.created_at ? (Date.now() - new Date(row.created_at).getTime()) : 0;
-            // Only accept if created within last 15 minutes to avoid stale mock rides
-            if (rowAgeMs < 15 * 60 * 1000) {
+            const row = rideData.find(r => {
+              const rAge = r.created_at ? (Date.now() - new Date(r.created_at).getTime()) : 0;
+              let meta = {};
+              try { meta = JSON.parse(r.notes || '{}'); } catch(e){}
+              const isReq = String(r.vehicle_number || '').startsWith('REQ-') ||
+                            (r.driver_name && r.driver_name.includes('(Rider Request)')) ||
+                            meta.isRequest;
+              return isReq && rAge < 15 * 60 * 1000;
+            });
+
+            if (row) {
               let meta = {};
               try { meta = JSON.parse(row.notes || '{}'); } catch(e){}
               incomingReq = {
-                id: row.vehicle_number,
+                id: row.vehicle_number || `REQ-${Date.now()}`,
                 dbId: row.id,
                 rider_id: meta.riderId || row.driver_id,
                 rider_name: meta.riderName || (row.driver_name ? row.driver_name.replace(' (Rider Request)', '') : 'Passenger'),
@@ -2485,8 +2603,16 @@ const db = {
                 rider_avatar: meta.riderAvatar || row.avatar,
                 rider_role: meta.riderRole || row.driver_role || 'Daily Commuter',
                 pickup: row.pickup,
+                pickup_lat: meta.pickup_lat || meta.pickupLat || 17.4024,
+                pickup_lng: meta.pickup_lng || meta.pickupLng || 78.5604,
                 drop: row.drop_location,
                 drop_location: row.drop_location,
+                drop_lat: meta.drop_lat || meta.dropLat || 17.7241,
+                drop_lng: meta.drop_lng || meta.dropLng || 79.1623,
+                pickupLat: meta.pickupLat || meta.pickup_lat || 17.4024,
+                pickupLng: meta.pickupLng || meta.pickup_lng || 78.5604,
+                dropLat: meta.dropLat || meta.drop_lat || 17.7241,
+                dropLng: meta.dropLng || meta.drop_lng || 79.1623,
                 seats: row.seats_available || 1,
                 fare: row.per_seat_price || 108,
                 distance: meta.distance || 84,

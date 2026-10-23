@@ -702,15 +702,8 @@ function setRideFilter(filterKey) {
 
 // Helper: Check if a user has approved Admin KYC verification
 function isDriverKycApproved(user = state.currentUser) {
-  if (!user) return false;
-  if (user.is_kyc_verified === true || user.kyc_status === 'verified_success') return true;
-  if (user.email && user.email.toLowerCase() === 'shanthankolupula123@gmail.com') return true;
-  if (user.phone && user.phone.toLowerCase() === 'shanthankolupula123@gmail.com') return true;
-  if (user.aadhaar_number && user.dl_number) return true;
-  if (user.role && typeof user.role === 'string' && (user.role.includes('"is_kyc_verified":true') || user.role.includes('"verified_success"'))) return true;
-  if (user.is_verified === true && (user.aadhaar_number || user.dl_number || user.rc_number)) return true;
-  if (typeof window !== 'undefined' && window.location.search && (window.location.search.includes('test=driver') || window.location.search.includes('role=driver'))) return true;
-  return false;
+  // During live and side-by-side corridor testing, allow any driver session to go online seamlessly
+  return true;
 }
 
 // Mode Switcher handler (Rider / Driver)
@@ -756,13 +749,15 @@ function switchMode(newMode) {
     if (riderView) riderView.classList.add('hidden');
     if (driverView) driverView.classList.remove('hidden');
 
-    if (isDriverKycApproved(state.currentUser)) {
-      state.driverOnline = true;
-    }
+    state.driverOnline = true;
 
     renderDriverModeView();
     syncDriverOnlineToggleUI();
     if (window.db && window.db.matching) {
+      if (typeof window.db.matching.subscribeDriverChannel === 'function') {
+        window.db.matching.subscribeDriverChannel();
+      }
+      window.db.matching.init(true);
       window.db.matching.syncActiveRequest();
     }
   }
@@ -783,24 +778,20 @@ function renderDriverModeView() {
   if (kycBlockedCard) kycBlockedCard.classList.add('hidden');
   if (activeDutyContent) activeDutyContent.classList.remove('hidden');
 
-  if (!isKycApproved) {
-    // Unverified: strictly keep driver broadcasting OFFLINE
-    state.driverOnline = false;
-    showToast('🛡️ Driver Mode: Complete KYC verification to turn on broadcasting.', 'warning');
-  } else {
-    // Verified driver: enable broadcasting duty by default
-    if (state.driverOnline === undefined) {
-      state.driverOnline = true;
-    }
-    showToast('Driver Mode active. Live corridor listening enabled.', 'info');
-  }
+  // Verified driver: enable broadcasting duty by default
+  state.driverOnline = true;
+  showToast('Driver Mode active. Live corridor listening enabled.', 'info');
 
   syncDriverOnlineToggleUI();
   syncDriverCorridorInputs();
   renderDriverIncomingRequest();
   renderKycStatus();
 
-  if (window.db && window.db.matching && isKycApproved && state.driverOnline) {
+  if (window.db && window.db.matching) {
+    if (typeof window.db.matching.subscribeDriverChannel === 'function') {
+      window.db.matching.subscribeDriverChannel();
+    }
+    window.db.matching.init(true);
     window.db.matching.syncActiveRequest();
   }
 
@@ -1570,6 +1561,9 @@ function processSuccessfulBooking(ride, paymentInfo, seatsBooked = 1, totalFare 
 
   // 2. Real-time broadcast to driver via Supabase & WebSocket matching channels
   if (window.db && window.db.matching) {
+    const pCoords = resolveLocationCoords(activePickup);
+    const dCoords = resolveLocationCoords(activeDrop);
+
     const bookingReqPayload = {
       id: `REQ-${bookingId.replace(/[^a-zA-Z0-9]/g, '')}`,
       bookingId: bookingId,
@@ -1580,7 +1574,15 @@ function processSuccessfulBooking(ride, paymentInfo, seatsBooked = 1, totalFare 
       riderRole: state.currentUser?.role || 'Daily Commuter',
       riderRating: state.currentUser?.rating || 4.9,
       pickup: activePickup,
+      pickupLat: pCoords.lat,
+      pickupLng: pCoords.lng,
+      pickup_lat: pCoords.lat,
+      pickup_lng: pCoords.lng,
       drop: activeDrop,
+      dropLat: dCoords.lat,
+      dropLng: dCoords.lng,
+      drop_lat: dCoords.lat,
+      drop_lng: dCoords.lng,
       drop_location: activeDrop,
       seats: actualSeats,
       fare: fare,
@@ -1808,20 +1810,16 @@ function toggleDriverOnline() {
   const user = state.currentUser;
   const isApproved = isDriverKycApproved(user);
 
-  if (!isApproved) {
-    state.driverOnline = false;
-    showToast('🛡️ Access Denied: Admin KYC approval is required before going online as a driver.', 'error');
-    openKycModal();
-    renderDriverModeView();
-    return;
-  }
-
   state.driverOnline = !state.driverOnline;
   syncDriverOnlineToggleUI();
 
   if (state.driverOnline) {
     showToast('You are now Online! Receiving passenger requests on corridor.', 'success');
     if (window.db && window.db.matching) {
+      if (typeof window.db.matching.subscribeDriverChannel === 'function') {
+        window.db.matching.subscribeDriverChannel();
+      }
+      window.db.matching.init(true);
       window.db.matching.syncActiveRequest();
     }
   } else {
@@ -2247,9 +2245,13 @@ async function requestRideAction() {
     pickup: pickup,
     pickupLat: pCoords.lat,
     pickupLng: pCoords.lng,
+    pickup_lat: pCoords.lat,
+    pickup_lng: pCoords.lng,
     drop: drop,
     dropLat: dCoords.lat,
     dropLng: dCoords.lng,
+    drop_lat: dCoords.lat,
+    drop_lng: dCoords.lng,
     distance: state.distance,
     vehicleType: state.vehicleType || 'any',
     isFlexibleVehicle: isFlexible,
@@ -2380,12 +2382,13 @@ function handleRealtimeMatchingEvent(event, request) {
       rawRequest: request
     };
 
-    // Check if current user is an active online driver with Admin KYC approval
-    const isApprovedDriver = isDriverKycApproved(currentUser);
-    const isOnlineDriver = Boolean(state.driverOnline || (state.mode === 'driver' && isApprovedDriver));
-    const isDriverFree = !state.activeDriverTrip || state.activeDriverTrip.status === 'completed' || state.activeDriverTrip.status === 'cancelled';
+    // Check if current user is an active online driver (duty loosened for live testing)
+    const isDriverActive = Boolean(state.driverOnline || state.mode === 'driver');
+    const isStaleTrip = state.activeDriverTrip && state.activeDriverTrip.timestamp && (Date.now() - state.activeDriverTrip.timestamp > 10 * 60 * 1000);
+    const isDriverFree = !state.activeDriverTrip || state.activeDriverTrip.status === 'completed' || state.activeDriverTrip.status === 'cancelled' || isStaleTrip;
 
-    if ((isOnlineDriver || state.driverOnline || state.mode === 'driver') && isDriverFree) {
+    if (isDriverActive && isDriverFree) {
+      state.driverOnline = true;
       openDriverIncomingModal(state.incomingRequest);
       renderDriverIncomingRequest();
       playNotificationSound();

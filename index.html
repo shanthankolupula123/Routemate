@@ -1560,8 +1560,8 @@
       </div>
     </div>
 
-    <!-- 1. Real-Time Driver Incoming Ride Request Modal (Popped up when Online & KYC Verified) -->
-    <div id="driverIncomingRideModal" class="modal-backdrop fixed inset-0 z-55 flex items-center justify-center p-4 hidden">
+    <!-- 1. Real-Time Driver Incoming Ride Request Modal (Popped up when Online) -->
+    <div id="driverIncomingRideModal" class="modal-backdrop fixed inset-0 z-55 flex items-center justify-center p-4 hidden" style="z-index: 99999;">
       <div class="bg-white rounded-3xl max-w-sm w-full shadow-2xl border-2 border-blue-500 overflow-hidden animate-in fade-in zoom-in duration-200">
         <!-- Top Live Banner with Animated Countdown -->
         <div class="p-4 bg-gradient-to-r from-blue-900 to-indigo-950 text-white flex items-center justify-between">
@@ -3370,16 +3370,16 @@
     };
   </script>
   <!-- Interactive Maps Engine (Leaflet + OSM with Google Maps fallback) -->
-  <script src="maps.js?v=20261023_live_sync_v2"></script>
+  <script src="maps.js?v=20261023_dispatch_v1"></script>
   <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCpZp3uUEEPF5ZJeVuuQRSGZxBDIgPuMqA&libraries=places,geometry&callback=initGoogleMap" async defer></script>
   <!-- Razorpay Standard Checkout SDK -->
   <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
-  <script src="payment.js?v=20261023_live_sync_v2"></script>
+  <script src="payment.js?v=20261023_dispatch_v1"></script>
   <!-- Tesseract.js Pure Client-Side WebAssembly OCR Engine v5 -->
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
   <!-- Supabase JS Client SDK v2 -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="supabaseClient.js?v=20261023_live_sync_v2"></script>
-  <script src="app.js?v=20261023_live_sync_v2"></script>
+  <script src="supabaseClient.js?v=20261023_dispatch_v1"></script>
+  <script src="app.js?v=20261023_dispatch_v1"></script>
 </body>
 </html>
