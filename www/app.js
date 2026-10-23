@@ -4741,7 +4741,7 @@ async function handleSendOtp() {
     showToast('Failed to dispatch verification code. Please check your network and try again.', 'error');
   } finally {
     if (sendBtn) sendBtn.disabled = false;
-    if (sendBtnText) sendBtnText.textContent = state.authMode === 'signup' ? 'Verify & Continue to Step 2' : 'Send Sign In Code';
+    if (sendBtnText) sendBtnText.textContent = state.authMode === 'signup' ? 'Continue with Email' : 'Send Sign In Code';
     if (window.lucide) lucide.createIcons();
   }
 }
@@ -4850,96 +4850,61 @@ async function handleVerifyOtp() {
         }
       }
 
-      // Check if user already exists in database
-      const userExistsInDb = Boolean(
-        profile && (
-          (profile.name && profile.name.trim().length >= 2 && profile.name !== 'Verified Commuter' && profile.name !== 'Guest Commuter') ||
-          profile.profile_completed ||
-          profile.is_kyc_verified ||
-          profile.email
-        )
-      );
-
-      // Requirement 1: If user already exists in database, automatically detect existing user
-      // and log them in directly with their profile intact, completely bypassing duplicate creation
-      if (userExistsInDb && profile) {
-        console.log('✅ Existing user account detected in Supabase DB. Logging in directly:', profile.email || profile.phone, profile.name);
-        const sessionUser = {
-          id: profile.id,
-          email: profile.email || authIdentifier,
-          phone: profile.phone || '',
-          name: (profile.name && profile.name !== 'Verified Commuter') ? profile.name : 'Verified Commuter',
-          gender: profile.gender || 'Prefer not to say',
-          avatar: (profile.avatar_url && !profile.avatar_url.includes('photo-1535713875002-d1d0cf377fde')) ? profile.avatar_url : null,
-          is_verified: true,
-          is_kyc_verified: Boolean(profile.is_kyc_verified),
-          kyc_status: profile.kyc_status || (profile.is_kyc_verified ? 'verified_success' : 'unverified'),
-          aadhaar_number: profile.aadhaar_number || '',
-          dl_number: profile.dl_number || '',
-          dob: profile.dob || '',
-          memberSince: profile.member_since || profile.created_at || 'October 2024',
-          profile_completed: Boolean(profile.name && profile.name !== 'Verified Commuter'),
-          authenticatedAt: new Date().toISOString()
-        };
-
-        state.currentUser = sessionUser;
-        localStorage.setItem('routemate_auth_user', JSON.stringify(sessionUser));
-        sessionStorage.setItem('routemate_auth_user', JSON.stringify(sessionUser));
-        if (document.documentElement) {
-          document.documentElement.classList.add('has-persisted-session');
+      // Derive clean name from email if not already specified in profile
+      let displayName = 'Verified Commuter';
+      if (profile && profile.name && profile.name.trim().length >= 2 && profile.name !== 'Verified Commuter' && profile.name !== 'Guest Commuter') {
+        displayName = profile.name.trim();
+      } else if (authIdentifier && authIdentifier.includes('@')) {
+        const prefix = authIdentifier.split('@')[0].replace(/[._+-]/g, ' ').trim();
+        if (prefix.length > 0) {
+          displayName = prefix.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
         }
-
-        showToast(`✅ Welcome back, ${sessionUser.name}! Signed in successfully.`, 'success');
-        showDashboardView();
-
-        // Reset auth forms
-        backToPhoneStep();
-        const emailInput = document.getElementById('authEmailInput') || document.getElementById('authPhoneInput');
-        if (emailInput) emailInput.value = '';
-        return;
       }
 
-      // If in Sign In mode and a baseline profile exists
-      if (state.authMode === 'signin' && profile) {
-        const sessionUser = {
-          id: profile.id,
-          email: profile.email || authIdentifier,
-          phone: profile.phone || '',
-          name: profile.name || 'Verified Commuter',
-          gender: profile.gender || 'Prefer not to say',
-          avatar: profile.avatar_url || null,
-          is_verified: true,
-          is_kyc_verified: Boolean(profile.is_kyc_verified),
-          kyc_status: profile.kyc_status || 'unverified',
-          aadhaar_number: profile.aadhaar_number || '',
-          dl_number: profile.dl_number || '',
-          dob: profile.dob || '',
-          memberSince: profile.member_since || 'October 2024',
-          profile_completed: false,
-          authenticatedAt: new Date().toISOString()
-        };
+      const userId = (profile && profile.id) || (authUser && authUser.id) || ('usr_' + authIdentifier.replace(/[^a-zA-Z0-9]/g, '_'));
+      const sessionUser = {
+        id: userId,
+        email: (profile && profile.email) || authIdentifier,
+        phone: (profile && profile.phone) || '',
+        name: displayName,
+        gender: (profile && profile.gender) || 'Prefer not to say',
+        avatar: (profile && profile.avatar_url && !profile.avatar_url.includes('photo-1535713875002-d1d0cf377fde')) ? profile.avatar_url : null,
+        is_verified: true,
+        is_kyc_verified: Boolean(profile && profile.is_kyc_verified),
+        kyc_status: (profile && profile.kyc_status) || ((profile && profile.is_kyc_verified) ? 'verified_success' : 'unverified'),
+        aadhaar_number: (profile && profile.aadhaar_number) || '',
+        dl_number: (profile && profile.dl_number) || '',
+        dob: (profile && profile.dob) || '',
+        memberSince: (profile && (profile.member_since || profile.created_at)) || 'October 2024',
+        profile_completed: Boolean(profile && profile.profile_completed) || true,
+        authenticatedAt: new Date().toISOString()
+      };
 
-        state.currentUser = sessionUser;
-        localStorage.setItem('routemate_auth_user', JSON.stringify(sessionUser));
-        sessionStorage.setItem('routemate_auth_user', JSON.stringify(sessionUser));
-        if (document.documentElement) {
-          document.documentElement.classList.add('has-persisted-session');
-        }
-
-        showToast('✅ Signed in successfully.', 'success');
-        showDashboardView();
-
-        backToPhoneStep();
-        const emailInput = document.getElementById('authEmailInput') || document.getElementById('authPhoneInput');
-        if (emailInput) emailInput.value = '';
-        return;
+      state.currentUser = sessionUser;
+      localStorage.setItem('routemate_auth_user', JSON.stringify(sessionUser));
+      sessionStorage.setItem('routemate_auth_user', JSON.stringify(sessionUser));
+      if (document.documentElement) {
+        document.documentElement.classList.add('has-persisted-session');
       }
 
-      // Truly new user: Show Step 2 Profile Setup
-      console.log('📝 Truly new user sign up with email:', authIdentifier, '. Showing Step 2 profile onboarding...');
-      state.authEmail = authIdentifier;
-      showOnboardingStep(authIdentifier, profile);
-      showToast('Step 2 of 2: Please enter your name to complete your profile', 'info');
+      // If user profile didn't exist in Supabase, create/upsert it in the background without blocking
+      if (!profile && window.db && window.db.profiles && window.db.profiles.create) {
+        window.db.profiles.create({
+          id: userId,
+          name: displayName,
+          phone: authIdentifier,
+          role: 'rider',
+          is_verified: true
+        }).catch(e => console.warn('Background profile create:', e));
+      }
+
+      showToast(`✅ Welcome back, ${sessionUser.name}! Signed in successfully.`, 'success');
+      showDashboardView();
+
+      // Reset auth forms
+      backToPhoneStep();
+      const emailInput = document.getElementById('authEmailInput') || document.getElementById('authPhoneInput');
+      if (emailInput) emailInput.value = '';
       return;
     } else {
       if (errorText) errorText.textContent = 'Invalid verification code. Please enter the valid OTP sent to your email.';
@@ -4952,7 +4917,7 @@ async function handleVerifyOtp() {
     if (errorEl) errorEl.classList.remove('hidden');
   } finally {
     if (verifyBtn) verifyBtn.disabled = false;
-    if (verifyBtnText) verifyBtnText.textContent = state.authMode === 'signup' ? 'Verify & Continue to Step 2' : 'Verify & Access Dashboard';
+    if (verifyBtnText) verifyBtnText.textContent = 'Verify & Access Dashboard';
   }
 }
 
