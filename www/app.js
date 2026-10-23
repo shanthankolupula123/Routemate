@@ -2397,74 +2397,36 @@ function handleRealtimeMatchingEvent(event, request) {
 
   // --- EVENT 1: New Ride Request Broadcasted ---
   if ((event === 'new_ride_request' || event === 'searching') && request) {
-    if (request.status && request.status !== 'searching' && request.status !== 'active') return;
-
-    // Avoid self-matching only if rider is strictly on this tab in Rider mode
-    const isSameRiderOnThisTab = currentUser && (
-      (request.rider_id && request.rider_id === currentUser.id) ||
-      (request.rider_phone && cleanUserPhone && String(request.rider_phone).includes(cleanUserPhone))
-    );
-
     const isDriverActive = Boolean(
       state.driverOnline || 
       state.mode === 'driver' ||
       (typeof document !== 'undefined' && document.getElementById('driverModeView') && !document.getElementById('driverModeView').classList.contains('hidden'))
     );
 
-    if (isSameRiderOnThisTab && !isDriverActive) {
-      return;
-    }
-
-    const isFlexible = Boolean(
-      request.is_flexible_vehicle ||
-      request.isFlexibleVehicle ||
-      request.vehicle_type === 'any' ||
-      request.vehicle_type === 'custom' ||
-      request.vehicleType === 'any' ||
-      request.vehicleType === 'custom'
-    );
-    const reqVehType = request.vehicle_type || request.vehicleType || 'any';
-    const driverVehType = (state.registeredVehicles && state.registeredVehicles[0]?.type) || state.vehicleType || 'bike';
-    const seatsRequested = parseInt(request.seats || 1, 10);
-    
-    // Flexible matching: Single passenger requests match across bikes, autos & cars without artificial boundaries
-    const isVehicleMatched = isFlexible || reqVehType === 'any' || reqVehType === 'custom' || reqVehType === driverVehType || seatsRequested <= 1;
-
-    const prefLabel = isFlexible ? 'Any / Custom Vehicle' : (reqVehType === 'bike' ? 'Bike Pillion' : (reqVehType === 'auto' ? 'Auto Rickshaw' : 'Car / Cab'));
-
-    state.incomingRequest = {
-      id: request.id,
-      name: request.rider_name || 'Verified Commuter',
-      role: request.rider_role || 'Daily Commuter',
-      rating: request.rider_rating || 4.9,
-      totalCommutes: 14,
-      avatar: request.rider_avatar || 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=120&h=120&q=80',
-      pickup: request.pickup,
-      drop: request.drop_location || request.drop,
-      time: 'Ready in 5 mins',
-      distance: request.distance_km || request.distance || 84,
-      seatCount: seatsRequested,
-      fareOffer: request.fare || 110,
-      paymentMethod: request.payment_method === 'cash' ? 'Cash on Board' : 'Direct UPI',
-      pin: request.pin || '4821',
-      phone: request.rider_phone || '+91 98480 23145',
-      vehiclePreference: prefLabel,
-      isFlexible: isFlexible,
-      rawRequest: request
-    };
-
-    // Check if current user is actively engaged in an already-accepted ongoing trip
-    const isTripInProgress = state.activeDriverTrip && (state.activeDriverTrip.status === 'driver_accepted' || state.activeDriverTrip.status === 'ride_started');
-    const tripAcceptedTime = isTripInProgress ? (state.activeDriverTrip.accepted_at || state.activeDriverTrip.timestamp || state.activeDriverTrip.created_at) : null;
-    const tripAge = tripAcceptedTime ? (Date.now() - new Date(tripAcceptedTime).getTime()) : Infinity;
-    const isStaleTrip = tripAge > 10 * 60 * 1000;
-    if (isStaleTrip && state.activeDriverTrip) {
-      state.activeDriverTrip = null;
-    }
-    const isDriverBusy = isTripInProgress && !isStaleTrip;
-
-    if (isDriverActive && !isDriverBusy) {
+    // If driver is active/online, display incoming ride card & popup immediately without corridor/vehicle restrictions
+    if (isDriverActive) {
       state.driverOnline = true;
+      state.incomingRequest = {
+        id: request.id || ('REQ-' + Date.now()),
+        name: request.rider_name || request.name || 'Verified Commuter',
+        role: request.rider_role || request.role || 'Daily Commuter',
+        rating: request.rider_rating || request.rating || 4.9,
+        totalCommutes: 14,
+        avatar: request.rider_avatar || request.avatar || 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=120&h=120&q=80',
+        pickup: request.pickup || 'Pickup Location',
+        drop: request.drop_location || request.drop || 'Destination',
+        time: 'Ready in 5 mins',
+        distance: request.distance_km || request.distance || 84,
+        seatCount: request.seats || request.seatCount || 1,
+        fareOffer: request.fare || request.fareOffer || 110,
+        paymentMethod: request.payment_method === 'cash' ? 'Cash on Board' : 'Direct UPI',
+        pin: request.pin || '4821',
+        phone: request.rider_phone || request.phone || '+91 98480 23145',
+        vehiclePreference: 'Any / Custom Vehicle',
+        isFlexible: true,
+        rawRequest: request
+      };
+
       openDriverIncomingModal(state.incomingRequest);
       renderDriverIncomingRequest();
       playNotificationSound();
@@ -2477,10 +2439,11 @@ function handleRealtimeMatchingEvent(event, request) {
       if (typeof window.addPassengerMarkerToDriverMap === 'function') {
         const pLat = request.pickupLat || request.pickup_lat || (request.pickupCoords && request.pickupCoords.lat);
         const pLng = request.pickupLng || request.pickup_lng || (request.pickupCoords && request.pickupCoords.lng);
-        window.addPassengerMarkerToDriverMap(pLat, pLng, request.rider_name || 'Passenger', request.pickup);
+        window.addPassengerMarkerToDriverMap(pLat, pLng, state.incomingRequest.name, state.incomingRequest.pickup);
       }
 
-      showToast(`🚗 New Ride Request: ${request.rider_name || 'Passenger'} (${request.pickup} ➔ ${request.drop_location || request.drop}) • ₹${request.fare || 110}`, 'success');
+      showToast(`🚗 New Ride Request: ${state.incomingRequest.name} (${state.incomingRequest.pickup} ➔ ${state.incomingRequest.drop}) • ₹${state.incomingRequest.fareOffer}`, 'success');
+      return;
     }
   }
 
