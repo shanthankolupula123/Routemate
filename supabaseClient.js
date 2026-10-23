@@ -1029,8 +1029,11 @@ const db = {
       const client = getSupabaseClient();
       if (!client) return { success: false };
       try {
+        const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+        const validRideId = (bookingData.rideId && uuidRegex.test(bookingData.rideId)) ? bookingData.rideId : null;
+
         const payload = {
-          ride_id: bookingData.rideId,
+          ride_id: validRideId,
           rider_name: bookingData.riderName || 'Commuter',
           rider_phone: bookingData.riderPhone || '+91 98480 23145',
           seats_booked: bookingData.seats || 1,
@@ -1802,8 +1805,8 @@ const db = {
                 this._handleIncomingEvent(payload.payload.event, payload.payload.request);
               }
             })
-            .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'rides' }, (payload) => {
-              console.log('📡 [Supabase Realtime DB INSERT on rides]:', payload.new);
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'rides' }, (payload) => {
+              console.log('📡 [Supabase Realtime DB postgres_changes on rides]:', payload.eventType, payload.new);
               const row = payload.new;
               if (row && (row.status === 'active' || row.status === 'searching') && String(row.vehicle_number || '').startsWith('REQ-')) {
                 let meta = {};
@@ -1831,12 +1834,20 @@ const db = {
                   created_at: row.created_at
                 };
                 this._handleIncomingEvent('new_ride_request', incomingReq);
+              } else if (payload.eventType === 'UPDATE' && row && String(row.vehicle_number || '').startsWith('REQ-')) {
+                let meta = {};
+                try { meta = JSON.parse(row.notes || '{}'); } catch(e){}
+                if (row.status === 'completed' || meta.status === 'driver_accepted') {
+                  this._handleIncomingEvent('ride_accepted', { id: row.vehicle_number, ...meta });
+                }
+              } else if (payload.eventType === 'DELETE' && payload.old && payload.old.vehicle_number) {
+                this._handleIncomingEvent('ride_cancelled', { id: payload.old.vehicle_number });
               }
             })
-            .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'bookings' }, (payload) => {
-              console.log('📡 [Supabase Realtime DB INSERT on bookings]:', payload.new);
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'bookings' }, (payload) => {
+              console.log('📡 [Supabase Realtime DB postgres_changes on bookings]:', payload.eventType, payload.new);
               const b = payload.new;
-              if (b) {
+              if (b && (b.status === 'confirmed' || b.status === 'searching' || b.status === 'pending')) {
                 const incomingReq = {
                   id: b.id ? `REQ-${String(b.id).replace(/[^a-zA-Z0-9]/g, '').slice(0, 8)}` : `REQ-${Date.now()}`,
                   dbId: b.id,
@@ -1858,23 +1869,6 @@ const db = {
                   created_at: b.created_at || new Date().toISOString()
                 };
                 this._handleIncomingEvent('new_ride_request', incomingReq);
-              }
-            })
-            .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'rides' }, (payload) => {
-              console.log('📡 [Supabase Realtime DB UPDATE on rides]:', payload.new);
-              const row = payload.new;
-              if (row && String(row.vehicle_number || '').startsWith('REQ-')) {
-                let meta = {};
-                try { meta = JSON.parse(row.notes || '{}'); } catch(e){}
-                if (row.status === 'completed' || meta.status === 'driver_accepted') {
-                  this._handleIncomingEvent('ride_accepted', { id: row.vehicle_number, ...meta });
-                }
-              }
-            })
-            .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'rides' }, (payload) => {
-              console.log('📡 [Supabase Realtime DB DELETE on rides]:', payload.old);
-              if (payload.old && payload.old.vehicle_number) {
-                this._handleIncomingEvent('ride_cancelled', { id: payload.old.vehicle_number });
               }
             })
             .subscribe((status) => {
@@ -1969,6 +1963,9 @@ const db = {
       }
 
       // Supabase Realtime Channel
+      if (!this._channel) {
+        try { this.init(); } catch (e) {}
+      }
       if (this._channel) {
         try {
           this._channel.send({
@@ -2132,8 +2129,9 @@ const db = {
 
           // Also persist booking to bookings table so both rides and bookings reflect the active request
           if (db.bookings && db.bookings.create) {
+            const insertedRideUuid = (data && data[0] && data[0].id) ? data[0].id : null;
             db.bookings.create({
-              rideId: request.id,
+              rideId: insertedRideUuid,
               riderName: request.rider_name,
               riderPhone: request.rider_phone,
               seats: request.seats || 1,
@@ -2473,30 +2471,34 @@ const db = {
 
           if (!rideErr && rideData && rideData.length > 0) {
             const row = rideData[0];
-            let meta = {};
-            try { meta = JSON.parse(row.notes || '{}'); } catch(e){}
-            incomingReq = {
-              id: row.vehicle_number,
-              dbId: row.id,
-              rider_id: meta.riderId || row.driver_id,
-              rider_name: meta.riderName || (row.driver_name ? row.driver_name.replace(' (Rider Request)', '') : 'Passenger'),
-              rider_phone: meta.riderPhone || '+91 98480 23145',
-              rider_avatar: meta.riderAvatar || row.avatar,
-              rider_role: meta.riderRole || row.driver_role || 'Daily Commuter',
-              pickup: row.pickup,
-              drop: row.drop_location,
-              drop_location: row.drop_location,
-              seats: row.seats_available || 1,
-              fare: row.per_seat_price || 108,
-              distance: meta.distance || 84,
-              pin: meta.pin || '4821',
-              vehicle_type: meta.vehicleType || row.vehicle_type || 'any',
-              vehicleType: meta.vehicleType || row.vehicle_type || 'any',
-              isFlexibleVehicle: Boolean(meta.isFlexible !== false),
-              payment_method: meta.paymentMethod || 'Direct UPI',
-              status: 'searching',
-              created_at: row.created_at
-            };
+            const rowAgeMs = row.created_at ? (Date.now() - new Date(row.created_at).getTime()) : 0;
+            // Only accept if created within last 15 minutes to avoid stale mock rides
+            if (rowAgeMs < 15 * 60 * 1000) {
+              let meta = {};
+              try { meta = JSON.parse(row.notes || '{}'); } catch(e){}
+              incomingReq = {
+                id: row.vehicle_number,
+                dbId: row.id,
+                rider_id: meta.riderId || row.driver_id,
+                rider_name: meta.riderName || (row.driver_name ? row.driver_name.replace(' (Rider Request)', '') : 'Passenger'),
+                rider_phone: meta.riderPhone || '+91 98480 23145',
+                rider_avatar: meta.riderAvatar || row.avatar,
+                rider_role: meta.riderRole || row.driver_role || 'Daily Commuter',
+                pickup: row.pickup,
+                drop: row.drop_location,
+                drop_location: row.drop_location,
+                seats: row.seats_available || 1,
+                fare: row.per_seat_price || 108,
+                distance: meta.distance || 84,
+                pin: meta.pin || '4821',
+                vehicle_type: meta.vehicleType || row.vehicle_type || 'any',
+                vehicleType: meta.vehicleType || row.vehicle_type || 'any',
+                isFlexibleVehicle: Boolean(meta.isFlexible !== false),
+                payment_method: meta.paymentMethod || 'Direct UPI',
+                status: 'searching',
+                created_at: row.created_at
+              };
+            }
           }
 
           // A2. Also check bookings table for recent active passenger bookings

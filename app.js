@@ -756,7 +756,15 @@ function switchMode(newMode) {
     if (riderView) riderView.classList.add('hidden');
     if (driverView) driverView.classList.remove('hidden');
 
+    if (isDriverKycApproved(state.currentUser)) {
+      state.driverOnline = true;
+    }
+
     renderDriverModeView();
+    syncDriverOnlineToggleUI();
+    if (window.db && window.db.matching) {
+      window.db.matching.syncActiveRequest();
+    }
   }
 }
 
@@ -2305,7 +2313,7 @@ function handleRealtimeMatchingEvent(event, request) {
     const isRider = currentUser && ((request.rider_id && request.rider_id === currentUser.id) || (request.rider_phone && String(request.rider_phone).includes(cleanUserPhone)));
     const isAssignedDriver = currentUser && ((request.driver_id && request.driver_id === currentUser.id) || (request.driver_phone && String(request.driver_phone).includes(cleanUserPhone)));
 
-    if (isRider && state.mode !== 'driver') {
+    if (isRider && state.mode !== 'driver' && !state.driverOnline) {
       state.currentActiveRide = request;
       state.activeRideRole = 'rider';
     } else if (isAssignedDriver) {
@@ -4736,9 +4744,27 @@ async function handleSendOtp() {
     sessionStorage.setItem('routemate_auth_target', activeTarget);
   } catch (e) {}
 
-  // Set button loading
-  if (sendBtn) sendBtn.disabled = true;
-  if (sendBtnText) sendBtnText.textContent = 'Sending Code...';
+  // Requirement 1: Strict guard for non-registered emails on Sign In
+  if (state.authMode === 'signin') {
+    let existingProfile = null;
+    if (window.db && window.db.profiles && window.db.profiles.findByEmailOrPhone) {
+      try {
+        existingProfile = await window.db.profiles.findByEmailOrPhone(activeTarget);
+      } catch (e) {
+        console.warn('Check existing profile error:', e);
+      }
+    }
+    if (!existingProfile) {
+      if (sendBtn) sendBtn.disabled = false;
+      if (sendBtnText) sendBtnText.textContent = 'Send Sign In Code';
+      const msg = 'Account not found. Please Sign Up first.';
+      if (errorText) errorText.textContent = msg;
+      if (errorEl) errorEl.classList.remove('hidden');
+      showToast(msg, 'warning');
+      setAuthMode('signup');
+      return;
+    }
+  }
 
   try {
     let result = await sendOtpApi(activeTarget);
@@ -4890,6 +4916,17 @@ async function handleVerifyOtp() {
         } catch (e) {
           console.warn('Profile search by email:', e);
         }
+      }
+
+      // Requirement 1: Guard for non-registered emails on Sign In
+      if (state.authMode === 'signin' && !profile) {
+        const msg = 'Account not found. Please Sign Up first.';
+        if (errorText) errorText.textContent = msg;
+        if (errorEl) errorEl.classList.remove('hidden');
+        showToast(msg, 'warning');
+        backToPhoneStep();
+        setAuthMode('signup');
+        return;
       }
 
       // Derive clean name from email if not already specified in profile
