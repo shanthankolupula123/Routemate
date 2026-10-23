@@ -2261,19 +2261,38 @@ async function requestRideAction() {
     paymentMethod: 'Direct UPI'
   };
 
-  showToast('📡 Radar activated! Broadcasting ride request to nearby drivers...', 'info');
+  const pin = Math.floor(1000 + Math.random() * 9000).toString();
+  const requestId = 'REQ-' + Math.floor(100000 + Math.random() * 900000);
 
-  const res = await window.db.matching.createRequest(reqPayload);
-  if (res && res.success) {
-    state.currentActiveRide = res.request;
-    state.activeRideRole = 'rider';
-    renderLiveTrackingStage(res.request, 'rider');
-    renderRiderSearchingCard();
-    updateActiveRideBanner();
-    playNotificationSound();
-    showToast(`📡 Live Radar Scanning: Broadcasting on ${pickup} ➔ ${drop} (₹${fare})`, 'success');
-  } else {
-    showToast('Could not broadcast ride request. Please try again.', 'error');
+  const initialReq = {
+    id: requestId,
+    pin: pin,
+    ...reqPayload,
+    status: 'searching',
+    created_at: new Date().toISOString()
+  };
+
+  // Immediate 0ms UI transition: activate search radar and tracking modal instantly
+  state.currentActiveRide = initialReq;
+  state.activeRideRole = 'rider';
+  renderLiveTrackingStage(initialReq, 'rider');
+  renderRiderSearchingCard();
+  updateActiveRideBanner();
+  playNotificationSound();
+
+  showToast(`📡 Radar activated! Broadcasting on ${pickup} ➔ ${drop} (₹${fare})`, 'info');
+
+  try {
+    const res = await window.db.matching.createRequest({ ...reqPayload, pin, id: requestId });
+    if (res && res.request) {
+      state.currentActiveRide = res.request;
+      renderLiveTrackingStage(res.request, 'rider');
+      renderRiderSearchingCard();
+      updateActiveRideBanner();
+      showToast(`📡 Live Radar Scanning: Broadcasting on ${pickup} ➔ ${drop} (₹${fare})`, 'success');
+    }
+  } catch (e) {
+    console.error('Ride request broadcast error:', e);
   }
 }
 
@@ -2340,7 +2359,13 @@ function handleRealtimeMatchingEvent(event, request) {
       (request.rider_phone && cleanUserPhone && String(request.rider_phone).includes(cleanUserPhone))
     );
 
-    if (isSameRiderOnThisTab && state.mode !== 'driver' && !state.driverOnline) {
+    const isDriverActive = Boolean(
+      state.driverOnline || 
+      state.mode === 'driver' ||
+      (typeof document !== 'undefined' && document.getElementById('driverModeView') && !document.getElementById('driverModeView').classList.contains('hidden'))
+    );
+
+    if (isSameRiderOnThisTab && !isDriverActive) {
       return;
     }
 
@@ -2383,7 +2408,6 @@ function handleRealtimeMatchingEvent(event, request) {
     };
 
     // Check if current user is an active online driver (duty loosened for live testing)
-    const isDriverActive = Boolean(state.driverOnline || state.mode === 'driver');
     const isStaleTrip = state.activeDriverTrip && state.activeDriverTrip.timestamp && (Date.now() - state.activeDriverTrip.timestamp > 10 * 60 * 1000);
     const isDriverFree = !state.activeDriverTrip || state.activeDriverTrip.status === 'completed' || state.activeDriverTrip.status === 'cancelled' || isStaleTrip;
 
@@ -2795,6 +2819,7 @@ function openDriverIncomingModal(req) {
   }
 
   modal.classList.remove('hidden');
+  modal.style.display = 'flex';
   if (window.lucide) lucide.createIcons();
 
   startIncomingTimer();
@@ -3230,6 +3255,7 @@ function renderLiveTrackingStage(request, role = 'rider') {
   }
 
   modal.classList.remove('hidden');
+  modal.style.display = 'flex';
   if (window.lucide) lucide.createIcons();
 }
 

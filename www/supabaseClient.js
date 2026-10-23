@@ -2111,8 +2111,8 @@ const db = {
 
     // 1. Create & Broadcast New Ride Request (Rider)
     async createRequest(reqData) {
-      const pin = Math.floor(1000 + Math.random() * 9000).toString();
-      const requestId = 'REQ-' + Math.floor(100000 + Math.random() * 900000);
+      const pin = reqData.pin || Math.floor(1000 + Math.random() * 9000).toString();
+      const requestId = reqData.id || ('REQ-' + Math.floor(100000 + Math.random() * 900000));
 
       const pLat = reqData.pickupLat || reqData.pickup_lat || 17.4024;
       const pLng = reqData.pickupLng || reqData.pickup_lng || 78.5604;
@@ -2193,7 +2193,7 @@ const db = {
             per_seat_price: request.fare || 108,
             payment_preference: request.payment_method === 'cash' ? 'cash' : 'upi',
             verified: true,
-            status: 'searching',
+            status: 'active', // Postgres check constraint 'rides_status_check' strictly requires 'active'
             notes: JSON.stringify({
               isRequest: true,
               status: 'searching',
@@ -2222,16 +2222,7 @@ const db = {
             })
           };
 
-          let { data, error } = await client.from('rides').insert([dbRow]).select();
-          // If Postgres check constraint 'rides_status_check' requires 'active', fallback gracefully
-          if (error && error.message && error.message.includes('rides_status_check')) {
-            console.warn('ℹ️ Postgres check constraint requires status active, inserting with active status');
-            dbRow.status = 'active';
-            const retry = await client.from('rides').insert([dbRow]).select();
-            data = retry.data;
-            error = retry.error;
-          }
-
+          const { data, error } = await client.from('rides').insert([dbRow]).select();
           if (error) {
             console.error('❌ Supabase rides insert error:', error.message);
           } else {
@@ -2248,7 +2239,7 @@ const db = {
               seats: request.seats || 1,
               fare: request.fare || 110,
               paymentMethod: request.payment_method === 'cash' ? 'cash' : 'upi',
-              status: 'searching',
+              status: 'confirmed',
               pin: request.pin
             }).catch(() => {});
           }
@@ -2668,8 +2659,13 @@ const db = {
           }
 
           if (incomingReq) {
-            const isDriverActive = typeof state !== 'undefined' && (state.driverOnline || state.mode === 'driver');
-            const needsIncomingUiSync = isDriverActive && !state.incomingRequest && !state.activeDriverTrip;
+            const isDriverActive = typeof state !== 'undefined' && (
+              state.driverOnline || 
+              state.mode === 'driver' || 
+              (typeof document !== 'undefined' && document.getElementById('driverModeView') && !document.getElementById('driverModeView').classList.contains('hidden'))
+            );
+            const isModalHidden = typeof document !== 'undefined' && (!document.getElementById('driverIncomingRideModal') || document.getElementById('driverIncomingRideModal').classList.contains('hidden'));
+            const needsIncomingUiSync = isDriverActive && (!state.incomingRequest || isModalHidden) && !state.activeDriverTrip;
             if (!this._activeRequest || this._activeRequest.id !== incomingReq.id || this._activeRequest.status !== incomingReq.status || needsIncomingUiSync) {
               this._handleIncomingEvent('new_ride_request', incomingReq);
             }
