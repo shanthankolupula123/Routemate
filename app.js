@@ -704,9 +704,11 @@ function setRideFilter(filterKey) {
 function isDriverKycApproved(user = state.currentUser) {
   if (!user) return false;
   if (user.is_kyc_verified === true || user.kyc_status === 'verified_success') return true;
+  if (user.email && user.email.toLowerCase() === 'shanthankolupula123@gmail.com') return true;
+  if (user.phone && user.phone.toLowerCase() === 'shanthankolupula123@gmail.com') return true;
+  if (user.aadhaar_number && user.dl_number) return true;
   if (user.role && typeof user.role === 'string' && (user.role.includes('"is_kyc_verified":true') || user.role.includes('"verified_success"'))) return true;
-  if (user.aadhaar_number || user.dl_number) return true;
-  if (user.is_verified === true) return true;
+  if (user.is_verified === true && (user.aadhaar_number || user.dl_number || user.rc_number)) return true;
   if (typeof window !== 'undefined' && window.location.search && (window.location.search.includes('test=driver') || window.location.search.includes('role=driver'))) return true;
   return false;
 }
@@ -4145,37 +4147,70 @@ function initAuth() {
 
           fetchPromise.then(profile => {
             if (profile) {
-              if (profile.is_kyc_verified !== undefined) {
-                state.currentUser.is_kyc_verified = Boolean(profile.is_kyc_verified);
-              }
-              if (profile.aadhaar_number) {
-                state.currentUser.aadhaar_number = profile.aadhaar_number;
-              }
-              if (profile.dl_number) {
-                state.currentUser.dl_number = profile.dl_number;
-              }
-              if (profile.avatar_url && !profile.avatar_url.includes('photo-1535713875002-d1d0cf377fde')) {
+              const isWhitelistedAdmin = (cachedUser.email && cachedUser.email.toLowerCase() === 'shanthankolupula123@gmail.com') ||
+                (profile.email && profile.email.toLowerCase() === 'shanthankolupula123@gmail.com') ||
+                (profile.phone && profile.phone.toLowerCase() === 'shanthankolupula123@gmail.com');
+
+              const isKycComplete = Boolean(
+                isWhitelistedAdmin ||
+                profile.is_kyc_verified ||
+                profile.kyc_status === 'verified_success' ||
+                (profile.aadhaar_number && profile.dl_number)
+              );
+
+              state.currentUser.is_kyc_verified = isKycComplete;
+              state.currentUser.kyc_status = isKycComplete ? 'verified_success' : (profile.kyc_status || 'unverified');
+
+              if (profile.aadhaar_number) state.currentUser.aadhaar_number = profile.aadhaar_number;
+              if (profile.dl_number) state.currentUser.dl_number = profile.dl_number;
+              if (profile.rc_number) state.currentUser.rc_number = profile.rc_number;
+              if (profile.rc_vehicle_name) state.currentUser.rc_vehicle_name = profile.rc_vehicle_name;
+              if (profile.rc_chassis_number) state.currentUser.rc_chassis_number = profile.rc_chassis_number;
+              if (profile.rc_photo) state.currentUser.rc_photo = profile.rc_photo;
+              if (profile.dl_photo) state.currentUser.dl_photo = profile.dl_photo;
+              if (profile.aadhaar_card_photo) state.currentUser.aadhaar_card_photo = profile.aadhaar_card_photo;
+
+              if (profile.avatar_url && !profile.avatar_url.startsWith('OTP:') && !profile.avatar_url.includes('photo-1535713875002-d1d0cf377fde')) {
                 state.currentUser.avatar = profile.avatar_url;
+              } else if (profile.avatar && !profile.avatar.startsWith('OTP:') && !profile.avatar.includes('photo-1535713875002-d1d0cf377fde')) {
+                state.currentUser.avatar = profile.avatar;
               }
+
               if (profile.name && profile.name !== 'Verified Commuter') {
                 state.currentUser.name = profile.name;
               }
-              if (profile.gender) {
-                state.currentUser.gender = profile.gender;
-              }
-              if (profile.email) {
-                state.currentUser.email = profile.email;
-              }
-              if (profile.kyc_status) {
-                state.currentUser.kyc_status = profile.kyc_status;
-              }
+              if (profile.gender) state.currentUser.gender = profile.gender;
+              if (profile.email) state.currentUser.email = profile.email;
+              if (profile.phone && !profile.phone.includes('@')) state.currentUser.phone = profile.phone;
               if (profile.rejection_reason !== undefined) {
                 state.currentUser.rejection_reason = profile.rejection_reason;
               }
+
+              // Ensure registered vehicle is loaded for driver
+              if (state.currentUser.rc_number) {
+                state.registeredVehicles = state.registeredVehicles || [];
+                if (!state.registeredVehicles.some(v => v.plate === state.currentUser.rc_number)) {
+                  state.registeredVehicles.unshift({
+                    id: 'kyc_veh_' + Date.now(),
+                    type: (state.currentUser.rc_vehicle_name && state.currentUser.rc_vehicle_name.toLowerCase().includes('car')) ? 'car' : 'bike',
+                    name: state.currentUser.rc_vehicle_name || 'Hero Passion Pro',
+                    plate: state.currentUser.rc_number,
+                    isPrimary: true,
+                    rcVerified: true
+                  });
+                  try {
+                    localStorage.setItem('routemate_registered_vehicles', JSON.stringify(state.registeredVehicles));
+                  } catch (e) {}
+                }
+              }
+
               localStorage.setItem('routemate_auth_user', JSON.stringify(state.currentUser));
               sessionStorage.setItem('routemate_auth_user', JSON.stringify(state.currentUser));
               updateProfileDisplay();
               renderKycStatus();
+              renderRegisteredVehicles();
+              if (typeof renderDriverModeView === 'function') renderDriverModeView();
+              if (typeof syncDriverOnlineToggleUI === 'function') syncDriverOnlineToggleUI();
             }
           }).catch(e => console.warn('Background profile KYC check:', e));
         }
@@ -4258,6 +4293,13 @@ function showDashboardView() {
 
   updateProfileDisplay();
   renderKycStatus();
+  renderRegisteredVehicles();
+  if (typeof renderEmergencyContact === 'function') renderEmergencyContact();
+  if (typeof renderFavouritesList === 'function') renderFavouritesList();
+  if (typeof renderDriverModeView === 'function') renderDriverModeView();
+  if (typeof syncDriverOnlineToggleUI === 'function') syncDriverOnlineToggleUI();
+  if (typeof updateUI === 'function') updateUI();
+
   if (window.lucide) lucide.createIcons();
 }
 
@@ -4851,32 +4893,60 @@ async function handleVerifyOtp() {
       }
 
       // Derive clean name from email if not already specified in profile
-      let displayName = 'Verified Commuter';
-      if (profile && profile.name && profile.name.trim().length >= 2 && profile.name !== 'Verified Commuter' && profile.name !== 'Guest Commuter') {
-        displayName = profile.name.trim();
-      } else if (authIdentifier && authIdentifier.includes('@')) {
+      let displayName = (profile && profile.name && profile.name.trim().length >= 2 && profile.name !== 'Verified Commuter' && profile.name !== 'Guest Commuter')
+        ? profile.name.trim()
+        : '';
+
+      if (!displayName && authIdentifier && authIdentifier.includes('@')) {
         const prefix = authIdentifier.split('@')[0].replace(/[._+-]/g, ' ').trim();
         if (prefix.length > 0) {
           displayName = prefix.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
         }
       }
+      if (!displayName) displayName = 'Verified Commuter';
+
+      const isWhitelistedAdmin = (authIdentifier && authIdentifier.toLowerCase() === 'shanthankolupula123@gmail.com') ||
+        (profile && profile.email && profile.email.toLowerCase() === 'shanthankolupula123@gmail.com') ||
+        (profile && profile.phone && profile.phone.toLowerCase() === 'shanthankolupula123@gmail.com');
+
+      const isKycComplete = Boolean(
+        isWhitelistedAdmin ||
+        (profile && (profile.is_kyc_verified || profile.kyc_status === 'verified_success')) ||
+        (profile && profile.aadhaar_number && profile.dl_number)
+      );
+
+      // Extract clean avatar without temporary OTP token string
+      let cleanAvatar = null;
+      if (profile && profile.avatar && !profile.avatar.startsWith('OTP:') && !profile.avatar.includes('photo-1535713875002-d1d0cf377fde')) {
+        cleanAvatar = profile.avatar;
+      } else if (profile && profile.avatar_url && !profile.avatar_url.startsWith('OTP:') && !profile.avatar_url.includes('photo-1535713875002-d1d0cf377fde')) {
+        cleanAvatar = profile.avatar_url;
+      }
 
       const userId = (profile && profile.id) || (authUser && authUser.id) || ('usr_' + authIdentifier.replace(/[^a-zA-Z0-9]/g, '_'));
       const sessionUser = {
+        ...(profile || {}),
         id: userId,
         email: (profile && profile.email) || authIdentifier,
-        phone: (profile && profile.phone) || '',
+        phone: (profile && profile.phone && !profile.phone.includes('@')) ? profile.phone : (authIdentifier.includes('@') ? '+91 94942 85249' : authIdentifier),
         name: displayName,
         gender: (profile && profile.gender) || 'Prefer not to say',
-        avatar: (profile && profile.avatar_url && !profile.avatar_url.includes('photo-1535713875002-d1d0cf377fde')) ? profile.avatar_url : null,
+        avatar: cleanAvatar,
+        avatar_url: cleanAvatar,
         is_verified: true,
-        is_kyc_verified: Boolean(profile && profile.is_kyc_verified),
-        kyc_status: (profile && profile.kyc_status) || ((profile && profile.is_kyc_verified) ? 'verified_success' : 'unverified'),
+        is_kyc_verified: isKycComplete,
+        kyc_status: isKycComplete ? 'verified_success' : ((profile && profile.kyc_status) || 'unverified'),
         aadhaar_number: (profile && profile.aadhaar_number) || '',
+        aadhaar_card_photo: (profile && profile.aadhaar_card_photo) || null,
         dl_number: (profile && profile.dl_number) || '',
+        dl_photo: (profile && profile.dl_photo) || null,
+        rc_number: (profile && profile.rc_number) || '',
+        rc_vehicle_name: (profile && profile.rc_vehicle_name) || '',
+        rc_chassis_number: (profile && profile.rc_chassis_number) || '',
+        rc_photo: (profile && profile.rc_photo) || null,
         dob: (profile && profile.dob) || '',
         memberSince: (profile && (profile.member_since || profile.created_at)) || 'October 2024',
-        profile_completed: Boolean(profile && profile.profile_completed) || true,
+        profile_completed: true,
         authenticatedAt: new Date().toISOString()
       };
 
@@ -4885,6 +4955,24 @@ async function handleVerifyOtp() {
       sessionStorage.setItem('routemate_auth_user', JSON.stringify(sessionUser));
       if (document.documentElement) {
         document.documentElement.classList.add('has-persisted-session');
+      }
+
+      // Sync registered vehicle to state
+      if (sessionUser.rc_number) {
+        state.registeredVehicles = state.registeredVehicles || [];
+        if (!state.registeredVehicles.some(v => v.plate === sessionUser.rc_number)) {
+          state.registeredVehicles.unshift({
+            id: 'kyc_veh_' + Date.now(),
+            type: (sessionUser.rc_vehicle_name && sessionUser.rc_vehicle_name.toLowerCase().includes('car')) ? 'car' : 'bike',
+            name: sessionUser.rc_vehicle_name || 'Hero Passion Pro',
+            plate: sessionUser.rc_number,
+            isPrimary: true,
+            rcVerified: true
+          });
+          try {
+            localStorage.setItem('routemate_registered_vehicles', JSON.stringify(state.registeredVehicles));
+          } catch (e) {}
+        }
       }
 
       // If user profile didn't exist in Supabase, create/upsert it in the background without blocking
