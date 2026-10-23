@@ -248,6 +248,8 @@ function attachPlacesAutocomplete() {
 // Universal Telangana Search & Geocoding Suggestion Engine (Rapido / Uber Style)
 function attachTelanganaSearchSuggest(inputEl, isPickup, targetMode = 'rider') {
   if (!inputEl) return;
+  if (inputEl._suggestAttached) return;
+  inputEl._suggestAttached = true;
 
   const wrapper = inputEl.closest('.relative') || inputEl.parentElement;
   if (!wrapper) return;
@@ -266,8 +268,7 @@ function attachTelanganaSearchSuggest(inputEl, isPickup, targetMode = 'rider') {
 
   let debounceTimer = null;
 
-  inputEl.addEventListener('input', (e) => {
-    const query = e.target.value.trim();
+  const handleSuggest = (query) => {
     if (debounceTimer) clearTimeout(debounceTimer);
 
     if (query.length < 2) {
@@ -278,7 +279,18 @@ function attachTelanganaSearchSuggest(inputEl, isPickup, targetMode = 'rider') {
 
     debounceTimer = setTimeout(() => {
       fetchTelanganaPredictions(query, suggestBox, inputEl, isPickup, targetMode);
-    }, 220);
+    }, 150);
+  };
+
+  inputEl.addEventListener('input', (e) => {
+    handleSuggest(e.target.value.trim());
+  });
+
+  inputEl.addEventListener('focus', (e) => {
+    const val = e.target.value.trim();
+    if (val.length >= 2) {
+      handleSuggest(val);
+    }
   });
 
   inputEl.addEventListener('keydown', (e) => {
@@ -294,12 +306,141 @@ function attachTelanganaSearchSuggest(inputEl, isPickup, targetMode = 'rider') {
   });
 }
 
-// Fetch predictions combining Google Places & Telangana OSM Geocoding
+// Master Curated Database of Telangana Hubs & Neighborhoods for 0ms Instant Autocomplete
+const TELANGANA_HUBS = [
+  // Highway Corridor (Hyderabad ➔ Warangal NH 163)
+  { name: 'Uppal Ring Road Metro', district: 'Hyderabad', tag: 'Metro Station' },
+  { name: 'Boduppal Main Road', district: 'Medchal-Malkajgiri', tag: 'Suburb' },
+  { name: 'Peerzadiguda Kaman', district: 'Medchal-Malkajgiri', tag: 'Suburb' },
+  { name: 'Medipally Canara Bank', district: 'Medchal-Malkajgiri', tag: 'Highway Suburb' },
+  { name: 'Chengicherla Crossroads', district: 'Medchal-Malkajgiri', tag: 'Transit Point' },
+  { name: 'Narapally Crossroads', district: 'Medchal-Malkajgiri', tag: 'Highway Junction' },
+  { name: 'Pocharam Infosys Gate', district: 'Medchal-Malkajgiri', tag: 'IT Campus' },
+  { name: 'Ghatkesar Town / ORR Exit 9', district: 'Medchal-Malkajgiri', tag: 'ORR Exit' },
+  { name: 'Ghatkesar Railway Station', district: 'Medchal-Malkajgiri', tag: 'Transit Point' },
+  { name: 'Bibinagar AIIMS Highway Junction', district: 'Yadadri Bhuvanagiri', tag: 'AIIMS / Transit' },
+  { name: 'Bibinagar Railway Station', district: 'Yadadri Bhuvanagiri', tag: 'Transit Point' },
+  { name: 'Bhongir Fort Chowrasta', district: 'Yadadri Bhuvanagiri', tag: 'District Hub' },
+  { name: 'Bhongir Bus Depot', district: 'Yadadri Bhuvanagiri', tag: 'Bus Terminal' },
+  { name: 'Raigiri Railway Station', district: 'Yadadri Bhuvanagiri', tag: 'Transit Point' },
+  { name: 'Yadagirigutta Temple Arch', district: 'Yadadri Bhuvanagiri', tag: 'Pilgrimage Hub' },
+  { name: 'Yadadri Bus Stand', district: 'Yadadri Bhuvanagiri', tag: 'Bus Terminal' },
+  { name: 'Aler Highway Junction', district: 'Yadadri Bhuvanagiri', tag: 'Highway Cross' },
+  { name: 'Aler Bus Stand', district: 'Yadadri Bhuvanagiri', tag: 'Town Hub' },
+  { name: 'Kolanupaka Jain Temple', district: 'Yadadri Bhuvanagiri', tag: 'Historic Landmark' },
+  { name: 'Jangaon Bus Depot / Chowrasta', district: 'Jangaon District', tag: 'Major Hub' },
+  { name: 'Jangaon Railway Station', district: 'Jangaon District', tag: 'Railway Junction' },
+  { name: 'Champak Hills Jangaon', district: 'Jangaon District', tag: 'Residential Hub' },
+  { name: 'Court Center Jangaon', district: 'Jangaon District', tag: 'Town Center' },
+  { name: 'Raghunathapally Bus Stop / Chowrasta', district: 'Jangaon District', tag: 'Town Hub' },
+  { name: 'Station Ghanpur Highway Cross', district: 'Jangaon District', tag: 'Highway Cross' },
+  { name: 'Kazipet Junction Railway Station', district: 'Warangal District', tag: 'Railway Junction' },
+  { name: 'Kazipet Diesel Colony', district: 'Warangal District', tag: 'Transit Point' },
+  { name: 'Hanamkonda Bus Stand', district: 'Warangal District', tag: 'City Terminal' },
+  { name: 'Subedari Collectorate', district: 'Warangal District', tag: 'Administrative Center' },
+  { name: 'Nakkalagutta Crossroads', district: 'Warangal District', tag: 'City Center' },
+  { name: 'Kakatiya University Crossroads', district: 'Warangal District', tag: 'University Hub' },
+  { name: 'Warangal Railway Station', district: 'Warangal District', tag: 'Transit Hub' },
+  { name: 'Warangal Fort', district: 'Warangal District', tag: 'Heritage Landmark' },
+  { name: 'MGM Hospital Crossroads', district: 'Warangal District', tag: 'Medical Hub' },
+
+  // Hyderabad & Cyberabad IT / Residential Hubs
+  { name: 'Secunderabad Railway Station', district: 'Hyderabad', tag: 'Major Junction' },
+  { name: 'Jubilee Bus Station (JBS)', district: 'Secunderabad', tag: 'Bus Terminal' },
+  { name: 'Paradise Circle', district: 'Secunderabad', tag: 'City Landmark' },
+  { name: 'Tarnaka Metro Station', district: 'Hyderabad', tag: 'Metro Station' },
+  { name: 'Habsiguda Metro Station', district: 'Hyderabad', tag: 'Metro Station' },
+  { name: 'Nacharam Industrial Area', district: 'Hyderabad', tag: 'Industrial Hub' },
+  { name: 'ECIL Crossroads', district: 'Hyderabad', tag: 'Tech Hub' },
+  { name: 'AS Rao Nagar', district: 'Hyderabad', tag: 'Residential Hub' },
+  { name: 'Moula Ali Railway Station', district: 'Hyderabad', tag: 'Transit Hub' },
+  { name: 'Malkajgiri Junction', district: 'Hyderabad', tag: 'Transit Point' },
+  { name: 'Alwal Hills', district: 'Hyderabad', tag: 'Suburb' },
+  { name: 'Bowenpally Crossroads', district: 'Secunderabad', tag: 'Highway Junction' },
+  { name: 'Suchitra Circle', district: 'Hyderabad', tag: 'NH 44 Hub' },
+  { name: 'Kompally D-Mart', district: 'Medchal-Malkajgiri', tag: 'Highway Suburb' },
+  { name: 'Medchal Checkpost', district: 'Medchal-Malkajgiri', tag: 'District Center' },
+  { name: 'Hitec City / Cyber Towers', district: 'Hyderabad', tag: 'IT Corridor' },
+  { name: 'Madhapur Metro Station', district: 'Hyderabad', tag: 'IT Hub' },
+  { name: 'Mindspace IT Park', district: 'Hyderabad', tag: 'IT Corridor' },
+  { name: 'Gachibowli Financial District', district: 'Hyderabad', tag: 'Tech Hub' },
+  { name: 'Nanakramguda Circle', district: 'Hyderabad', tag: 'Financial District' },
+  { name: 'Waverock SEZ', district: 'Hyderabad', tag: 'Tech Park' },
+  { name: 'Kondapur RTO Office', district: 'Hyderabad', tag: 'Residential Hub' },
+  { name: 'Kukatpally Housing Board (KPHB)', district: 'Hyderabad', tag: 'Metro / Suburb' },
+  { name: 'JNTU Metro Station', district: 'Hyderabad', tag: 'Metro / College' },
+  { name: 'Miyapur Metro Terminal', district: 'Hyderabad', tag: 'Metro Depot' },
+  { name: 'Chanda Nagar Railway Station', district: 'Hyderabad', tag: 'Transit Hub' },
+  { name: 'Ameerpet Metro Interchange', district: 'Hyderabad', tag: 'Central Metro' },
+  { name: 'SR Nagar Community Hall', district: 'Hyderabad', tag: 'Metro Suburb' },
+  { name: 'Punjagutta Central Mall', district: 'Hyderabad', tag: 'Commercial Hub' },
+  { name: 'Begumpet Airport Road', district: 'Hyderabad', tag: 'City Hub' },
+  { name: 'Banjara Hills Road No 12', district: 'Hyderabad', tag: 'Commercial Center' },
+  { name: 'Jubilee Hills Checkpost', district: 'Hyderabad', tag: 'Metro Landmark' },
+  { name: 'Mehdipatnam Rythu Bazar', district: 'Hyderabad', tag: 'Bus Terminal' },
+  { name: 'Tolichowki Crossroads', district: 'Hyderabad', tag: 'Transit Point' },
+  { name: 'Attapur Pillar 140', district: 'Hyderabad', tag: 'PVNR Expressway' },
+  { name: 'Shamshabad RGI Airport', district: 'Hyderabad', tag: 'International Airport' },
+  { name: 'Aramghar Chowrasta', district: 'Hyderabad', tag: 'Highway Junction' },
+  { name: 'Rajendranagar Agricultural University', district: 'Hyderabad', tag: 'Institutional' },
+  { name: 'Charminar Bus Stand', district: 'Hyderabad', tag: 'Old City Center' },
+  { name: 'Afzalgunj Bus Terminal', district: 'Hyderabad', tag: 'City Terminal' },
+  { name: 'MGBS Imlibun Bus Station', district: 'Hyderabad', tag: 'Interstate Terminal' },
+  { name: 'Koti Women\'s College', district: 'Hyderabad', tag: 'Commercial Hub' },
+  { name: 'Dilsukhnagar Metro Station', district: 'Hyderabad', tag: 'Metro / Terminal' },
+  { name: 'Chaitanyapuri Metro', district: 'Hyderabad', tag: 'Metro Station' },
+  { name: 'Nagole Metro Station', district: 'Hyderabad', tag: 'Metro Terminal' },
+  { name: 'LB Nagar Ring Road Metro', district: 'Hyderabad', tag: 'Highway Terminal' },
+  { name: 'Hayathnagar Bus Depot', district: 'Hyderabad', tag: 'Highway Terminal' },
+  { name: 'Vanasthalipuram Complex', district: 'Hyderabad', tag: 'Residential Hub' },
+  { name: 'Ibrahimpatnam Bus Stand', district: 'Rangareddy', tag: 'Town Center' },
+
+  // Major Telangana District Hubs
+  { name: 'Siddipet New Bus Stand', district: 'Siddipet District', tag: 'District Center' },
+  { name: 'Gajwel Pragathi Bhavan', district: 'Siddipet District', tag: 'Town Hub' },
+  { name: 'Karimnagar Bus Station / Collectorate', district: 'Karimnagar', tag: 'Smart City' },
+  { name: 'Jagtial Bus Depot', district: 'Jagtial District', tag: 'District Center' },
+  { name: 'Suryapet Hi-Tech Bus Stand', district: 'Suryapet District', tag: 'NH 65 Hub' },
+  { name: 'Kodad Town Hall', district: 'Suryapet District', tag: 'NH 65 Point' },
+  { name: 'Nalgonda Clock Tower Chowrasta', district: 'Nalgonda District', tag: 'District Center' },
+  { name: 'Miryalaguda Bus Stand', district: 'Nalgonda District', tag: 'Town Hub' },
+  { name: 'Khammam New Bus Station', district: 'Khammam District', tag: 'District Center' },
+  { name: 'Mahbubnagar Bus Station', district: 'Mahbubnagar', tag: 'District Center' },
+  { name: 'Jadcherla Crossroads', district: 'Mahbubnagar', tag: 'Highway Junction' },
+  { name: 'Nizamabad Central Bus Stand', district: 'Nizamabad', tag: 'District Center' },
+  { name: 'Armoor Bus Stand', district: 'Nizamabad', tag: 'Highway Hub' },
+  { name: 'Medak Church / Bus Station', district: 'Medak District', tag: 'District Center' },
+  { name: 'Sangareddy New Collectorate', district: 'Sangareddy District', tag: 'District Center' },
+  { name: 'Patancheru Bus Station', district: 'Sangareddy District', tag: 'Industrial Terminal' },
+  { name: 'BHEL Township Circle', district: 'Sangareddy District', tag: 'Township' }
+];
+
+// Fetch predictions combining Instant Curated Database, Google Places & Telangana OSM Geocoding
 async function fetchTelanganaPredictions(query, container, inputEl, isPickup, targetMode = 'rider') {
   const suggestions = [];
+  const qClean = String(query || '').toLowerCase().trim();
 
-  // 1. Google Places AutocompleteService
-  if (window.google && google.maps && google.maps.places && google.maps.places.AutocompleteService) {
+  // 1. Instant 0ms Match from Curated Telangana Hubs Database
+  if (qClean.length >= 2) {
+    const matchedHubs = TELANGANA_HUBS.filter(h => {
+      const nameMatch = h.name.toLowerCase().includes(qClean);
+      const distMatch = h.district && h.district.toLowerCase().includes(qClean);
+      const tagMatch = h.tag && h.tag.toLowerCase().includes(qClean);
+      return nameMatch || distMatch || tagMatch;
+    });
+
+    matchedHubs.slice(0, 6).forEach(h => {
+      const fullText = `${h.name}, ${h.district}, Telangana`;
+      suggestions.push({
+        title: h.name,
+        subtitle: `${h.district} • ${h.tag || 'Telangana'}`,
+        fullText: fullText
+      });
+    });
+  }
+
+  // 2. Google Places AutocompleteService
+  if (suggestions.length < 5 && window.google && google.maps && google.maps.places && google.maps.places.AutocompleteService) {
     try {
       const service = new google.maps.places.AutocompleteService();
       const googlePreds = await new Promise((resolve) => {
@@ -323,16 +464,19 @@ async function fetchTelanganaPredictions(query, container, inputEl, isPickup, ta
       });
 
       googlePreds.slice(0, 5).forEach(p => {
-        suggestions.push({
-          title: p.structured_formatting ? p.structured_formatting.main_text : p.description.split(',')[0],
-          subtitle: p.structured_formatting ? p.structured_formatting.secondary_text : p.description,
-          fullText: p.description
-        });
+        const fullDesc = p.description;
+        if (!suggestions.some(s => s.fullText.toLowerCase() === fullDesc.toLowerCase())) {
+          suggestions.push({
+            title: p.structured_formatting ? p.structured_formatting.main_text : p.description.split(',')[0],
+            subtitle: p.structured_formatting ? p.structured_formatting.secondary_text : p.description,
+            fullText: fullDesc
+          });
+        }
       });
     } catch (e) {}
   }
 
-  // 2. High-speed OpenStreetMap Telangana Geocoding (Photon / Nominatim)
+  // 3. High-speed OpenStreetMap Telangana Geocoding (Nominatim fallback)
   if (suggestions.length < 4) {
     try {
       const geoUrl = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query + ', Telangana')}&format=jsonv2&countrycodes=in&viewbox=77.2,19.9,81.8,15.8&bounded=0&limit=5`;
@@ -466,32 +610,6 @@ function selectTelanganaLocation(fullLocation, isPickup, targetMode = 'rider') {
   }
 }
 
-const TELANGANA_HUBS = [
-  { name: 'Raghunathapally Bus Stop / Chowrasta', district: 'Jangaon District', tag: 'Town Hub' },
-  { name: 'Jangaon Bus Depot / Chowrasta', district: 'Jangaon District', tag: 'Major Hub' },
-  { name: 'Hanamkonda Bus Stand', district: 'Warangal District', tag: 'City Terminal' },
-  { name: 'Warangal Railway Station', district: 'Warangal District', tag: 'Transit Hub' },
-  { name: 'Kazipet Junction Railway Station', district: 'Warangal District', tag: 'Railway Junction' },
-  { name: 'Station Ghanpur Highway Cross', district: 'Jangaon District', tag: 'Highway Cross' },
-  { name: 'Aler Highway Junction', district: 'Yadadri Bhuvanagiri', tag: 'Highway Cross' },
-  { name: 'Yadagirigutta Temple Arch', district: 'Yadadri Bhuvanagiri', tag: 'Pilgrimage' },
-  { name: 'Bhongir Fort Chowrasta', district: 'Yadadri Bhuvanagiri', tag: 'District Hub' },
-  { name: 'Bibinagar AIIMS Highway Junction', district: 'Yadadri Bhuvanagiri', tag: 'AIIMS / Transit' },
-  { name: 'Ghatkesar Town / ORR Exit 9', district: 'Medchal-Malkajgiri', tag: 'ORR Exit' },
-  { name: 'Uppal Ring Road Metro', district: 'Hyderabad', tag: 'Metro Station' },
-  { name: 'Secunderabad Railway Station', district: 'Hyderabad', tag: 'Major Junction' },
-  { name: 'Hitec City / Cyber Towers', district: 'Hyderabad', tag: 'IT Corridor' },
-  { name: 'Gachibowli Financial District', district: 'Hyderabad', tag: 'Tech Hub' },
-  { name: 'Kukatpally Housing Board (KPHB)', district: 'Hyderabad', tag: 'Metro / Suburb' },
-  { name: 'LB Nagar Ring Road Metro', district: 'Hyderabad', tag: 'Highway Terminal' },
-  { name: 'Shamshabad RGI Airport', district: 'Hyderabad', tag: 'Airport' },
-  { name: 'Siddipet New Bus Stand', district: 'Siddipet District', tag: 'District Center' },
-  { name: 'Karimnagar Bus Station / Collectorate', district: 'Karimnagar', tag: 'Smart City' },
-  { name: 'Suryapet Hi-Tech Bus Stand', district: 'Suryapet District', tag: 'NH 65 Hub' },
-  { name: 'Nalgonda Clock Tower Chowrasta', district: 'Nalgonda District', tag: 'District Center' },
-  { name: 'Khammam New Bus Station', district: 'Khammam District', tag: 'District Center' },
-  { name: 'Mahbubnagar Bus Station', district: 'Mahbubnagar', tag: 'District Center' }
-];
 
 // Quick modal selector for destination hubs with complete area names
 function promptDropQuickSelect() {

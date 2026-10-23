@@ -787,9 +787,14 @@ function renderDriverModeView() {
   renderDriverIncomingRequest();
   renderKycStatus();
 
+  // Attach real-time address autocomplete to driver corridor inputs
+  if (typeof attachPlacesAutocomplete === 'function') {
+    attachPlacesAutocomplete();
+  }
+
   if (window.db && window.db.matching) {
     if (typeof window.db.matching.subscribeDriverChannel === 'function') {
-      window.db.matching.subscribeDriverChannel();
+      window.db.matching.subscribeDriverChannel(true);
     }
     window.db.matching.init(true);
     window.db.matching.syncActiveRequest();
@@ -2449,7 +2454,12 @@ function handleRealtimeMatchingEvent(event, request) {
     };
 
     // Check if current user is an active online driver (duty loosened for live testing)
-    const isStaleTrip = state.activeDriverTrip && state.activeDriverTrip.timestamp && (Date.now() - state.activeDriverTrip.timestamp > 10 * 60 * 1000);
+    const tripAcceptedTime = state.activeDriverTrip ? (state.activeDriverTrip.accepted_at || state.activeDriverTrip.timestamp || state.activeDriverTrip.created_at) : null;
+    const tripAge = tripAcceptedTime ? (Date.now() - new Date(tripAcceptedTime).getTime()) : Infinity;
+    const isStaleTrip = tripAge > 5 * 60 * 1000;
+    if (isStaleTrip && state.activeDriverTrip) {
+      state.activeDriverTrip = null;
+    }
     const isDriverFree = !state.activeDriverTrip || state.activeDriverTrip.status === 'completed' || state.activeDriverTrip.status === 'cancelled' || isStaleTrip;
 
     if (isDriverActive && isDriverFree) {

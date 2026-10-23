@@ -1954,13 +1954,25 @@ const db = {
       }, 100);
     },
 
-    // Dedicated channel for drivers listening to table inserts on rides
-    subscribeDriverChannel() {
+    // Dedicated channel for drivers listening to table inserts & broadcasts on rides
+    subscribeDriverChannel(force = false) {
       const client = getSupabaseClient();
       if (!client) return;
+      if (force && this._driverChannel) {
+        try { client.removeChannel(this._driverChannel); } catch (e) {}
+        this._driverChannel = null;
+      }
       if (!this._driverChannel) {
         try {
-          this._driverChannel = client.channel('driver_rides_stream')
+          this._driverChannel = client.channel('driver_rides_stream', {
+            config: { broadcast: { ack: true, self: true } }
+          })
+            .on('broadcast', { event: 'ride_matching_event' }, (payload) => {
+              if (payload && payload.payload) {
+                console.log('⚡ [Driver Channel Direct Broadcast]:', payload.payload.event, payload.payload.request);
+                this._handleIncomingEvent(payload.payload.event, payload.payload.request);
+              }
+            })
             .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'rides' }, (payload) => {
               console.log('⚡ [Driver Channel Direct DB INSERT]:', payload.new);
               const row = payload.new;
@@ -2007,6 +2019,9 @@ const db = {
             })
             .subscribe((status) => {
               console.log('📡 Driver dedicated channel status:', status);
+              if (status === 'SUBSCRIBED') {
+                this.syncActiveRequest();
+              }
             });
         } catch (e) {
           console.warn('Driver direct channel subscription warning:', e);
@@ -2044,13 +2059,22 @@ const db = {
         } catch (e) {}
       }
 
-      // Supabase Realtime Channel
+      // Supabase Realtime Channels
       if (!this._channel) {
         try { this.init(); } catch (e) {}
       }
       if (this._channel) {
         try {
           this._channel.send({
+            type: 'broadcast',
+            event: 'ride_matching_event',
+            payload: { event, request }
+          });
+        } catch (e) {}
+      }
+      if (this._driverChannel) {
+        try {
+          this._driverChannel.send({
             type: 'broadcast',
             event: 'ride_matching_event',
             payload: { event, request }
@@ -2227,6 +2251,15 @@ const db = {
             console.error('❌ Supabase rides insert error:', error.message);
           } else {
             console.log('✅ Supabase rides row inserted successfully for real-time driver sync:', request.id, data);
+          }
+
+          // Immediately broadcast ride request packet across active WebSocket channels
+          const broadcastPayload = { event: 'new_ride_request', request: { ...request, dbId: data && data[0] && data[0].id } };
+          if (this._channel) {
+            try { this._channel.send({ type: 'broadcast', event: 'ride_matching_event', payload: broadcastPayload }); } catch(e){}
+          }
+          if (this._driverChannel) {
+            try { this._driverChannel.send({ type: 'broadcast', event: 'ride_matching_event', payload: broadcastPayload }); } catch(e){}
           }
 
           // Also persist booking to bookings table so both rides and bookings reflect the active request

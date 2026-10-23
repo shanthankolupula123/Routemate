@@ -917,7 +917,7 @@
           </div>
 
           <!-- 2. Driver Corridor Route & Departure Settings -->
-          <div class="bg-white rounded-3xl p-4.5 border border-slate-200 shadow-sm relative overflow-hidden space-y-3">
+          <div class="bg-white rounded-3xl p-4.5 border border-slate-200 shadow-sm relative overflow-visible z-20 space-y-3">
             <div class="flex items-center justify-between pb-2 border-b border-slate-100">
               <div class="flex items-center gap-2">
                 <div class="w-7 h-7 rounded-lg bg-blue-100 text-blue-700 flex items-center justify-center">
@@ -933,34 +933,45 @@
               </span>
             </div>
 
-            <!-- Dynamic Route Inputs with Map & GPS Controls -->
-            <div class="space-y-2">
-              <div class="flex items-center gap-2.5 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs relative">
-                <span class="w-2.5 h-2.5 rounded-full bg-emerald-500 flex-shrink-0"></span>
-                <div class="flex-1 pr-16 min-w-0">
-                  <label class="block text-[9px] uppercase font-bold text-slate-400">Starting From (Any Custom Location)</label>
-                  <input id="driverCorridorPickup" type="text" placeholder="Enter starting address or landmark" value="Uppal Ring Road Metro, Hyderabad" oninput="handleDriverCorridorChange()" class="w-full bg-transparent font-bold text-slate-900 focus:outline-none text-xs truncate" />
+            <!-- Dynamic Route Inputs with Map, Autocomplete & GPS Controls -->
+            <div class="space-y-2.5">
+              <!-- Driver Starting Point with Autocomplete Box -->
+              <div class="relative">
+                <div class="flex items-center gap-2.5 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs relative focus-within:border-blue-500 focus-within:bg-white transition">
+                  <span class="w-2.5 h-2.5 rounded-full bg-emerald-500 flex-shrink-0"></span>
+                  <div class="flex-1 pr-16 min-w-0">
+                    <label class="block text-[9px] uppercase font-bold text-slate-400">Starting From (Any Custom Location)</label>
+                    <input id="driverCorridorPickup" type="text" placeholder="Type starting address, landmark, town..." value="Uppal Ring Road Metro, Hyderabad" oninput="handleDriverCorridorChange()" autocomplete="off" class="w-full bg-transparent font-bold text-slate-900 focus:outline-none text-xs truncate" />
+                  </div>
+                  <div class="flex items-center gap-1 absolute right-2 top-1/2 -translate-y-1/2 z-10">
+                    <button type="button" onclick="detectDriverCurrentLocation()" title="Use Current GPS Location" class="p-1.5 rounded-lg bg-white hover:bg-emerald-50 text-emerald-600 border border-slate-200 shadow-xs hover:border-emerald-300 transition active:scale-95 flex items-center justify-center cursor-pointer">
+                      <i data-lucide="locate-fixed" class="w-3.5 h-3.5"></i>
+                    </button>
+                    <button type="button" onclick="openSelectOnMapModal(true, 'driver')" title="Select Starting Point on Map" class="p-1.5 rounded-lg bg-white hover:bg-blue-50 text-blue-600 border border-slate-200 shadow-xs hover:border-blue-300 transition active:scale-95 flex items-center justify-center cursor-pointer">
+                      <i data-lucide="map" class="w-3.5 h-3.5"></i>
+                    </button>
+                  </div>
                 </div>
-                <div class="flex items-center gap-1 absolute right-2 top-1/2 -translate-y-1/2 z-10">
-                  <button type="button" onclick="detectDriverCurrentLocation()" title="Use Current GPS Location" class="p-1.5 rounded-lg bg-white hover:bg-emerald-50 text-emerald-600 border border-slate-200 shadow-xs hover:border-emerald-300 transition active:scale-95 flex items-center justify-center cursor-pointer">
-                    <i data-lucide="locate-fixed" class="w-3.5 h-3.5"></i>
-                  </button>
-                  <button type="button" onclick="openSelectOnMapModal(true, 'driver')" title="Select Starting Point on Map" class="p-1.5 rounded-lg bg-white hover:bg-blue-50 text-blue-600 border border-slate-200 shadow-xs hover:border-blue-300 transition active:scale-95 flex items-center justify-center cursor-pointer">
-                    <i data-lucide="map" class="w-3.5 h-3.5"></i>
-                  </button>
-                </div>
+                <!-- Real-Time Autocomplete Suggestion Dropdown for Driver Pickup -->
+                <div id="driverPickupSuggestBox" class="hidden absolute left-0 right-0 top-full mt-1.5 bg-white rounded-2xl border border-slate-200 shadow-2xl z-50 overflow-hidden max-h-60 overflow-y-auto divide-y divide-slate-100 text-left"></div>
               </div>
-              <div class="flex items-center gap-2.5 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs relative">
-                <span class="w-2.5 h-2.5 rounded-full bg-blue-600 flex-shrink-0"></span>
-                <div class="flex-1 pr-10 min-w-0">
-                  <label class="block text-[9px] uppercase font-bold text-slate-400">Heading Towards (Any Destination)</label>
-                  <input id="driverCorridorDrop" type="text" placeholder="Enter destination town, landmark or district" value="Jangaon Bus Depot / Chowrasta" oninput="handleDriverCorridorChange()" class="w-full bg-transparent font-bold text-slate-900 focus:outline-none text-xs truncate" />
+
+              <!-- Driver Heading Destination with Autocomplete Box -->
+              <div class="relative">
+                <div class="flex items-center gap-2.5 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs relative focus-within:border-blue-500 focus-within:bg-white transition">
+                  <span class="w-2.5 h-2.5 rounded-full bg-blue-600 flex-shrink-0"></span>
+                  <div class="flex-1 pr-10 min-w-0">
+                    <label class="block text-[9px] uppercase font-bold text-slate-400">Heading Towards (Any Destination)</label>
+                    <input id="driverCorridorDrop" type="text" placeholder="Type destination town, landmark, district..." value="Jangaon Bus Depot / Chowrasta" oninput="handleDriverCorridorChange()" autocomplete="off" class="w-full bg-transparent font-bold text-slate-900 focus:outline-none text-xs truncate" />
+                  </div>
+                  <div class="flex items-center gap-1 absolute right-2 top-1/2 -translate-y-1/2 z-10">
+                    <button type="button" onclick="openSelectOnMapModal(false, 'driver')" title="Select Destination on Map" class="p-1.5 rounded-lg bg-white hover:bg-blue-50 text-blue-600 border border-slate-200 shadow-xs hover:border-blue-300 transition active:scale-95 flex items-center justify-center cursor-pointer">
+                      <i data-lucide="map" class="w-3.5 h-3.5"></i>
+                    </button>
+                  </div>
                 </div>
-                <div class="flex items-center gap-1 absolute right-2 top-1/2 -translate-y-1/2 z-10">
-                  <button type="button" onclick="openSelectOnMapModal(false, 'driver')" title="Select Destination on Map" class="p-1.5 rounded-lg bg-white hover:bg-blue-50 text-blue-600 border border-slate-200 shadow-xs hover:border-blue-300 transition active:scale-95 flex items-center justify-center cursor-pointer">
-                    <i data-lucide="map" class="w-3.5 h-3.5"></i>
-                  </button>
-                </div>
+                <!-- Real-Time Autocomplete Suggestion Dropdown for Driver Drop -->
+                <div id="driverDropSuggestBox" class="hidden absolute left-0 right-0 top-full mt-1.5 bg-white rounded-2xl border border-slate-200 shadow-2xl z-50 overflow-hidden max-h-60 overflow-y-auto divide-y divide-slate-100 text-left"></div>
               </div>
             </div>
 
@@ -3413,16 +3424,16 @@
     };
   </script>
   <!-- Interactive Maps Engine (Leaflet + OSM with Google Maps fallback) -->
-  <script src="maps.js?v=20261023_driver_gps_v4"></script>
+  <script src="maps.js?v=20261023_driver_autocomplete_v5"></script>
   <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCpZp3uUEEPF5ZJeVuuQRSGZxBDIgPuMqA&libraries=places,geometry&callback=initGoogleMap" async defer></script>
   <!-- Razorpay Standard Checkout SDK -->
   <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
-  <script src="payment.js?v=20261023_driver_gps_v4"></script>
+  <script src="payment.js?v=20261023_driver_autocomplete_v5"></script>
   <!-- Tesseract.js Pure Client-Side WebAssembly OCR Engine v5 -->
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
   <!-- Supabase JS Client SDK v2 -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="supabaseClient.js?v=20261023_driver_gps_v4"></script>
-  <script src="app.js?v=20261023_driver_gps_v4"></script>
+  <script src="supabaseClient.js?v=20261023_driver_autocomplete_v5"></script>
+  <script src="app.js?v=20261023_driver_autocomplete_v5"></script>
 </body>
 </html>
