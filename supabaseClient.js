@@ -12,7 +12,15 @@ let supabase = null;
 function getSupabaseClient() {
   if (!supabase && typeof window !== 'undefined' && window.supabase && window.supabase.createClient) {
     try {
-      supabase = window.supabase.createClient(SUPABASE_CONFIG.url, SUPABASE_CONFIG.publishableKey);
+      supabase = window.supabase.createClient(SUPABASE_CONFIG.url, SUPABASE_CONFIG.publishableKey, {
+        auth: {
+          persistSession: true,
+          autoRefreshToken: true,
+          detectSessionInUrl: true,
+          storage: window.localStorage,
+          storageKey: 'routemate_supabase_auth_token'
+        }
+      });
       console.log('✅ Supabase client initialized for Routemate (hjieeilzfbvubkhmlmdg.supabase.co)');
     } catch (err) {
       console.warn('⚠️ Error initializing Supabase client:', err);
@@ -387,6 +395,115 @@ const db = {
       }
     },
 
+    // Find existing profile by email or phone (READ ONLY - does NOT create duplicates)
+    async findByEmailOrPhone(identifier) {
+      if (!identifier) return null;
+      const client = getSupabaseClient();
+      if (!client) return null;
+      const clean = String(identifier).trim().toLowerCase();
+      const isEmail = clean.includes('@');
+
+      try {
+        let existing = null;
+        if (isEmail) {
+          // 1. Try querying by email column (case-insensitive)
+          try {
+            const { data, error } = await client
+              .from('profiles')
+              .select('*')
+              .ilike('email', clean)
+              .maybeSingle();
+            if (!error && data) existing = data;
+          } catch (e) {}
+
+          // 2. Also check if the email was stored in phone column
+          if (!existing) {
+            try {
+              const { data, error } = await client
+                .from('profiles')
+                .select('*')
+                .ilike('phone', clean)
+                .maybeSingle();
+              if (!error && data) existing = data;
+            } catch (e) {}
+          }
+        } else {
+          // Phone search
+          try {
+            const { data, error } = await client
+              .from('profiles')
+              .select('*')
+              .eq('phone', clean)
+              .maybeSingle();
+            if (!error && data) existing = data;
+          } catch (e) {}
+        }
+        return existing;
+      } catch (err) {
+        console.warn('Error in findByEmailOrPhone:', err);
+        return null;
+      }
+    },
+
+    // Create new profile only if it does not already exist
+    async create(profileData) {
+      const client = getSupabaseClient();
+      if (!client) return { success: true, data: profileData };
+      const email = String(profileData.email || '').trim().toLowerCase();
+      const phone = String(profileData.phone || '').trim();
+
+      try {
+        if (email) {
+          const existing = await this.findByEmailOrPhone(email);
+          if (existing) {
+            console.log('User already exists in Supabase, returning existing profile:', existing.email || existing.phone);
+            return { success: true, data: existing, existed: true };
+          }
+        }
+
+        const payload = {
+          name: profileData.name || 'Verified Commuter',
+          role: profileData.role || 'Daily Commuter',
+          gender: profileData.gender || 'Prefer not to say',
+          email: email || null,
+          phone: phone || email || '+91 98480 23145',
+          rating: 5.00,
+          total_rides: 1,
+          avatar_url: profileData.avatar_url || null,
+          is_verified: true,
+          is_kyc_verified: false,
+          kyc_status: 'unverified',
+          profile_completed: true,
+          dob: profileData.dob || null
+        };
+
+        const { data, error } = await client
+          .from('profiles')
+          .insert([payload])
+          .select()
+          .maybeSingle();
+
+        if (error) {
+          if (error.code === 'PGRST204' && payload.email) {
+            const fallbackPayload = { ...payload, phone: payload.email };
+            delete fallbackPayload.email;
+            const { data: fbData, error: fbErr } = await client
+              .from('profiles')
+              .insert([fallbackPayload])
+              .select()
+              .maybeSingle();
+            if (!fbErr && fbData) return { success: true, data: fbData };
+          }
+          console.warn('Could not insert profile:', error.message);
+          return { success: false, error: error.message };
+        }
+        return { success: true, data };
+      } catch (e) {
+        console.warn('Exception in profiles.create:', e);
+        return { success: false, error: e.message };
+      }
+    },
+
     async getOrCreateByPhone(identifier, customName = null) {
       const isEmail = String(identifier || '').includes('@');
       const cleanTarget = String(identifier || '').trim();
@@ -751,7 +868,7 @@ const db = {
         const isEmailTarget = typeof profileIdOrPhone === 'string' && profileIdOrPhone.includes('@');
         let query = client.from('profiles').update(details);
         if (isEmailTarget) {
-          query = query.eq('phone', profileIdOrPhone);
+          query = query.or(`email.ilike.${profileIdOrPhone},phone.ilike.${profileIdOrPhone}`);
         } else if (typeof profileIdOrPhone === 'string' && (profileIdOrPhone.startsWith('+') || /^\d{10,}$/.test(profileIdOrPhone.replace(/[\s+-]/g, '')))) {
           query = query.eq('phone', profileIdOrPhone);
         } else {

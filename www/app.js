@@ -1140,17 +1140,20 @@ function setAuthMode(mode) {
       tabSignIn.className = 'w-1/2 py-2.5 rounded-xl text-xs font-semibold transition-all text-slate-500 hover:text-slate-900 flex items-center justify-center gap-1.5 cursor-pointer';
     }
     if (badge) {
-      badge.textContent = 'Step 1 of 2';
+      badge.textContent = 'Account Setup';
       badge.className = 'text-[10px] font-extrabold uppercase tracking-wider bg-purple-100 text-purple-800 px-2 py-0.5 rounded-full';
     }
     if (title) title.textContent = 'Create Your Account';
-    if (subtitle) subtitle.textContent = 'Step 1 of 2: Enter your mobile number or email to receive a verification code';
-    if (inputLabel) inputLabel.textContent = 'Mobile Number or Email Address';
-    if (emailInput) emailInput.placeholder = '10-digit mobile or you@gmail.com';
-    if (sendBtnText) sendBtnText.textContent = 'Verify & Continue to Step 2';
+    if (subtitle) subtitle.textContent = 'Enter your Gmail or email address to receive a 6-digit verification code';
+    if (inputLabel) inputLabel.textContent = 'Email Address (Gmail / Personal / Work)';
+    if (emailInput) {
+      emailInput.placeholder = 'you@gmail.com';
+      emailInput.type = 'email';
+    }
+    if (sendBtnText) sendBtnText.textContent = 'Continue with Email';
     if (toggleHint) toggleHint.textContent = 'Already registered with Routemate?';
     if (toggleAction) toggleAction.textContent = 'Sign In';
-    if (verifyBtnText) verifyBtnText.textContent = 'Verify & Continue to Step 2';
+    if (verifyBtnText) verifyBtnText.textContent = 'Verify & Access Account';
   } else {
     // signin mode
     if (tabSignIn) {
@@ -1164,9 +1167,12 @@ function setAuthMode(mode) {
       badge.className = 'text-[10px] font-extrabold uppercase tracking-wider bg-blue-100 text-blue-800 px-2 py-0.5 rounded-full';
     }
     if (title) title.textContent = 'Sign In to Routemate';
-    if (subtitle) subtitle.textContent = 'Enter your registered email or mobile number to receive a login code';
-    if (inputLabel) inputLabel.textContent = 'Email Address or Mobile Number';
-    if (emailInput) emailInput.placeholder = 'you@gmail.com or 10-digit mobile';
+    if (subtitle) subtitle.textContent = 'Enter your registered email address to receive a 6-digit login code';
+    if (inputLabel) inputLabel.textContent = 'Email Address (Gmail / Personal / Work)';
+    if (emailInput) {
+      emailInput.placeholder = 'you@gmail.com';
+      emailInput.type = 'email';
+    }
     if (sendBtnText) sendBtnText.textContent = 'Send Sign In Code';
     if (toggleHint) toggleHint.textContent = "Don't have an account yet?";
     if (toggleAction) toggleAction.textContent = 'Create Account';
@@ -4079,23 +4085,30 @@ function initAuth() {
     return;
   }
 
-  // 1. Check local session cache (sessionStorage takes precedence for per-tab isolation)
-  const cachedUserStr = sessionStorage.getItem('routemate_auth_user') || localStorage.getItem('routemate_auth_user');
+  // 1. Check local session cache (localStorage takes precedence for long-lived session persistence)
+  const cachedUserStr = localStorage.getItem('routemate_auth_user') || sessionStorage.getItem('routemate_auth_user');
   if (cachedUserStr) {
     try {
       const cachedUser = JSON.parse(cachedUserStr);
-      if (cachedUser && (cachedUser.phone || cachedUser.email || cachedUser.id)) {
+      if (cachedUser && (cachedUser.email || cachedUser.phone || cachedUser.id)) {
         if (cachedUser.avatar && cachedUser.avatar.includes('photo-1535713875002-d1d0cf377fde')) {
           cachedUser.avatar = null;
         }
         state.currentUser = cachedUser;
         console.log('✅ Active user session restored persistently:', cachedUser.email || cachedUser.phone);
+        if (document.documentElement) {
+          document.documentElement.classList.add('has-persisted-session');
+        }
         showDashboardView();
 
-        // Asynchronously sync latest profile from Supabase to refresh KYC verification status
+        // Asynchronously sync latest profile from Supabase to refresh KYC verification status without creating blank duplicates
         if (window.db && window.db.profiles) {
-          const userIdentifier = cachedUser.phone || cachedUser.email || cachedUser.id;
-          window.db.profiles.getOrCreateByPhone(userIdentifier).then(profile => {
+          const userIdentifier = cachedUser.email || cachedUser.phone || cachedUser.id;
+          const fetchPromise = window.db.profiles.findByEmailOrPhone 
+            ? window.db.profiles.findByEmailOrPhone(userIdentifier)
+            : window.db.profiles.getOrCreateByPhone(userIdentifier);
+
+          fetchPromise.then(profile => {
             if (profile) {
               if (profile.is_kyc_verified !== undefined) {
                 state.currentUser.is_kyc_verified = Boolean(profile.is_kyc_verified);
@@ -4125,6 +4138,7 @@ function initAuth() {
                 state.currentUser.rejection_reason = profile.rejection_reason;
               }
               localStorage.setItem('routemate_auth_user', JSON.stringify(state.currentUser));
+              sessionStorage.setItem('routemate_auth_user', JSON.stringify(state.currentUser));
               updateProfileDisplay();
               renderKycStatus();
             }
@@ -4140,11 +4154,13 @@ function initAuth() {
   // 2. Check Supabase Auth active session asynchronously
   if (window.db && window.db.auth) {
     window.db.auth.getSession().then(session => {
-      if (session && session.user && (session.user.phone || session.user.email)) {
+      if (session && session.user && (session.user.email || session.user.phone)) {
+        const authUserEmail = session.user.email || '';
+        const authUserPhone = session.user.phone || '';
         state.currentUser = {
           id: session.user.id,
-          phone: session.user.phone || '',
-          email: session.user.email || '',
+          phone: authUserPhone,
+          email: authUserEmail,
           name: 'Verified Commuter',
           avatar: null,
           is_verified: true,
@@ -4154,6 +4170,10 @@ function initAuth() {
           authenticatedAt: new Date().toISOString()
         };
         localStorage.setItem('routemate_auth_user', JSON.stringify(state.currentUser));
+        sessionStorage.setItem('routemate_auth_user', JSON.stringify(state.currentUser));
+        if (document.documentElement) {
+          document.documentElement.classList.add('has-persisted-session');
+        }
         showDashboardView();
       } else if (!state.currentUser) {
         showAuthView();
@@ -4168,6 +4188,9 @@ function initAuth() {
 }
 
 function showAuthView() {
+  if (document.documentElement) {
+    document.documentElement.classList.remove('has-persisted-session');
+  }
   const authScreen = document.getElementById('authScreen');
   const appHeader = document.getElementById('appHeader');
   const appMain = document.getElementById('appMain');
@@ -4185,6 +4208,9 @@ function showAuthView() {
 }
 
 function showDashboardView() {
+  if (document.documentElement) {
+    document.documentElement.classList.add('has-persisted-session');
+  }
   const authScreen = document.getElementById('authScreen');
   const appHeader = document.getElementById('appHeader');
   const appMain = document.getElementById('appMain');
@@ -4431,33 +4457,19 @@ async function handleAuthSubmit() {
   const errorText = document.getElementById('authPhoneErrorText');
 
   if (!emailInput) return;
-  const rawInput = emailInput.value.trim();
+  const rawInput = emailInput.value.trim().toLowerCase();
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  const isEmail = rawInput.includes('@');
-  const phoneDigits = rawInput.replace(/\D/g, '');
 
-  if (isEmail) {
-    if (!emailRegex.test(rawInput.toLowerCase())) {
-      if (errorText) errorText.textContent = 'Please enter a valid email address';
-      if (errorEl) errorEl.classList.remove('hidden');
-      emailInput.focus();
-      return;
-    }
-    clearPhoneError();
-    state.authEmail = rawInput.toLowerCase();
-    state.authPhone = rawInput.toLowerCase();
-  } else {
-    if (phoneDigits.length < 10 || phoneDigits.length > 13) {
-      if (errorText) errorText.textContent = 'Please enter a valid 10-digit mobile number or email address';
-      if (errorEl) errorEl.classList.remove('hidden');
-      emailInput.focus();
-      return;
-    }
-    clearPhoneError();
-    const formattedPhone = phoneDigits.length === 10 ? `+91 ${phoneDigits}` : `+${phoneDigits}`;
-    state.authPhone = formattedPhone;
-    state.authEmail = '';
+  if (!rawInput || !emailRegex.test(rawInput)) {
+    if (errorText) errorText.textContent = 'Please enter a valid Gmail or email address (e.g., you@gmail.com)';
+    if (errorEl) errorEl.classList.remove('hidden');
+    emailInput.focus();
+    return;
   }
+
+  clearPhoneError();
+  state.authEmail = rawInput;
+  state.authPhone = rawInput;
 
   await handleSendOtp();
 }
@@ -4628,33 +4640,19 @@ async function handleSendOtp() {
   const sendBtn = document.getElementById('btnSendOtp');
   const sendBtnText = document.getElementById('btnSendOtpText');
 
-  const rawInput = emailInput ? emailInput.value.trim() : (state.authEmail || state.authPhone || '');
+  const rawInput = (emailInput ? emailInput.value.trim() : (state.authEmail || '')).toLowerCase();
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  const isEmail = rawInput.includes('@');
-  const phoneDigits = rawInput.replace(/\D/g, '');
 
-  let activeTarget = '';
-  if (isEmail) {
-    if (!emailRegex.test(rawInput.toLowerCase())) {
-      if (errorText) errorText.textContent = 'Please enter a valid email address';
-      if (errorEl) errorEl.classList.remove('hidden');
-      if (emailInput) emailInput.focus();
-      return;
-    }
-    activeTarget = rawInput.toLowerCase();
-    state.authEmail = activeTarget;
-    state.authPhone = activeTarget;
-  } else {
-    if (phoneDigits.length < 10 || phoneDigits.length > 13) {
-      if (errorText) errorText.textContent = 'Please enter a valid 10-digit mobile number or email address';
-      if (errorEl) errorEl.classList.remove('hidden');
-      if (emailInput) emailInput.focus();
-      return;
-    }
-    activeTarget = phoneDigits.length === 10 ? `+91 ${phoneDigits}` : `+${phoneDigits}`;
-    state.authPhone = activeTarget;
-    state.authEmail = '';
+  if (!rawInput || !emailRegex.test(rawInput)) {
+    if (errorText) errorText.textContent = 'Please enter a valid Gmail or email address (e.g., you@gmail.com)';
+    if (errorEl) errorEl.classList.remove('hidden');
+    if (emailInput) emailInput.focus();
+    return;
   }
+
+  const activeTarget = rawInput;
+  state.authEmail = activeTarget;
+  state.authPhone = activeTarget;
 
   clearPhoneError();
   try {
@@ -4674,7 +4672,7 @@ async function handleSendOtp() {
     }
 
     if (!result || !result.success) {
-      const errMsg = (result && result.error) || 'Failed to send verification code. Please check your contact details.';
+      const errMsg = (result && result.error) || 'Failed to send verification code. Please check your email and try again.';
       if (errorText) errorText.textContent = errMsg;
       if (errorEl) errorEl.classList.remove('hidden');
       showToast(errMsg, 'error');
@@ -4698,16 +4696,7 @@ async function handleSendOtp() {
     otpBoxes.forEach(b => { b.value = ''; });
     if (otpBoxes[0]) setTimeout(() => otpBoxes[0].focus(), 150);
 
-    const isEmailTarget = activeTarget.includes('@');
-    if (isEmailTarget) {
-      showToast(`✉️ 6-digit verification code sent to ${activeTarget}. Please check your inbox.`, 'success');
-    } else {
-      if (result.data && result.data.debugOtp) {
-        showToast(`📱 Verification code for ${activeTarget}: ${result.data.debugOtp}`, 'success');
-      } else {
-        showToast(`📱 Verification code sent to ${activeTarget}.`, 'success');
-      }
-    }
+    showToast(`✉️ 6-digit verification code sent to ${activeTarget}. Please check your inbox.`, 'success');
 
     // Start 30s countdown
     startOtpCountdown();
@@ -4812,54 +4801,60 @@ async function handleVerifyOtp() {
     }
 
     if (verified) {
-      // Sync or fetch profile from Supabase Database
+      // Find existing profile in Supabase Database WITHOUT creating duplicate/blank records
       let profile = null;
       if (window.db && window.db.profiles) {
         try {
-          profile = await window.db.profiles.getOrCreateByPhone(authIdentifier);
+          if (window.db.profiles.findByEmailOrPhone) {
+            profile = await window.db.profiles.findByEmailOrPhone(authIdentifier);
+          } else {
+            profile = await window.db.profiles.getOrCreateByPhone(authIdentifier);
+          }
         } catch (e) {
-          console.warn('Profile sync:', e);
+          console.warn('Profile search by email:', e);
         }
       }
 
-      // Differentiate Sign In mode from Sign Up mode
-      const isSignIn = (state.authMode === 'signin');
-
-      // Check if this is a user with completed profile in Supabase
-      const hasCompletedProfile = Boolean(
-        profile &&
-        profile.profile_completed &&
-        profile.name &&
-        profile.name.trim().length >= 2 &&
-        profile.name !== 'Verified Commuter' &&
-        profile.name !== 'Guest Commuter' &&
-        profile.gender
+      // Check if user already exists in database
+      const userExistsInDb = Boolean(
+        profile && (
+          (profile.name && profile.name.trim().length >= 2 && profile.name !== 'Verified Commuter' && profile.name !== 'Guest Commuter') ||
+          profile.profile_completed ||
+          profile.is_kyc_verified ||
+          profile.email
+        )
       );
 
-      const sessionUser = {
-        id: (authUser && authUser.id) || (profile && profile.id) || ('usr_' + Date.now()),
-        email: state.authEmail || (authUser && authUser.email) || (profile && profile.email) || (authIdentifier.includes('@') ? authIdentifier : ''),
-        phone: (profile && profile.phone) || (authUser && authUser.phone) || (state.authPhone && !state.authPhone.includes('@') ? state.authPhone : (!authIdentifier.includes('@') ? authIdentifier : '+91 98480 23145')),
-        name: (profile && profile.name) || (isSignIn ? 'Verified Commuter' : ''),
-        gender: (profile && profile.gender) || (isSignIn ? 'Prefer not to say' : ''),
-        avatar: (profile && profile.avatar_url && !profile.avatar_url.includes('photo-1535713875002-d1d0cf377fde')) ? profile.avatar_url : null,
-        is_verified: true,
-        is_kyc_verified: profile ? Boolean(profile.is_kyc_verified) : false,
-        kyc_status: (profile && profile.kyc_status) || (profile && profile.is_kyc_verified ? 'verified_success' : 'unverified'),
-        aadhaar_number: (profile && profile.aadhaar_number) || '',
-        dl_number: (profile && profile.dl_number) || '',
-        dob: (profile && profile.dob) || '',
-        memberSince: (profile && profile.member_since) || 'October 2024',
-        profile_completed: isSignIn ? true : hasCompletedProfile,
-        authenticatedAt: new Date().toISOString()
-      };
+      // Requirement 1: If user already exists in database, automatically detect existing user
+      // and log them in directly with their profile intact, completely bypassing duplicate creation
+      if (userExistsInDb && profile) {
+        console.log('✅ Existing user account detected in Supabase DB. Logging in directly:', profile.email || profile.phone, profile.name);
+        const sessionUser = {
+          id: profile.id,
+          email: profile.email || authIdentifier,
+          phone: profile.phone || '',
+          name: (profile.name && profile.name !== 'Verified Commuter') ? profile.name : 'Verified Commuter',
+          gender: profile.gender || 'Prefer not to say',
+          avatar: (profile.avatar_url && !profile.avatar_url.includes('photo-1535713875002-d1d0cf377fde')) ? profile.avatar_url : null,
+          is_verified: true,
+          is_kyc_verified: Boolean(profile.is_kyc_verified),
+          kyc_status: profile.kyc_status || (profile.is_kyc_verified ? 'verified_success' : 'unverified'),
+          aadhaar_number: profile.aadhaar_number || '',
+          dl_number: profile.dl_number || '',
+          dob: profile.dob || '',
+          memberSince: profile.member_since || profile.created_at || 'October 2024',
+          profile_completed: Boolean(profile.name && profile.name !== 'Verified Commuter'),
+          authenticatedAt: new Date().toISOString()
+        };
 
-      state.currentUser = sessionUser;
-      localStorage.setItem('routemate_auth_user', JSON.stringify(sessionUser));
-      sessionStorage.setItem('routemate_auth_user', JSON.stringify(sessionUser));
+        state.currentUser = sessionUser;
+        localStorage.setItem('routemate_auth_user', JSON.stringify(sessionUser));
+        sessionStorage.setItem('routemate_auth_user', JSON.stringify(sessionUser));
+        if (document.documentElement) {
+          document.documentElement.classList.add('has-persisted-session');
+        }
 
-      if (isSignIn || hasCompletedProfile) {
-        showToast('✅ Welcome back! Signed in successfully.', 'success');
+        showToast(`✅ Welcome back, ${sessionUser.name}! Signed in successfully.`, 'success');
         showDashboardView();
 
         // Reset auth forms
@@ -4869,13 +4864,50 @@ async function handleVerifyOtp() {
         return;
       }
 
-      // First-time registration under Sign Up mode -> Show Step 2 Profile Setup
-      console.log('📝 New user sign up. Showing Step 2 profile onboarding...');
+      // If in Sign In mode and a baseline profile exists
+      if (state.authMode === 'signin' && profile) {
+        const sessionUser = {
+          id: profile.id,
+          email: profile.email || authIdentifier,
+          phone: profile.phone || '',
+          name: profile.name || 'Verified Commuter',
+          gender: profile.gender || 'Prefer not to say',
+          avatar: profile.avatar_url || null,
+          is_verified: true,
+          is_kyc_verified: Boolean(profile.is_kyc_verified),
+          kyc_status: profile.kyc_status || 'unverified',
+          aadhaar_number: profile.aadhaar_number || '',
+          dl_number: profile.dl_number || '',
+          dob: profile.dob || '',
+          memberSince: profile.member_since || 'October 2024',
+          profile_completed: false,
+          authenticatedAt: new Date().toISOString()
+        };
+
+        state.currentUser = sessionUser;
+        localStorage.setItem('routemate_auth_user', JSON.stringify(sessionUser));
+        sessionStorage.setItem('routemate_auth_user', JSON.stringify(sessionUser));
+        if (document.documentElement) {
+          document.documentElement.classList.add('has-persisted-session');
+        }
+
+        showToast('✅ Signed in successfully.', 'success');
+        showDashboardView();
+
+        backToPhoneStep();
+        const emailInput = document.getElementById('authEmailInput') || document.getElementById('authPhoneInput');
+        if (emailInput) emailInput.value = '';
+        return;
+      }
+
+      // Truly new user: Show Step 2 Profile Setup
+      console.log('📝 Truly new user sign up with email:', authIdentifier, '. Showing Step 2 profile onboarding...');
+      state.authEmail = authIdentifier;
       showOnboardingStep(authIdentifier, profile);
-      showToast('Step 2 of 2: Please enter your name and gender to continue', 'info');
+      showToast('Step 2 of 2: Please enter your name to complete your profile', 'info');
       return;
     } else {
-      if (errorText) errorText.textContent = 'Invalid verification code. Please enter the valid OTP sent to your email or phone.';
+      if (errorText) errorText.textContent = 'Invalid verification code. Please enter the valid OTP sent to your email.';
       if (errorEl) errorEl.classList.remove('hidden');
       if (otpBoxes[0]) otpBoxes[0].focus();
     }
@@ -5013,16 +5045,20 @@ async function handleOnboardingSubmit() {
     hasError = true;
   }
 
-  // 2. Mandatory Mobile Number Validation
+  // 2. Mobile Number Validation (Optional, validated only if provided)
   const cleanPhoneDigits = rawPhoneVal.replace(/[^\d]/g, '');
-  if (!cleanPhoneDigits || cleanPhoneDigits.length < 10) {
-    showOnboardingError('onboardingPhoneError', 'Please enter a valid 10-digit mobile number');
-    if (!hasError && phoneInput) phoneInput.focus();
-    hasError = true;
+  let formattedPhone = '';
+  if (cleanPhoneDigits.length > 0) {
+    if (cleanPhoneDigits.length < 10) {
+      showOnboardingError('onboardingPhoneError', 'Please enter a valid 10-digit mobile number or leave blank');
+      if (!hasError && phoneInput) phoneInput.focus();
+      hasError = true;
+    } else {
+      formattedPhone = cleanPhoneDigits.length === 10 
+        ? `+91 ${cleanPhoneDigits.slice(0, 5)} ${cleanPhoneDigits.slice(5)}`
+        : (rawPhoneVal.startsWith('+') ? rawPhoneVal : `+91 ${cleanPhoneDigits}`);
+    }
   }
-  const formattedPhone = cleanPhoneDigits.length === 10 
-    ? `+91 ${cleanPhoneDigits.slice(0, 5)} ${cleanPhoneDigits.slice(5)}`
-    : (rawPhoneVal.startsWith('+') ? rawPhoneVal : `+91 ${cleanPhoneDigits}`);
 
   // 3. Mandatory Gender Validation
   if (!genderVal) {
@@ -5065,21 +5101,35 @@ async function handleOnboardingSubmit() {
     const profileDisplayName = document.getElementById('profileDisplayName');
     if (profileDisplayName) profileDisplayName.textContent = nameVal;
     const profileDisplayPhone = document.getElementById('profileDisplayPhone');
-    if (profileDisplayPhone) profileDisplayPhone.textContent = formattedPhone;
+    if (profileDisplayPhone) profileDisplayPhone.textContent = formattedPhone || emailVal;
 
-    // Persist to local storage
+    // Persist to local & session storage
     localStorage.setItem('routemate_auth_user', JSON.stringify(state.currentUser));
+    sessionStorage.setItem('routemate_auth_user', JSON.stringify(state.currentUser));
+    if (document.documentElement) {
+      document.documentElement.classList.add('has-persisted-session');
+    }
 
-    // Persist to Supabase Database in real time
-    if (window.db && window.db.profiles && window.db.profiles.updateDetails) {
-      await window.db.profiles.updateDetails(formattedPhone || emailVal, {
-        name: nameVal,
-        gender: genderVal,
-        email: emailVal || null,
-        dob: dobVal || null,
-        phone: formattedPhone,
-        profile_completed: true
-      }).catch(e => console.warn('Supabase profile update warning:', e));
+    // Persist to Supabase Database safely without creating duplicate records
+    if (window.db && window.db.profiles) {
+      if (window.db.profiles.create) {
+        await window.db.profiles.create({
+          name: nameVal,
+          gender: genderVal,
+          email: emailVal,
+          phone: formattedPhone || emailVal,
+          dob: dobVal || null
+        }).catch(e => console.warn('Supabase profile create warning:', e));
+      } else if (window.db.profiles.updateDetails) {
+        await window.db.profiles.updateDetails(emailVal || formattedPhone, {
+          name: nameVal,
+          gender: genderVal,
+          email: emailVal || null,
+          dob: dobVal || null,
+          phone: formattedPhone,
+          profile_completed: true
+        }).catch(e => console.warn('Supabase profile update warning:', e));
+      }
     }
 
     showToast(`✅ Welcome, ${nameVal}! Profile registered successfully.`, 'success');
@@ -5087,8 +5137,8 @@ async function handleOnboardingSubmit() {
 
     // Reset auth screens
     backToPhoneStep();
-    const phoneInputEl = document.getElementById('authPhoneInput');
-    if (phoneInputEl) phoneInputEl.value = '';
+    const emailInputEl = document.getElementById('authEmailInput') || document.getElementById('authPhoneInput');
+    if (emailInputEl) emailInputEl.value = '';
 
   } catch (err) {
     console.error('Exception submitting onboarding profile:', err);
@@ -5105,6 +5155,10 @@ async function handleOnboardingSubmit() {
 function handleSignOut() {
   if (confirm('Are you sure you want to log out of Routemate?')) {
     localStorage.removeItem('routemate_auth_user');
+    sessionStorage.removeItem('routemate_auth_user');
+    if (document.documentElement) {
+      document.documentElement.classList.remove('has-persisted-session');
+    }
     if (window.db && window.db.auth) {
       window.db.auth.signOut();
     }

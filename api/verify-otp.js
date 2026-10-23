@@ -89,7 +89,10 @@ module.exports = async (req, res) => {
       
       for (const cand of candidates) {
         if (isVerified) break;
-        const dbRes = await fetch(`${supabaseUrl}/rest/v1/profiles?phone=eq.${encodeURIComponent(cand)}&select=id,phone,avatar_url`, {
+        const filterStr = cand.includes('@') 
+          ? `or=(email.ilike.${encodeURIComponent(cand)},phone.ilike.${encodeURIComponent(cand)})`
+          : `phone=eq.${encodeURIComponent(cand)}`;
+        const dbRes = await fetch(`${supabaseUrl}/rest/v1/profiles?${filterStr}&select=id,phone,avatar_url`, {
           headers: {
             'apikey': supabaseKey,
             'Authorization': `Bearer ${supabaseKey}`
