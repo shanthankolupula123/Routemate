@@ -207,6 +207,19 @@ const state = {
   chatMessages: []
 };
 
+// Expose state globally so all client scripts and modules can access it
+if (typeof window !== 'undefined') {
+  window.state = state;
+}
+
+// Restore persisted user mode preference (rider vs driver)
+try {
+  const savedMode = localStorage.getItem('routemate_app_mode');
+  if (savedMode === 'driver' || savedMode === 'rider') {
+    state.mode = savedMode;
+  }
+} catch (e) {}
+
 // Real-Time Active Driver Rides Pool (starts clean with 0 mock rides)
 let availableRides = [];
 
@@ -709,6 +722,7 @@ function isDriverKycApproved(user = state.currentUser) {
 // Mode Switcher handler (Rider / Driver)
 function switchMode(newMode) {
   state.mode = newMode;
+  try { localStorage.setItem('routemate_app_mode', newMode); } catch(e){}
   const pill = document.getElementById('modeActivePill');
   const riderBtn = document.getElementById('btnModeRider');
   const driverBtn = document.getElementById('btnModeDriver');
@@ -761,7 +775,7 @@ function switchMode(newMode) {
         window.db.matching.subscribeDriverChannel();
       }
       if (typeof window.db.matching.startDriverPolling === 'function') {
-        window.db.matching.startDriverPolling(2500);
+        window.db.matching.startDriverPolling(2000);
       }
       window.db.matching.init(true);
       window.db.matching.syncActiveRequest();
@@ -803,7 +817,7 @@ function renderDriverModeView() {
       window.db.matching.subscribeDriverChannel(true);
     }
     if (typeof window.db.matching.startDriverPolling === 'function') {
-      window.db.matching.startDriverPolling(2500);
+      window.db.matching.startDriverPolling(2000);
     }
     window.db.matching.init(true);
     window.db.matching.syncActiveRequest();
@@ -1871,7 +1885,7 @@ function toggleDriverOnline() {
         window.db.matching.subscribeDriverChannel();
       }
       if (typeof window.db.matching.startDriverPolling === 'function') {
-        window.db.matching.startDriverPolling(2500);
+        window.db.matching.startDriverPolling(2000);
       }
       window.db.matching.init(true);
       window.db.matching.syncActiveRequest();
@@ -4084,13 +4098,25 @@ document.addEventListener('DOMContentLoaded', () => {
   // Subscribe to Realtime Ride Matching engine
   if (window.db && window.db.matching) {
     window.db.matching.subscribe(handleRealtimeMatchingEvent);
+    if (state.mode === 'driver') {
+      window.db.matching.startDriverPolling(2000);
+    }
   } else {
     setTimeout(() => {
       if (window.db && window.db.matching) {
         window.db.matching.subscribe(handleRealtimeMatchingEvent);
+        if (state.mode === 'driver') {
+          window.db.matching.startDriverPolling(2000);
+        }
       }
     }, 400);
   }
+
+  // Restore driver view if saved mode is driver
+  if (state.mode === 'driver') {
+    switchMode('driver');
+  }
+
   updateActiveRideBanner();
   renderRiderSearchingCard();
 

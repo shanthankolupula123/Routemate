@@ -38,6 +38,13 @@ function getSupabaseClient() {
 // Initial attempt
 getSupabaseClient();
 
+// Safe global state accessor across script modules
+function getGlobalState() {
+  if (typeof window !== 'undefined' && window.state) return window.state;
+  if (typeof state !== 'undefined') return state;
+  return null;
+}
+
 // Database and Authentication helper functions
 const db = {
   get client() {
@@ -2103,15 +2110,15 @@ const db = {
         }
       }
 
-      // Automatically engage guaranteed 2.5s polling fallback for the active driver
-      this.startDriverPolling(2500);
+      // Automatically engage guaranteed 2s polling fallback for the active driver
+      this.startDriverPolling(2000);
     },
 
     _driverPollTimer: null,
 
-    startDriverPolling(intervalMs = 2500) {
+    startDriverPolling(intervalMs = 2000) {
       if (this._driverPollTimer) return;
-      console.log(`🔄 Starting guaranteed driver polling fallback (${intervalMs}ms)`);
+      console.log(`🔄 Starting guaranteed driver 2s polling fallback (${intervalMs}ms)`);
       this.pollLatestSearchingRides();
       this._driverPollTimer = setInterval(() => {
         this.pollLatestSearchingRides();
@@ -2130,40 +2137,66 @@ const db = {
       const client = getSupabaseClient();
       if (!client) return;
 
-      const isDriverActive = typeof state !== 'undefined' && (
-        state.driverOnline || 
-        state.mode === 'driver' || 
-        (typeof document !== 'undefined' && document.getElementById('driverModeView') && !document.getElementById('driverModeView').classList.contains('hidden'))
+      const appState = getGlobalState();
+      const driverViewEl = typeof document !== 'undefined' ? document.getElementById('driverModeView') : null;
+      const isDriverViewVisible = driverViewEl && !driverViewEl.classList.contains('hidden') && driverViewEl.style.display !== 'none';
+      const isDriverActive = Boolean(
+        (appState && (appState.driverOnline || appState.mode === 'driver')) ||
+        isDriverViewVisible
       );
       if (!isDriverActive) return;
 
       // Don't show incoming popup if driver has already accepted and is currently driving a ride
-      const isTripAccepted = typeof state !== 'undefined' && state.activeDriverTrip && (state.activeDriverTrip.status === 'driver_accepted' || state.activeDriverTrip.status === 'ride_started');
+      const isTripAccepted = Boolean(
+        appState && appState.activeDriverTrip && 
+        (appState.activeDriverTrip.status === 'driver_accepted' || appState.activeDriverTrip.status === 'ride_started')
+      );
       if (isTripAccepted) return;
 
       try {
+        console.log('🔄 [Driver 2s Polling]: Actively querying Supabase for status = searching / active...');
         let incomingReq = null;
 
-        // 1. Fetch latest searching/active rows from 'rides' table
-        const { data: rideRows, error: rideErr } = await client
+        // 1. Fetch latest searching/active rows from 'rides' table directly via Supabase REST
+        let { data: rideRows, error: rideErr } = await client
           .from('rides')
           .select('*')
           .in('status', ['searching', 'active'])
           .order('created_at', { ascending: false })
-          .limit(5);
+          .limit(10);
 
-        if (!rideErr && rideRows && rideRows.length > 0) {
+        if (rideErr || !rideRows) {
+          const fallback = await client
+            .from('rides')
+            .select('*')
+            .order('created_at', { ascending: false })
+            .limit(10);
+          rideRows = fallback.data;
+        }
+
+        if (rideRows && rideRows.length > 0) {
           const candidate = rideRows.find(r => {
+            if (!r) return false;
             let meta = {};
             try { meta = JSON.parse(r.notes || '{}'); } catch(e){}
-            const isReq = String(r.vehicle_number || '').startsWith('REQ-') ||
-                          (r.driver_name && r.driver_name.includes('(Rider Request)')) ||
-                          meta.isRequest ||
-                          r.status === 'searching' ||
-                          meta.status === 'searching';
+
             const reqId = r.vehicle_number || r.id;
-            const isDeclined = typeof state !== 'undefined' && state.declinedRequestIds && state.declinedRequestIds.has(reqId);
-            return isReq && !isDeclined;
+            if (appState && appState.declinedRequestIds && appState.declinedRequestIds.has(reqId)) {
+              return false;
+            }
+
+            // Exclude driver's own posted rides
+            const currentUserId = appState?.currentUser?.id;
+            const currentUserPhone = appState?.currentUser?.phone ? String(appState.currentUser.phone).replace(/\D/g, '').slice(-10) : '';
+            const isMyOwnRide = (currentUserId && (r.driver_id === currentUserId || meta.riderId === currentUserId)) ||
+                                (currentUserPhone && meta.riderPhone && String(meta.riderPhone).includes(currentUserPhone));
+            if (isMyOwnRide) return false;
+
+            const isSearching = r.status === 'searching' || meta.status === 'searching';
+            const isRiderReq = meta.isRequest === true ||
+                               String(r.vehicle_number || '').startsWith('REQ-') ||
+                               (r.driver_name && r.driver_name.includes('(Rider Request)'));
+            return isSearching || isRiderReq;
           });
 
           if (candidate) {
@@ -2219,12 +2252,12 @@ const db = {
             .select('*')
             .in('status', ['searching', 'confirmed', 'pending'])
             .order('created_at', { ascending: false })
-            .limit(3);
+            .limit(5);
 
           if (!bErr && bRows && bRows.length > 0) {
             const b = bRows.find(item => {
               const bId = item.id ? `REQ-${String(item.id).replace(/[^a-zA-Z0-9]/g, '').slice(0, 8)}` : null;
-              return !state.declinedRequestIds || !state.declinedRequestIds.has(bId);
+              return !appState || !appState.declinedRequestIds || !appState.declinedRequestIds.has(bId);
             });
             if (b) {
               incomingReq = {
@@ -2261,10 +2294,10 @@ const db = {
         if (incomingReq) {
           const modal = typeof document !== 'undefined' ? document.getElementById('driverIncomingRideModal') : null;
           const isModalHidden = !modal || modal.classList.contains('hidden') || modal.style.display !== 'flex';
-          const isDifferentReq = !state.incomingRequest || state.incomingRequest.id !== incomingReq.id;
+          const isDifferentReq = !appState || !appState.incomingRequest || appState.incomingRequest.id !== incomingReq.id;
 
           if (isModalHidden || isDifferentReq) {
-            console.log('⚡ [Driver Guaranteed Polling Fallback]: Immediate Popup Trigger for', incomingReq.id);
+            console.log('⚡ [Driver Guaranteed 2s Polling]: Triggering incoming ride popup for', incomingReq.id);
             this._handleIncomingEvent('new_ride_request', incomingReq);
           }
         }
@@ -2490,9 +2523,16 @@ const db = {
             })
           };
 
-          const { data, error } = await client.from('rides').insert([dbRow]).select();
-          if (error) {
-            console.error('❌ Supabase rides insert error:', error.message);
+          // Try inserting with status: 'searching' first (if Postgres check constraint allows it);
+          // if Postgres constraint strictly requires ('active', 'completed', 'cancelled'), fallback to status: 'active'.
+          let data = null;
+          let insertRes = await client.from('rides').insert([{ ...dbRow, status: 'searching' }]).select();
+          if (insertRes.error && insertRes.error.code === '23514') {
+            insertRes = await client.from('rides').insert([dbRow]).select();
+          }
+          data = insertRes.data;
+          if (insertRes.error) {
+            console.error('❌ Supabase rides insert error:', insertRes.error.message);
           } else {
             console.log('✅ Supabase rides row inserted successfully for real-time driver sync:', request.id, data);
           }
@@ -2827,7 +2867,8 @@ const db = {
             foundOnServer = true;
             const serverReq = data.activeRequest;
             const eventName = (serverReq.status === 'searching' || serverReq.status === 'active') ? 'new_ride_request' : serverReq.status;
-            const needsIncomingUiSync = typeof state !== 'undefined' && !state.incomingRequest && !state.activeDriverTrip && (serverReq.status === 'searching' || serverReq.status === 'active');
+            const appState = getGlobalState();
+            const needsIncomingUiSync = appState && !appState.incomingRequest && !appState.activeDriverTrip && (serverReq.status === 'searching' || serverReq.status === 'active');
             if (!this._activeRequest || this._activeRequest.status !== serverReq.status || this._activeRequest.id !== serverReq.id || needsIncomingUiSync) {
               this._handleIncomingEvent(eventName, serverReq);
             }
@@ -2935,13 +2976,13 @@ const db = {
           }
 
           if (incomingReq) {
-            const isDriverActive = typeof state !== 'undefined' && (
-              state.driverOnline || 
-              state.mode === 'driver' || 
+            const appState = getGlobalState();
+            const isDriverActive = Boolean(
+              (appState && (appState.driverOnline || appState.mode === 'driver')) ||
               (typeof document !== 'undefined' && document.getElementById('driverModeView') && !document.getElementById('driverModeView').classList.contains('hidden'))
             );
             const isModalHidden = typeof document !== 'undefined' && (!document.getElementById('driverIncomingRideModal') || document.getElementById('driverIncomingRideModal').classList.contains('hidden'));
-            const needsIncomingUiSync = isDriverActive && (!state.incomingRequest || isModalHidden);
+            const needsIncomingUiSync = isDriverActive && (!appState || !appState.incomingRequest || isModalHidden);
             if (needsIncomingUiSync || !this._activeRequest || this._activeRequest.id !== incomingReq.id || this._activeRequest.status !== incomingReq.status) {
               this._handleIncomingEvent('new_ride_request', incomingReq);
             }
