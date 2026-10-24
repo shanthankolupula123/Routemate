@@ -2273,10 +2273,11 @@ async function requestRideAction() {
 
   // Auto-provision verified commuter guest session so booking never blocks
   if (!state.currentUser) {
+    const guestRand = Math.floor(1000 + Math.random() * 9000);
     const guestUser = {
-      id: 'usr_' + Date.now(),
+      id: 'usr_guest_' + Date.now() + '_' + guestRand,
       name: 'Verified Commuter',
-      phone: '+91 98480 23145',
+      phone: '+91 98480 ' + guestRand,
       role: 'Daily Commuter',
       rating: 4.95,
       avatar_url: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=120&h=120&q=80',
@@ -2926,10 +2927,11 @@ async function acceptDriverIncomingModal() {
 
   // Ensure default driver profile if currentUser is not set
   if (!state.currentUser) {
+    const dRand = Math.floor(1000 + Math.random() * 9000);
     state.currentUser = {
-      id: 'driver_' + Date.now(),
+      id: 'driver_' + Date.now() + '_' + dRand,
       name: 'Verified Driver',
-      phone: '9494285249',
+      phone: '+91 94942 ' + dRand,
       role: 'Verified Driver',
       rating: 4.9,
       is_verified: true,
@@ -4180,6 +4182,85 @@ function setupLocalhostTestSession(role) {
     showToast('🧪 Localhost Test: Logged in as Commuter (Ready to Request Instant Ride)', 'info');
   }
 }
+
+// Quick Guest & Testing Access (Works in Incognito, Mobile Browsers & Production)
+function quickGuestAccess(role = 'rider') {
+  const rand = Math.floor(1000 + Math.random() * 9000);
+  if (role === 'driver') {
+    const driverUser = {
+      id: 'driver_demo_' + Date.now() + '_' + rand,
+      phone: '+91 94942 ' + rand,
+      name: 'Verified Driver',
+      gender: 'male',
+      role: 'Verified Corridor Driver',
+      rating: 4.95,
+      avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=120&h=120&q=80',
+      is_verified: true,
+      is_kyc_verified: true,
+      kyc_status: 'verified_success',
+      profile_completed: true,
+      rc_number: 'TS 08 AB ' + rand,
+      rc_vehicle_name: 'Hero Splendor / Sedan',
+      authenticatedAt: new Date().toISOString()
+    };
+    state.currentUser = driverUser;
+    try {
+      localStorage.setItem('routemate_auth_user', JSON.stringify(driverUser));
+      sessionStorage.setItem('routemate_auth_user', JSON.stringify(driverUser));
+    } catch (e) {}
+    state.registeredVehicles = [{
+      name: 'Hero Splendor Plus',
+      plate: 'TS 08 AB ' + rand,
+      type: 'bike',
+      status: 'verified',
+      seats: 1
+    }];
+    state.mode = 'driver';
+    state.driverOnline = true;
+    showDashboardView();
+    switchMode('driver');
+    if (window.db && window.db.matching) {
+      if (typeof window.db.matching.subscribeDriverChannel === 'function') {
+        window.db.matching.subscribeDriverChannel();
+      }
+      if (typeof window.db.matching.startDriverPolling === 'function') {
+        window.db.matching.startDriverPolling(2000);
+      }
+      window.db.matching.init(true);
+      window.db.matching.syncActiveRequest();
+    }
+    showToast('🟢 Online as Verified Driver! Listening for passenger requests.', 'success');
+  } else {
+    const riderUser = {
+      id: 'rider_demo_' + Date.now() + '_' + rand,
+      phone: '+91 98480 ' + rand,
+      name: 'Verified Commuter',
+      gender: 'female',
+      role: 'Daily Commuter',
+      rating: 4.95,
+      avatar: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=120&h=120&q=80',
+      is_verified: true,
+      is_kyc_verified: true,
+      kyc_status: 'verified_success',
+      profile_completed: true,
+      authenticatedAt: new Date().toISOString()
+    };
+    state.currentUser = riderUser;
+    try {
+      localStorage.setItem('routemate_auth_user', JSON.stringify(riderUser));
+      sessionStorage.setItem('routemate_auth_user', JSON.stringify(riderUser));
+    } catch (e) {}
+    state.mode = 'rider';
+    showDashboardView();
+    switchMode('rider');
+    if (window.db && window.db.matching) {
+      window.db.matching.init(true);
+      window.db.matching.syncActiveRequest();
+    }
+    showToast('🔵 Logged in as Commuter! Ready to book instant ride.', 'info');
+  }
+}
+window.quickGuestAccess = quickGuestAccess;
 
 function initLocalhostTestDock() {
   if (typeof window === 'undefined') return;

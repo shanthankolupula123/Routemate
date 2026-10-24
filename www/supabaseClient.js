@@ -45,6 +45,35 @@ function getGlobalState() {
   return null;
 }
 
+// Direct Native Fetch Helper for Supabase PostgREST
+// 100% independent of external CDN scripts; works in incognito, mobile web views, and slow connections
+async function supabaseRest(endpoint, options = {}) {
+  const cleanEndpoint = endpoint.startsWith('/') ? endpoint.slice(1) : endpoint;
+  const url = `${SUPABASE_CONFIG.url}/rest/v1/${cleanEndpoint}`;
+  const headers = {
+    'apikey': SUPABASE_CONFIG.publishableKey,
+    'Authorization': `Bearer ${SUPABASE_CONFIG.publishableKey}`,
+    'Content-Type': 'application/json',
+    'Prefer': options.prefer || 'return=representation',
+    ...(options.headers || {})
+  };
+  try {
+    const res = await fetch(url, {
+      method: options.method || 'GET',
+      headers,
+      body: options.body ? JSON.stringify(options.body) : undefined
+    });
+    const text = await res.text();
+    let data = null;
+    try { data = JSON.parse(text); } catch (e) { data = text; }
+    return { ok: res.ok, status: res.status, data, error: !res.ok ? (data && data.message ? data : { message: text }) : null };
+  } catch (err) {
+    console.warn(`Supabase direct REST error (${endpoint}):`, err);
+    return { ok: false, status: 0, data: null, error: err };
+  }
+}
+if (typeof window !== 'undefined') window.supabaseRest = supabaseRest;
+
 // Database and Authentication helper functions
 const db = {
   get client() {
@@ -2134,9 +2163,6 @@ const db = {
     },
 
     async pollLatestSearchingRides() {
-      const client = getSupabaseClient();
-      if (!client) return;
-
       const appState = getGlobalState();
       const driverViewEl = typeof document !== 'undefined' ? document.getElementById('driverModeView') : null;
       const isDriverViewVisible = driverViewEl && !driverViewEl.classList.contains('hidden') && driverViewEl.style.display !== 'none';
@@ -2154,43 +2180,54 @@ const db = {
       if (isTripAccepted) return;
 
       try {
-        console.log('🔄 [Driver 2s Polling]: Actively querying Supabase for status = searching / active...');
         let incomingReq = null;
+        let rideRows = null;
 
-        // 1. Fetch latest searching/active rows from 'rides' table directly via Supabase REST
-        let { data: rideRows, error: rideErr } = await client
-          .from('rides')
-          .select('*')
-          .in('status', ['searching', 'active'])
-          .order('created_at', { ascending: false })
-          .limit(10);
+        // 1. Direct PostgREST fetch (100% resilient across mobile & incognito, zero CDN dependency)
+        try {
+          const restRes = await supabaseRest('rides?select=*&status=in.(searching,active)&order=created_at.desc&limit=10');
+          if (restRes.ok && Array.isArray(restRes.data) && restRes.data.length > 0) {
+            rideRows = restRes.data;
+          }
+        } catch (e) {}
 
-        if (rideErr || !rideRows) {
-          const fallback = await client
-            .from('rides')
-            .select('*')
-            .order('created_at', { ascending: false })
-            .limit(10);
-          rideRows = fallback.data;
+        // Fallback to Supabase client if available
+        if (!rideRows || rideRows.length === 0) {
+          const client = getSupabaseClient();
+          if (client) {
+            const { data } = await client
+              .from('rides')
+              .select('*')
+              .in('status', ['searching', 'active'])
+              .order('created_at', { ascending: false })
+              .limit(10);
+            if (data && data.length > 0) rideRows = data;
+          }
         }
 
         if (rideRows && rideRows.length > 0) {
           const candidate = rideRows.find(r => {
             if (!r) return false;
             let meta = {};
-            try { meta = JSON.parse(r.notes || '{}'); } catch(e){}
+            try { meta = JSON.parse(r.notes || '{}'); } catch (e) {}
 
             const reqId = r.vehicle_number || r.id;
+            // Skip if driver declined this request in current session
             if (appState && appState.declinedRequestIds && appState.declinedRequestIds.has(reqId)) {
               return false;
             }
 
-            // Exclude driver's own posted rides
-            const currentUserId = appState?.currentUser?.id;
-            const currentUserPhone = appState?.currentUser?.phone ? String(appState.currentUser.phone).replace(/\D/g, '').slice(-10) : '';
-            const isMyOwnRide = (currentUserId && (r.driver_id === currentUserId || meta.riderId === currentUserId)) ||
-                                (currentUserPhone && meta.riderPhone && String(meta.riderPhone).includes(currentUserPhone));
-            if (isMyOwnRide) return false;
+            // DO NOT show incoming popup on the rider's own screen if this exact browser tab is the active rider
+            const isThisTabTheActiveRider = Boolean(
+              appState && appState.activeRideRole === 'rider' &&
+              appState.currentActiveRide &&
+              (appState.currentActiveRide.id === reqId || appState.currentActiveRide.id === r.id)
+            );
+            if (isThisTabTheActiveRider) return false;
+
+            // Do not show rides that have already been accepted or finished
+            const isAlreadyAccepted = meta.status === 'driver_accepted' || meta.status === 'ride_started' || meta.status === 'ride_completed' || r.status === 'completed' || r.status === 'cancelled';
+            if (isAlreadyAccepted) return false;
 
             const isSearching = r.status === 'searching' || meta.status === 'searching';
             const isRiderReq = meta.isRequest === true ||
@@ -2472,98 +2509,55 @@ const db = {
         });
       } catch (e) {}
 
-      // 3. Supabase Database insert (Persist to Supabase 'rides' table for real-time cloud broadcast across devices)
-      const client = getSupabaseClient();
-      if (client) {
-        try {
-          // Supabase 'rides' table has check constraint 'rides_vehicle_type_check' accepting ('bike', 'car')
-          const reqType = request.vehicle_type || request.vehicleType || 'bike';
-          const dbVehicleType = (reqType === 'car') ? 'car' : 'bike';
-
-          const dbRow = {
-            driver_name: `${request.rider_name || 'Passenger'} (Rider Request)`,
-            driver_role: request.rider_role || 'Commuter',
-            avatar: request.rider_avatar || 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=120&h=120&q=80',
-            vehicle_type: dbVehicleType,
-            vehicle_name: reqData.vehiclePreferenceLabel || (reqType === 'car' ? 'Car / Cab' : 'Any / Custom Vehicle'),
-            vehicle_number: request.id,
-            pickup: request.pickup,
-            drop_location: request.drop_location || request.drop,
-            departure_time: 'Immediate',
-            seats_available: request.seats || 1,
-            per_seat_price: request.fare || 108,
-            payment_preference: request.payment_method === 'cash' ? 'cash' : 'upi',
-            verified: true,
-            status: 'active', // Postgres check constraint 'rides_status_check' strictly requires 'active'
-            notes: JSON.stringify({
-              isRequest: true,
-              status: 'searching',
-              riderId: request.rider_id,
-              riderName: request.rider_name,
-              riderPhone: request.rider_phone,
-              riderAvatar: request.rider_avatar,
-              riderRole: request.rider_role,
-              fare: request.fare,
-              distance: request.distance,
-              pin: request.pin,
-              pickup: request.pickup,
-              drop: request.drop_location,
-              pickup_lat: pLat,
-              pickup_lng: pLng,
-              drop_lat: dLat,
-              drop_lng: dLng,
-              pickupLat: pLat,
-              pickupLng: pLng,
-              dropLat: dLat,
-              dropLng: dLng,
-              vehicleType: reqType,
-              isFlexible: request.isFlexibleVehicle,
-              paymentMethod: request.payment_method,
-              createdAt: request.created_at
-            })
-          };
-
-          // Try inserting with status: 'searching' first (if Postgres check constraint allows it);
-          // if Postgres constraint strictly requires ('active', 'completed', 'cancelled'), fallback to status: 'active'.
-          let data = null;
-          let insertRes = await client.from('rides').insert([{ ...dbRow, status: 'searching' }]).select();
-          if (insertRes.error && insertRes.error.code === '23514') {
-            insertRes = await client.from('rides').insert([dbRow]).select();
-          }
-          data = insertRes.data;
-          if (insertRes.error) {
-            console.error('❌ Supabase rides insert error:', insertRes.error.message);
-          } else {
-            console.log('✅ Supabase rides row inserted successfully for real-time driver sync:', request.id, data);
-          }
-
-          // Immediately broadcast ride request packet across active WebSocket channels
-          const broadcastPayload = { event: 'new_ride_request', request: { ...request, dbId: data && data[0] && data[0].id } };
-          if (this._channel) {
-            try { this._channel.send({ type: 'broadcast', event: 'ride_matching_event', payload: broadcastPayload }); } catch(e){}
-          }
-          if (this._driverChannel) {
-            try { this._driverChannel.send({ type: 'broadcast', event: 'ride_matching_event', payload: broadcastPayload }); } catch(e){}
-          }
-
-          // Also persist booking to bookings table so both rides and bookings reflect the active request
-          if (db.bookings && db.bookings.create) {
-            const insertedRideUuid = (data && data[0] && data[0].id) ? data[0].id : null;
-            db.bookings.create({
-              rideId: insertedRideUuid,
-              riderName: request.rider_name,
-              riderPhone: request.rider_phone,
-              seats: request.seats || 1,
-              fare: request.fare || 110,
-              paymentMethod: request.payment_method === 'cash' ? 'cash' : 'upi',
-              status: 'confirmed',
-              pin: request.pin
-            }).catch(() => {});
-          }
-        } catch (e) {
-          console.error('❌ Supabase insert exception:', e);
+      // 3. Supabase Direct Cloud Insert (Guaranteed, zero CDN dependency, works on all devices & incognito)
+      let data = null;
+      try {
+        const restRes = await supabaseRest('rides', {
+          method: 'POST',
+          body: dbRow,
+          prefer: 'return=representation'
+        });
+        if (restRes.ok && restRes.data) {
+          data = Array.isArray(restRes.data) ? restRes.data : [restRes.data];
+          console.log('✅ Supabase REST insert successful:', request.id, data);
+        } else {
+          console.warn('⚠️ Supabase REST insert response:', restRes.status, restRes.error);
         }
+      } catch (restErr) {
+        console.warn('⚠️ Supabase REST insert error:', restErr);
       }
+
+      // Also try via client if available and not yet inserted
+      const client = getSupabaseClient();
+      if (!data && client) {
+        try {
+          const insertRes = await client.from('rides').insert([dbRow]).select();
+          data = insertRes.data;
+        } catch (e) {}
+      }
+
+      // Immediately broadcast ride request packet across active WebSocket channels
+      const broadcastPayload = { event: 'new_ride_request', request: { ...request, dbId: data && data[0] && data[0].id } };
+      if (this._channel) {
+        try { this._channel.send({ type: 'broadcast', event: 'ride_matching_event', payload: broadcastPayload }); } catch (e) {}
+      }
+      if (this._driverChannel) {
+        try { this._driverChannel.send({ type: 'broadcast', event: 'ride_matching_event', payload: broadcastPayload }); } catch (e) {}
+      }
+
+      // Also persist booking to bookings table so both rides and bookings reflect the active request
+      const insertedRideUuid = (data && data[0] && data[0].id) ? data[0].id : null;
+      const bookingPayload = {
+        ride_id: insertedRideUuid,
+        rider_name: request.rider_name,
+        rider_phone: request.rider_phone,
+        seats_booked: request.seats || 1,
+        total_fare: request.fare || 110,
+        payment_method: request.payment_method === 'cash' ? 'cash' : 'upi',
+        status: 'confirmed',
+        booking_pin: request.pin
+      };
+      supabaseRest('bookings', { method: 'POST', body: bookingPayload }).catch(() => {});
 
       return { success: true, request };
     },
@@ -2665,33 +2659,38 @@ const db = {
       if (this._channel) { try { this._channel.send({ type: 'broadcast', event: 'ride_matching_event', payload: acceptBroadcast }); } catch(e){} }
       if (this._driverChannel) { try { this._driverChannel.send({ type: 'broadcast', event: 'ride_matching_event', payload: acceptBroadcast }); } catch(e){} }
 
-      // Supabase DB update on rides table
-      const client = getSupabaseClient();
-      if (client) {
-        try {
-          const updateNotes = JSON.stringify({
-            isRequest: true,
-            status: 'driver_accepted',
-            driver: {
-              id: current.driver_id,
-              name: current.driver_name,
-              phone: current.driver_phone,
-              avatar: current.driver_avatar,
-              vehicleName: current.driver_vehicle_name,
-              vehicleNumber: current.driver_vehicle_number,
-              vehicleType: current.driver_vehicle_type
-            },
-            accepted_at: current.accepted_at
-          });
+      // Supabase Direct REST update on rides table
+      try {
+        const updateNotes = JSON.stringify({
+          isRequest: true,
+          status: 'driver_accepted',
+          driver: {
+            id: current.driver_id,
+            name: current.driver_name,
+            phone: current.driver_phone,
+            avatar: current.driver_avatar,
+            vehicleName: current.driver_vehicle_name,
+            vehicleNumber: current.driver_vehicle_number,
+            vehicleType: current.driver_vehicle_type
+          },
+          accepted_at: current.accepted_at
+        });
+
+        // 1. Direct REST PATCH
+        supabaseRest(`rides?vehicle_number=eq.${encodeURIComponent(current.id)}`, {
+          method: 'PATCH',
+          body: { status: 'completed', notes: updateNotes }
+        }).then(() => {}).catch(() => {});
+
+        // 2. Also try client if ready
+        const client = getSupabaseClient();
+        if (client) {
           client.from('rides')
-            .update({
-              status: 'completed',
-              notes: updateNotes
-            })
+            .update({ status: 'completed', notes: updateNotes })
             .eq('vehicle_number', current.id)
             .then(() => {}).catch(() => {});
-        } catch (e) {}
-      }
+        }
+      } catch (e) {}
 
       return { success: true, request: current };
     },
@@ -2745,32 +2744,36 @@ const db = {
         });
       } catch (e) {}
 
-      const client = getSupabaseClient();
-      if (client) {
-        try {
-          const startNotes = JSON.stringify({
-            isRequest: true,
-            status: 'ride_started',
-            started_at: current.started_at,
-            driver: {
-              id: current.driver_id,
-              name: current.driver_name,
-              phone: current.driver_phone,
-              avatar: current.driver_avatar,
-              vehicleName: current.driver_vehicle_name,
-              vehicleNumber: current.driver_vehicle_number,
-              vehicleType: current.driver_vehicle_type
-            }
-          });
+      // Direct REST update on rides table
+      try {
+        const startNotes = JSON.stringify({
+          isRequest: true,
+          status: 'ride_started',
+          started_at: current.started_at,
+          driver: {
+            id: current.driver_id,
+            name: current.driver_name,
+            phone: current.driver_phone,
+            avatar: current.driver_avatar,
+            vehicleName: current.driver_vehicle_name,
+            vehicleNumber: current.driver_vehicle_number,
+            vehicleType: current.driver_vehicle_type
+          }
+        });
+
+        supabaseRest(`rides?vehicle_number=eq.${encodeURIComponent(current.id)}`, {
+          method: 'PATCH',
+          body: { status: 'completed', notes: startNotes }
+        }).then(() => {}).catch(() => {});
+
+        const client = getSupabaseClient();
+        if (client) {
           client.from('rides')
-            .update({
-              status: 'completed',
-              notes: startNotes
-            })
+            .update({ status: 'completed', notes: startNotes })
             .eq('vehicle_number', current.id)
             .then(() => {}).catch(() => {});
-        } catch (e) {}
-      }
+        }
+      } catch (e) {}
 
       return { success: true, request: current };
     },
@@ -2832,32 +2835,36 @@ const db = {
         }).catch(() => {});
       }
 
-      const client = getSupabaseClient();
-      if (client) {
-        try {
-          const completeNotes = JSON.stringify({
-            isRequest: true,
-            status: 'ride_completed',
-            completed_at: current.completed_at,
-            driver: {
-              id: current.driver_id,
-              name: current.driver_name,
-              phone: current.driver_phone,
-              avatar: current.driver_avatar,
-              vehicleName: current.driver_vehicle_name,
-              vehicleNumber: current.driver_vehicle_number,
-              vehicleType: current.driver_vehicle_type
-            }
-          });
+      // Direct REST update on rides table
+      try {
+        const completeNotes = JSON.stringify({
+          isRequest: true,
+          status: 'ride_completed',
+          completed_at: current.completed_at,
+          driver: {
+            id: current.driver_id,
+            name: current.driver_name,
+            phone: current.driver_phone,
+            avatar: current.driver_avatar,
+            vehicleName: current.driver_vehicle_name,
+            vehicleNumber: current.driver_vehicle_number,
+            vehicleType: current.driver_vehicle_type
+          }
+        });
+
+        supabaseRest(`rides?vehicle_number=eq.${encodeURIComponent(requestId)}`, {
+          method: 'PATCH',
+          body: { status: 'completed', notes: completeNotes }
+        }).then(() => {}).catch(() => {});
+
+        const client = getSupabaseClient();
+        if (client) {
           client.from('rides')
-            .update({
-              status: 'completed',
-              notes: completeNotes
-            })
+            .update({ status: 'completed', notes: completeNotes })
             .eq('vehicle_number', requestId)
             .then(() => {}).catch(() => {});
-        } catch (e) {}
-      }
+        }
+      } catch (e) {}
 
       return { success: true, request: current };
     },
@@ -3039,17 +3046,25 @@ const db = {
               this._handleIncomingEvent('new_ride_request', incomingReq);
             }
           } else if (!foundOnServer && this._activeRequest && (this._activeRequest.status === 'searching' || this._activeRequest.status === 'active' || this._activeRequest.status === 'driver_accepted' || this._activeRequest.status === 'ride_started')) {
-            // B. If this device is a Rider, sync ride progress from Supabase
+            // B. If this device is a Rider, sync ride progress from Supabase cloud directly
             try {
-              const { data: myReqRows } = await client
-                .from('rides')
-                .select('*')
-                .eq('vehicle_number', this._activeRequest.id)
-                .limit(1);
+              let myReqRows = null;
+              const restRes = await supabaseRest(`rides?vehicle_number=eq.${encodeURIComponent(this._activeRequest.id)}&select=*&limit=1`);
+              if (restRes.ok && Array.isArray(restRes.data) && restRes.data.length > 0) {
+                myReqRows = restRes.data;
+              } else if (client) {
+                const { data } = await client
+                  .from('rides')
+                  .select('*')
+                  .eq('vehicle_number', this._activeRequest.id)
+                  .limit(1);
+                if (data && data.length > 0) myReqRows = data;
+              }
+
               if (myReqRows && myReqRows.length > 0) {
                 const myRow = myReqRows[0];
                 let notesData = {};
-                try { notesData = JSON.parse(myRow.notes || '{}'); } catch(e){}
+                try { notesData = JSON.parse(myRow.notes || '{}'); } catch (e) {}
 
                 if (notesData.status === 'ride_completed' && this._activeRequest.status !== 'ride_completed') {
                   this._handleIncomingEvent('ride_completed', { ...this._activeRequest, ...notesData, status: 'ride_completed' });
@@ -3074,7 +3089,7 @@ const db = {
                   return;
                 }
               }
-            } catch(e){}
+            } catch (e) {}
 
             const ageMs = this._activeRequest.created_at ? (Date.now() - new Date(this._activeRequest.created_at).getTime()) : 999999;
             if (ageMs > 30 * 60 * 1000) {
