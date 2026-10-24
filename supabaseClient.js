@@ -19,9 +19,15 @@ function getSupabaseClient() {
           detectSessionInUrl: true,
           storage: window.localStorage,
           storageKey: 'routemate_supabase_auth_token'
+        },
+        realtime: {
+          enabled: true,
+          params: {
+            eventsPerSecond: 10
+          }
         }
       });
-      console.log('✅ Supabase client initialized for Routemate (hjieeilzfbvubkhmlmdg.supabase.co)');
+      console.log('✅ Supabase client initialized with Realtime enabled for Routemate (hjieeilzfbvubkhmlmdg.supabase.co)');
     } catch (err) {
       console.warn('⚠️ Error initializing Supabase client:', err);
     }
@@ -2095,6 +2101,175 @@ const db = {
         } catch (e) {
           console.warn('Driver direct channel subscription warning:', e);
         }
+      }
+
+      // Automatically engage guaranteed 2.5s polling fallback for the active driver
+      this.startDriverPolling(2500);
+    },
+
+    _driverPollTimer: null,
+
+    startDriverPolling(intervalMs = 2500) {
+      if (this._driverPollTimer) return;
+      console.log(`🔄 Starting guaranteed driver polling fallback (${intervalMs}ms)`);
+      this.pollLatestSearchingRides();
+      this._driverPollTimer = setInterval(() => {
+        this.pollLatestSearchingRides();
+      }, intervalMs);
+    },
+
+    stopDriverPolling() {
+      if (this._driverPollTimer) {
+        clearInterval(this._driverPollTimer);
+        this._driverPollTimer = null;
+        console.log('🛑 Stopped driver polling fallback');
+      }
+    },
+
+    async pollLatestSearchingRides() {
+      const client = getSupabaseClient();
+      if (!client) return;
+
+      const isDriverActive = typeof state !== 'undefined' && (
+        state.driverOnline || 
+        state.mode === 'driver' || 
+        (typeof document !== 'undefined' && document.getElementById('driverModeView') && !document.getElementById('driverModeView').classList.contains('hidden'))
+      );
+      if (!isDriverActive) return;
+
+      // Don't show incoming popup if driver has already accepted and is currently driving a ride
+      const isTripAccepted = typeof state !== 'undefined' && state.activeDriverTrip && (state.activeDriverTrip.status === 'driver_accepted' || state.activeDriverTrip.status === 'ride_started');
+      if (isTripAccepted) return;
+
+      try {
+        let incomingReq = null;
+
+        // 1. Fetch latest searching/active rows from 'rides' table
+        const { data: rideRows, error: rideErr } = await client
+          .from('rides')
+          .select('*')
+          .in('status', ['searching', 'active'])
+          .order('created_at', { ascending: false })
+          .limit(5);
+
+        if (!rideErr && rideRows && rideRows.length > 0) {
+          const candidate = rideRows.find(r => {
+            let meta = {};
+            try { meta = JSON.parse(r.notes || '{}'); } catch(e){}
+            const isReq = String(r.vehicle_number || '').startsWith('REQ-') ||
+                          (r.driver_name && r.driver_name.includes('(Rider Request)')) ||
+                          meta.isRequest ||
+                          r.status === 'searching' ||
+                          meta.status === 'searching';
+            const reqId = r.vehicle_number || r.id;
+            const isDeclined = typeof state !== 'undefined' && state.declinedRequestIds && state.declinedRequestIds.has(reqId);
+            return isReq && !isDeclined;
+          });
+
+          if (candidate) {
+            let meta = {};
+            try { meta = JSON.parse(candidate.notes || '{}'); } catch(e){}
+            incomingReq = {
+              id: candidate.vehicle_number || ('REQ-' + (candidate.id ? String(candidate.id).slice(0, 8) : Date.now())),
+              dbId: candidate.id,
+              rider_id: meta.riderId || candidate.driver_id || ('rider_' + Date.now()),
+              name: meta.riderName || (candidate.driver_name ? candidate.driver_name.replace(' (Rider Request)', '') : 'Verified Commuter'),
+              rider_name: meta.riderName || (candidate.driver_name ? candidate.driver_name.replace(' (Rider Request)', '') : 'Verified Commuter'),
+              phone: meta.riderPhone || '+91 98480 23145',
+              rider_phone: meta.riderPhone || '+91 98480 23145',
+              avatar: meta.riderAvatar || candidate.avatar || 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=120&h=120&q=80',
+              rider_avatar: meta.riderAvatar || candidate.avatar || 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=120&h=120&q=80',
+              role: meta.riderRole || candidate.driver_role || 'Daily Commuter',
+              rider_role: meta.riderRole || candidate.driver_role || 'Daily Commuter',
+              rating: 4.9,
+              pickup: candidate.pickup || 'Pickup Location',
+              pickup_lat: meta.pickup_lat || meta.pickupLat || 17.4024,
+              pickup_lng: meta.pickup_lng || meta.pickupLng || 78.5604,
+              drop: candidate.drop_location || 'Destination',
+              drop_location: candidate.drop_location || 'Destination',
+              drop_lat: meta.drop_lat || meta.dropLat || 17.7241,
+              drop_lng: meta.drop_lng || meta.dropLng || 79.1623,
+              pickupLat: meta.pickupLat || meta.pickup_lat || 17.4024,
+              pickupLng: meta.pickupLng || meta.pickup_lng || 78.5604,
+              dropLat: meta.dropLat || meta.drop_lat || 17.7241,
+              dropLng: meta.dropLng || meta.drop_lng || 79.1623,
+              seats: candidate.seats_available || 1,
+              seatCount: candidate.seats_available || 1,
+              fare: candidate.per_seat_price || 110,
+              fareOffer: candidate.per_seat_price || 110,
+              distance: meta.distance || 84,
+              distance_km: meta.distance || 84,
+              pin: meta.pin || '4821',
+              vehicle_type: meta.vehicleType || candidate.vehicle_type || 'any',
+              vehicleType: meta.vehicleType || candidate.vehicle_type || 'any',
+              isFlexible: true,
+              isFlexibleVehicle: true,
+              payment_method: meta.paymentMethod || 'Direct UPI',
+              paymentMethod: meta.paymentMethod || 'Direct UPI',
+              status: 'searching',
+              created_at: candidate.created_at || new Date().toISOString()
+            };
+          }
+        }
+
+        // 2. Fallback check 'bookings' table
+        if (!incomingReq) {
+          const { data: bRows, error: bErr } = await client
+            .from('bookings')
+            .select('*')
+            .in('status', ['searching', 'confirmed', 'pending'])
+            .order('created_at', { ascending: false })
+            .limit(3);
+
+          if (!bErr && bRows && bRows.length > 0) {
+            const b = bRows.find(item => {
+              const bId = item.id ? `REQ-${String(item.id).replace(/[^a-zA-Z0-9]/g, '').slice(0, 8)}` : null;
+              return !state.declinedRequestIds || !state.declinedRequestIds.has(bId);
+            });
+            if (b) {
+              incomingReq = {
+                id: b.id ? `REQ-${String(b.id).replace(/[^a-zA-Z0-9]/g, '').slice(0, 8)}` : `REQ-${Date.now()}`,
+                dbId: b.id,
+                booking_id: b.id,
+                name: b.rider_name || 'Verified Commuter',
+                rider_name: b.rider_name || 'Verified Commuter',
+                phone: b.rider_phone || '+91 98480 23145',
+                rider_phone: b.rider_phone || '+91 98480 23145',
+                seats: b.seats_booked || 1,
+                seatCount: b.seats_booked || 1,
+                fare: b.total_fare || 110,
+                fareOffer: b.total_fare || 110,
+                pin: b.booking_pin || '4821',
+                pickup: 'Uppal Ring Road Metro, Hyderabad',
+                drop: 'Jangaon Bus Depot / Chowrasta',
+                drop_location: 'Jangaon Bus Depot / Chowrasta',
+                distance: 84,
+                distance_km: 84,
+                vehicle_type: 'any',
+                vehicleType: 'any',
+                isFlexible: true,
+                isFlexibleVehicle: true,
+                payment_method: b.payment_method === 'cash' ? 'Cash on Board' : 'Direct UPI',
+                paymentMethod: b.payment_method === 'cash' ? 'Cash on Board' : 'Direct UPI',
+                status: 'searching',
+                created_at: b.created_at || new Date().toISOString()
+              };
+            }
+          }
+        }
+
+        if (incomingReq) {
+          const modal = typeof document !== 'undefined' ? document.getElementById('driverIncomingRideModal') : null;
+          const isModalHidden = !modal || modal.classList.contains('hidden') || modal.style.display !== 'flex';
+          const isDifferentReq = !state.incomingRequest || state.incomingRequest.id !== incomingReq.id;
+
+          if (isModalHidden || isDifferentReq) {
+            console.log('⚡ [Driver Guaranteed Polling Fallback]: Immediate Popup Trigger for', incomingReq.id);
+            this._handleIncomingEvent('new_ride_request', incomingReq);
+          }
+        }
+      } catch (err) {
+        console.warn('Driver polling fetch error:', err);
       }
     },
 

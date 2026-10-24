@@ -732,6 +732,9 @@ function switchMode(newMode) {
       driverBtn.classList.add('text-slate-600', 'font-medium');
     }
 
+    if (window.db && window.db.matching && typeof window.db.matching.stopDriverPolling === 'function') {
+      window.db.matching.stopDriverPolling();
+    }
     if (riderView) riderView.classList.remove('hidden');
     if (driverView) driverView.classList.add('hidden');
     showToast('Switched to Rider Mode. Find fuel-split rides near you.', 'info');
@@ -756,6 +759,9 @@ function switchMode(newMode) {
     if (window.db && window.db.matching) {
       if (typeof window.db.matching.subscribeDriverChannel === 'function') {
         window.db.matching.subscribeDriverChannel();
+      }
+      if (typeof window.db.matching.startDriverPolling === 'function') {
+        window.db.matching.startDriverPolling(2500);
       }
       window.db.matching.init(true);
       window.db.matching.syncActiveRequest();
@@ -795,6 +801,9 @@ function renderDriverModeView() {
   if (window.db && window.db.matching) {
     if (typeof window.db.matching.subscribeDriverChannel === 'function') {
       window.db.matching.subscribeDriverChannel(true);
+    }
+    if (typeof window.db.matching.startDriverPolling === 'function') {
+      window.db.matching.startDriverPolling(2500);
     }
     window.db.matching.init(true);
     window.db.matching.syncActiveRequest();
@@ -1856,16 +1865,22 @@ function toggleDriverOnline() {
   syncDriverOnlineToggleUI();
 
   if (state.driverOnline) {
-    showToast('You are now Online! Receiving passenger requests on corridor.', 'success');
+    showToast('You are now Online! Receiving passenger requests.', 'success');
     if (window.db && window.db.matching) {
       if (typeof window.db.matching.subscribeDriverChannel === 'function') {
         window.db.matching.subscribeDriverChannel();
+      }
+      if (typeof window.db.matching.startDriverPolling === 'function') {
+        window.db.matching.startDriverPolling(2500);
       }
       window.db.matching.init(true);
       window.db.matching.syncActiveRequest();
     }
   } else {
-    showToast('You went Offline. Corridor requests paused.', 'info');
+    showToast('You went Offline. Requests paused.', 'info');
+    if (window.db && window.db.matching && typeof window.db.matching.stopDriverPolling === 'function') {
+      window.db.matching.stopDriverPolling();
+    }
   }
 }
 
