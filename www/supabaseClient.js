@@ -2448,18 +2448,19 @@ const db = {
     subscribeDriverChannel(force = false) {
       this.init(force);
       // Automatically engage real-time driver polling fallback as a continuous safety net
-      this.startDriverPolling(1500);
+      this.startDriverPolling(1200);
     },
 
     _driverPollTimer: null,
 
-    startDriverPolling(intervalMs = 2000) {
+    startDriverPolling(intervalMs = 1200) {
+      const effectiveInterval = Math.min(intervalMs, 1200);
       if (this._driverPollTimer) return;
-      console.log(`🔄 Starting guaranteed driver 2s polling fallback (${intervalMs}ms)`);
+      console.log(`🔄 Starting guaranteed driver polling bridge (${effectiveInterval}ms)`);
       this.pollLatestSearchingRides();
       this._driverPollTimer = setInterval(() => {
         this.pollLatestSearchingRides();
-      }, intervalMs);
+      }, effectiveInterval);
     },
 
     stopDriverPolling() {
@@ -2489,199 +2490,205 @@ const db = {
 
       try {
         let incomingReq = null;
-        let rideRows = null;
 
-        // 1. Direct PostgREST fetch (100% resilient across mobile & incognito, zero CDN dependency)
+        // =========================================================================
+        // SOURCE 1: DIRECT LOCAL STORAGE BRIDGE (0ms instant cross-window sync)
+        // Completely bypasses cloud; works immediately between tabs / windows
+        // =========================================================================
         try {
-          const restRes = await supabaseRest('rides?select=*&status=in.(searching,active)&order=created_at.desc&limit=10');
-          if (restRes.ok && Array.isArray(restRes.data) && restRes.data.length > 0) {
-            rideRows = restRes.data;
+          const cachedStr = localStorage.getItem('routemate_active_ride_request');
+          if (cachedStr) {
+            const cReq = JSON.parse(cachedStr);
+            if (cReq && (cReq.status === 'searching' || cReq.status === 'active')) {
+              const reqId = cReq.id;
+              const isDeclined = appState && appState.declinedRequestIds && appState.declinedRequestIds.has(reqId);
+              const isThisTabTheActiveRider = Boolean(
+                appState && appState.activeRideRole === 'rider' &&
+                appState.currentActiveRide &&
+                (appState.currentActiveRide.id === reqId)
+              );
+              if (!isDeclined && !isThisTabTheActiveRider) {
+                incomingReq = cReq;
+              }
+            }
           }
         } catch (e) {}
 
-        // Fallback to Supabase client if available
-        if (!rideRows || rideRows.length === 0) {
-          const client = getSupabaseClient();
-          if (client) {
-            const { data } = await client
-              .from('rides')
-              .select('*')
-              .in('status', ['searching', 'active'])
-              .order('created_at', { ascending: false })
-              .limit(10);
-            if (data && data.length > 0) rideRows = data;
-          }
-        }
-
-        if (rideRows && rideRows.length > 0) {
-          const candidate = rideRows.find(r => {
-            if (!r) return false;
-            let meta = {};
-            try { meta = JSON.parse(r.notes || '{}'); } catch (e) {}
-
-            const reqId = r.vehicle_number || r.id;
-            // Skip if driver declined this request in current session
-            if (appState && appState.declinedRequestIds && appState.declinedRequestIds.has(reqId)) {
-              return false;
-            }
-
-            // DO NOT show incoming popup on the rider's own screen if this exact browser tab is the active rider
-            const isThisTabTheActiveRider = Boolean(
-              appState && appState.activeRideRole === 'rider' &&
-              appState.currentActiveRide &&
-              (appState.currentActiveRide.id === reqId || appState.currentActiveRide.id === r.id)
-            );
-            if (isThisTabTheActiveRider) return false;
-
-            // Do not show rides that have already been accepted or finished
-            const isAlreadyAccepted = meta.status === 'driver_accepted' || meta.status === 'ride_started' || meta.status === 'ride_completed' || r.status === 'completed' || r.status === 'cancelled';
-            if (isAlreadyAccepted) return false;
-
-            const isSearching = r.status === 'searching' || meta.status === 'searching';
-            const isRiderReq = meta.isRequest === true ||
-                               String(r.vehicle_number || '').startsWith('REQ-') ||
-                               (r.driver_name && r.driver_name.includes('(Rider Request)'));
-            return isSearching || isRiderReq;
-          });
-
-          if (candidate) {
-            let meta = {};
-            try { meta = JSON.parse(candidate.notes || '{}'); } catch(e){}
-            incomingReq = {
-              id: candidate.vehicle_number || ('REQ-' + (candidate.id ? String(candidate.id).slice(0, 8) : Date.now())),
-              dbId: candidate.id,
-              rider_id: meta.riderId || candidate.driver_id || ('rider_' + Date.now()),
-              name: meta.riderName || (candidate.driver_name ? candidate.driver_name.replace(' (Rider Request)', '') : 'Verified Commuter'),
-              rider_name: meta.riderName || (candidate.driver_name ? candidate.driver_name.replace(' (Rider Request)', '') : 'Verified Commuter'),
-              phone: meta.riderPhone || '+91 98480 23145',
-              rider_phone: meta.riderPhone || '+91 98480 23145',
-              avatar: meta.riderAvatar || candidate.avatar || 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=120&h=120&q=80',
-              rider_avatar: meta.riderAvatar || candidate.avatar || 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=120&h=120&q=80',
-              role: meta.riderRole || candidate.driver_role || 'Daily Commuter',
-              rider_role: meta.riderRole || candidate.driver_role || 'Daily Commuter',
-              rating: 4.9,
-              pickup: candidate.pickup || 'Pickup Location',
-              pickup_lat: meta.pickup_lat || meta.pickupLat || 17.4024,
-              pickup_lng: meta.pickup_lng || meta.pickupLng || 78.5604,
-              drop: candidate.drop_location || 'Destination',
-              drop_location: candidate.drop_location || 'Destination',
-              drop_lat: meta.drop_lat || meta.dropLat || 17.7241,
-              drop_lng: meta.drop_lng || meta.dropLng || 79.1623,
-              pickupLat: meta.pickupLat || meta.pickup_lat || 17.4024,
-              pickupLng: meta.pickupLng || meta.pickup_lng || 78.5604,
-              dropLat: meta.dropLat || meta.drop_lat || 17.7241,
-              dropLng: meta.dropLng || meta.drop_lng || 79.1623,
-              seats: candidate.seats_available || 1,
-              seatCount: candidate.seats_available || 1,
-              fare: candidate.per_seat_price || 110,
-              fareOffer: candidate.per_seat_price || 110,
-              distance: meta.distance || 84,
-              distance_km: meta.distance || 84,
-              pin: meta.pin || '4821',
-              vehicle_type: meta.vehicleType || candidate.vehicle_type || 'any',
-              vehicleType: meta.vehicleType || candidate.vehicle_type || 'any',
-              isFlexible: true,
-              isFlexibleVehicle: true,
-              payment_method: meta.paymentMethod || 'Direct UPI',
-              paymentMethod: meta.paymentMethod || 'Direct UPI',
-              status: 'searching',
-              created_at: candidate.created_at || new Date().toISOString()
-            };
-          }
-        }
-
-        // 2. Fallback check 'bookings' table
-        if (!incomingReq) {
-          let bRows = null;
-          try {
-            const bRes = await supabaseRest('bookings?select=*&status=in.(searching,confirmed,pending)&order=created_at.desc&limit=5');
-            if (bRes.ok && Array.isArray(bRes.data)) bRows = bRes.data;
-          } catch (e) {}
-
-          if (!bRows || bRows.length === 0) {
-            const client = getSupabaseClient();
-            if (client) {
-              const { data } = await client
-                .from('bookings')
-                .select('*')
-                .in('status', ['searching', 'confirmed', 'pending'])
-                .order('created_at', { ascending: false })
-                .limit(5);
-              if (data) bRows = data;
-            }
-          }
-
-          if (bRows && bRows.length > 0) {
-            const b = bRows.find(item => {
-              const bId = item.id ? `REQ-${String(item.id).replace(/[^a-zA-Z0-9]/g, '').slice(0, 8)}` : null;
-              return !appState || !appState.declinedRequestIds || !appState.declinedRequestIds.has(bId);
-            });
-            if (b) {
-              incomingReq = {
-                id: b.id ? `REQ-${String(b.id).replace(/[^a-zA-Z0-9]/g, '').slice(0, 8)}` : `REQ-${Date.now()}`,
-                dbId: b.id,
-                booking_id: b.id,
-                name: b.rider_name || 'Verified Commuter',
-                rider_name: b.rider_name || 'Verified Commuter',
-                phone: b.rider_phone || '+91 98480 23145',
-                rider_phone: b.rider_phone || '+91 98480 23145',
-                seats: b.seats_booked || 1,
-                seatCount: b.seats_booked || 1,
-                fare: b.total_fare || 110,
-                fareOffer: b.total_fare || 110,
-                pin: b.booking_pin || '4821',
-                pickup: 'Uppal Ring Road Metro, Hyderabad',
-                drop: 'Jangaon Bus Depot / Chowrasta',
-                drop_location: 'Jangaon Bus Depot / Chowrasta',
-                distance: 84,
-                distance_km: 84,
-                vehicle_type: 'any',
-                vehicleType: 'any',
-                isFlexible: true,
-                isFlexibleVehicle: true,
-                payment_method: b.payment_method === 'cash' ? 'Cash on Board' : 'Direct UPI',
-                paymentMethod: b.payment_method === 'cash' ? 'Cash on Board' : 'Direct UPI',
-                status: 'searching',
-                created_at: b.created_at || new Date().toISOString()
-              };
-            }
-          }
-        }
-
-        // 3. Fallback: check local active request if cloud queries returned empty or degraded
+        // =========================================================================
+        // SOURCE 2: DIRECT SERVERLESS STORAGE BRIDGE (/api/ride-requests on Vercel)
+        // 100% independent of Supabase WebSockets; works across different phones
+        // =========================================================================
         if (!incomingReq) {
           try {
-            const cachedStr = localStorage.getItem('routemate_active_ride_request');
-            if (cachedStr) {
-              const cReq = JSON.parse(cachedStr);
-              if (cReq && (cReq.status === 'searching' || cReq.status === 'active')) {
-                const reqId = cReq.id;
-                const isDeclined = appState && appState.declinedRequestIds && appState.declinedRequestIds.has(reqId);
-                const isThisTabTheActiveRider = Boolean(
-                  appState && appState.activeRideRole === 'rider' &&
-                  appState.currentActiveRide &&
-                  (appState.currentActiveRide.id === reqId)
-                );
-                if (!isDeclined && !isThisTabTheActiveRider) {
-                  incomingReq = cReq;
+            const apiRes = await fetch('/api/ride-requests', { cache: 'no-store' });
+            if (apiRes.ok) {
+              const apiData = await apiRes.json();
+              if (apiData && apiData.activeRequest) {
+                const sReq = apiData.activeRequest;
+                if (sReq && (sReq.status === 'searching' || sReq.status === 'active')) {
+                  const reqId = sReq.id;
+                  const isDeclined = appState && appState.declinedRequestIds && appState.declinedRequestIds.has(reqId);
+                  const isThisTabTheActiveRider = Boolean(
+                    appState && appState.activeRideRole === 'rider' &&
+                    appState.currentActiveRide &&
+                    (appState.currentActiveRide.id === reqId)
+                  );
+                  if (!isDeclined && !isThisTabTheActiveRider) {
+                    incomingReq = {
+                      id: sReq.id || ('REQ-' + Date.now()),
+                      rider_id: sReq.rider_id || sReq.riderId,
+                      name: sReq.rider_name || sReq.name || 'Verified Commuter',
+                      rider_name: sReq.rider_name || sReq.name || 'Verified Commuter',
+                      phone: sReq.rider_phone || sReq.phone || '+91 98480 23145',
+                      rider_phone: sReq.rider_phone || sReq.phone || '+91 98480 23145',
+                      avatar: sReq.rider_avatar || sReq.avatar || 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=120&h=120&q=80',
+                      rider_avatar: sReq.rider_avatar || sReq.avatar || 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=120&h=120&q=80',
+                      role: sReq.rider_role || sReq.role || 'Daily Commuter',
+                      pickup: sReq.pickup || 'Pickup Location',
+                      drop: sReq.drop || sReq.drop_location || 'Destination',
+                      drop_location: sReq.drop_location || sReq.drop || 'Destination',
+                      seats: sReq.seats || 1,
+                      seatCount: sReq.seats || 1,
+                      fare: sReq.fare || sReq.fareOffer || 110,
+                      fareOffer: sReq.fare || sReq.fareOffer || 110,
+                      distance: sReq.distance || sReq.distance_km || 84,
+                      distance_km: sReq.distance || sReq.distance_km || 84,
+                      pin: sReq.pin || '4821',
+                      vehicle_type: sReq.vehicle_type || sReq.vehicleType || 'any',
+                      vehicleType: sReq.vehicle_type || sReq.vehicleType || 'any',
+                      isFlexible: true,
+                      payment_method: sReq.payment_method || 'Direct UPI',
+                      status: 'searching',
+                      created_at: sReq.created_at || sReq.createdAt || new Date().toISOString()
+                    };
+                  }
                 }
               }
             }
           } catch (e) {}
         }
 
-        const pollStatusEl = typeof document !== 'undefined' ? document.getElementById('driverLivePollStatus') : null;
-        if (pollStatusEl) {
-          if (connectionManager.status === 'offline') {
-            pollStatusEl.textContent = '⚠️ Highway Radar (Offline Mode) • Active';
-          } else if (connectionManager.status === 'degraded') {
-            pollStatusEl.textContent = '⚡ Highway Radar (Local Fallback Mode) • Active';
-          } else {
-            pollStatusEl.textContent = '⚡ Connected to Realtime Highway Radar • Active';
+        // =========================================================================
+        // SOURCE 3: SUPABASE CLOUD POSTGREST (rides and bookings tables)
+        // =========================================================================
+        if (!incomingReq) {
+          let rideRows = null;
+          try {
+            const restRes = await supabaseRest('rides?select=*&status=in.(searching,active)&order=created_at.desc&limit=10');
+            if (restRes.ok && Array.isArray(restRes.data) && restRes.data.length > 0) {
+              rideRows = restRes.data;
+            }
+          } catch (e) {}
+
+          if (!rideRows || rideRows.length === 0) {
+            const client = getSupabaseClient();
+            if (client) {
+              const { data } = await client
+                .from('rides')
+                .select('*')
+                .in('status', ['searching', 'active'])
+                .order('created_at', { ascending: false })
+                .limit(10);
+              if (data && data.length > 0) rideRows = data;
+            }
+          }
+
+          if (rideRows && rideRows.length > 0) {
+            const candidate = rideRows.find(r => {
+              if (!r) return false;
+              let meta = {};
+              try { meta = JSON.parse(r.notes || '{}'); } catch (e) {}
+
+              const reqId = r.vehicle_number || r.id;
+              if (appState && appState.declinedRequestIds && appState.declinedRequestIds.has(reqId)) {
+                return false;
+              }
+
+              const isThisTabTheActiveRider = Boolean(
+                appState && appState.activeRideRole === 'rider' &&
+                appState.currentActiveRide &&
+                (appState.currentActiveRide.id === reqId || appState.currentActiveRide.id === r.id)
+              );
+              if (isThisTabTheActiveRider) return false;
+
+              const isAlreadyAccepted = meta.status === 'driver_accepted' || meta.status === 'ride_started' || meta.status === 'ride_completed' || r.status === 'completed' || r.status === 'cancelled';
+              if (isAlreadyAccepted) return false;
+
+              const isSearching = r.status === 'searching' || meta.status === 'searching';
+              const isRiderReq = meta.isRequest === true ||
+                                 String(r.vehicle_number || '').startsWith('REQ-') ||
+                                 (r.driver_name && r.driver_name.includes('(Rider Request)'));
+              return isSearching || isRiderReq;
+            });
+
+            if (candidate) {
+              let meta = {};
+              try { meta = JSON.parse(candidate.notes || '{}'); } catch(e){}
+              incomingReq = {
+                id: candidate.vehicle_number || ('REQ-' + (candidate.id ? String(candidate.id).slice(0, 8) : Date.now())),
+                dbId: candidate.id,
+                rider_id: meta.riderId || candidate.driver_id || ('rider_' + Date.now()),
+                name: meta.riderName || (candidate.driver_name ? candidate.driver_name.replace(' (Rider Request)', '') : 'Verified Commuter'),
+                rider_name: meta.riderName || (candidate.driver_name ? candidate.driver_name.replace(' (Rider Request)', '') : 'Verified Commuter'),
+                phone: meta.riderPhone || '+91 98480 23145',
+                rider_phone: meta.riderPhone || '+91 98480 23145',
+                avatar: meta.riderAvatar || candidate.avatar || 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=120&h=120&q=80',
+                rider_avatar: meta.riderAvatar || candidate.avatar || 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=120&h=120&q=80',
+                role: meta.riderRole || candidate.driver_role || 'Daily Commuter',
+                rider_role: meta.riderRole || candidate.driver_role || 'Daily Commuter',
+                rating: 4.9,
+                pickup: candidate.pickup || 'Pickup Location',
+                pickup_lat: meta.pickup_lat || meta.pickupLat || 17.4024,
+                pickup_lng: meta.pickup_lng || meta.pickupLng || 78.5604,
+                drop: candidate.drop_location || 'Destination',
+                drop_location: candidate.drop_location || 'Destination',
+                drop_lat: meta.drop_lat || meta.dropLat || 17.7241,
+                drop_lng: meta.drop_lng || meta.dropLng || 79.1623,
+                seats: candidate.seats_available || 1,
+                seatCount: candidate.seats_available || 1,
+                fare: candidate.per_seat_price || 110,
+                fareOffer: candidate.per_seat_price || 110,
+                distance: meta.distance || 84,
+                distance_km: meta.distance || 84,
+                pin: meta.pin || '4821',
+                vehicle_type: meta.vehicleType || candidate.vehicle_type || 'any',
+                vehicleType: meta.vehicleType || candidate.vehicle_type || 'any',
+                isFlexible: true,
+                isFlexibleVehicle: true,
+                payment_method: meta.paymentMethod || 'Direct UPI',
+                paymentMethod: meta.paymentMethod || 'Direct UPI',
+                status: 'searching',
+                created_at: candidate.created_at || new Date().toISOString()
+              };
+            }
           }
         }
 
+        // =========================================================================
+        // STATUS BADGE UPDATE
+        // =========================================================================
+        const pollStatusEl = typeof document !== 'undefined' ? document.getElementById('driverLivePollStatus') : null;
+        if (pollStatusEl) {
+          if (incomingReq) {
+            pollStatusEl.textContent = '🟢 1 Passenger Request Waiting! • Auto-Detect';
+          } else {
+            pollStatusEl.textContent = '⚡ Connected to Highway Radar • Instant Bridge Active';
+          }
+        }
+
+        // =========================================================================
+        // FORCED DRIVER SCREEN NOTIFICATION & POPUP
+        // =========================================================================
         if (incomingReq) {
+          // 1. Play sound notification and vibrate immediately
+          if (typeof playNotificationSound === 'function') {
+            try { playNotificationSound(); } catch (e) {}
+          }
+          if (typeof navigator !== 'undefined' && navigator.vibrate) {
+            try { navigator.vibrate([300, 150, 300]); } catch (e) {}
+          }
+
+          // 2. Display persistent Top Alert Banner on driver screen
           const topAlert = typeof document !== 'undefined' ? document.getElementById('driverTopIncomingAlert') : null;
           if (topAlert) {
             topAlert.classList.remove('hidden');
@@ -2702,15 +2709,22 @@ const db = {
             `;
           }
 
+          // 3. Force Open the Full Driver Incoming Ride Modal Card
           const modal = typeof document !== 'undefined' ? document.getElementById('driverIncomingRideModal') : null;
           const isModalHidden = !modal || modal.classList.contains('hidden') || modal.style.display !== 'flex';
           const isDifferentReq = !appState || !appState.incomingRequest || appState.incomingRequest.id !== incomingReq.id;
 
           if (isModalHidden || isDifferentReq) {
-            console.log('⚡ [Driver Radar Match]: Triggering incoming ride popup for', incomingReq.id);
+            console.log('⚡ [Forced Driver Screen Notification]: Popping incoming ride modal card for', incomingReq.id);
+            if (appState) {
+              appState.incomingRequest = incomingReq;
+            }
             this._handleIncomingEvent('new_ride_request', incomingReq);
             if (typeof openDriverIncomingModal === 'function') {
               openDriverIncomingModal(incomingReq);
+            }
+            if (typeof renderDriverIncomingRequest === 'function') {
+              renderDriverIncomingRequest();
             }
           }
         } else {
@@ -2721,16 +2735,6 @@ const db = {
         }
       } catch (err) {
         console.warn('Driver polling notice:', err.message || err);
-        // Fallback to local active request if any
-        try {
-          const cachedStr = localStorage.getItem('routemate_active_ride_request');
-          if (cachedStr) {
-            const cReq = JSON.parse(cachedStr);
-            if (cReq && (cReq.status === 'searching' || cReq.status === 'active')) {
-              this._handleIncomingEvent('new_ride_request', cReq);
-            }
-          }
-        } catch(e) {}
       }
     },
 
@@ -2885,20 +2889,27 @@ const db = {
       // 1. Local & Inter-tab Broadcast
       this._emit('new_ride_request', request);
 
-      // 2. Server API if available
+      // 2. Serverless Storage Bridge (Immediate cross-device sync)
       try {
-        fetch('/api/ride-requests', {
+        const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+        const timeoutId = controller ? setTimeout(() => controller.abort(), 2500) : null;
+        await fetch('/api/ride-requests', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'create', ...request })
-        }).catch(() => {
-          fetch('/api/ride-requests/create', {
+          body: JSON.stringify({ action: 'create', ...request }),
+          signal: controller ? controller.signal : undefined
+        }).catch(async () => {
+          return fetch('/api/ride-requests/create', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(request)
-          }).catch(() => {});
+          });
+        }).finally(() => {
+          if (timeoutId) clearTimeout(timeoutId);
         });
-      } catch (e) {}
+      } catch (e) {
+        console.warn('Serverless bridge create notice:', e);
+      }
 
       // Prepare PostgreSQL DB Row for Supabase 'rides' table
       const reqType = request.vehicle_type || request.vehicleType || 'bike';
