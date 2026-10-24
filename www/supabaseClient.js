@@ -2657,7 +2657,13 @@ const db = {
       }
 
       // Broadcast immediately so other drivers get removed
+      // Broadcast immediately so other drivers get removed
       this._emit('ride_accepted', current);
+
+      // WebSocket cross-device channel broadcast
+      const acceptBroadcast = { event: 'ride_accepted', request: current };
+      if (this._channel) { try { this._channel.send({ type: 'broadcast', event: 'ride_matching_event', payload: acceptBroadcast }); } catch(e){} }
+      if (this._driverChannel) { try { this._driverChannel.send({ type: 'broadcast', event: 'ride_matching_event', payload: acceptBroadcast }); } catch(e){} }
 
       // Supabase DB update on rides table
       const client = getSupabaseClient();
@@ -2720,6 +2726,11 @@ const db = {
 
       this._emit('ride_started', current);
 
+      // WebSocket cross-device channel broadcast
+      const startBroadcast = { event: 'ride_started', request: current };
+      if (this._channel) { try { this._channel.send({ type: 'broadcast', event: 'ride_matching_event', payload: startBroadcast }); } catch(e){} }
+      if (this._driverChannel) { try { this._driverChannel.send({ type: 'broadcast', event: 'ride_matching_event', payload: startBroadcast }); } catch(e){} }
+
       try {
         fetch('/api/ride-requests', {
           method: 'POST',
@@ -2737,10 +2748,24 @@ const db = {
       const client = getSupabaseClient();
       if (client) {
         try {
+          const startNotes = JSON.stringify({
+            isRequest: true,
+            status: 'ride_started',
+            started_at: current.started_at,
+            driver: {
+              id: current.driver_id,
+              name: current.driver_name,
+              phone: current.driver_phone,
+              avatar: current.driver_avatar,
+              vehicleName: current.driver_vehicle_name,
+              vehicleNumber: current.driver_vehicle_number,
+              vehicleType: current.driver_vehicle_type
+            }
+          });
           client.from('rides')
             .update({
               status: 'completed',
-              notes: JSON.stringify({ isRequest: true, status: 'ride_started', started_at: current.started_at })
+              notes: startNotes
             })
             .eq('vehicle_number', current.id)
             .then(() => {}).catch(() => {});
@@ -2775,6 +2800,11 @@ const db = {
 
       this._emit('ride_completed', current);
 
+      // WebSocket cross-device channel broadcast
+      const completeBroadcast = { event: 'ride_completed', request: current };
+      if (this._channel) { try { this._channel.send({ type: 'broadcast', event: 'ride_matching_event', payload: completeBroadcast }); } catch(e){} }
+      if (this._driverChannel) { try { this._driverChannel.send({ type: 'broadcast', event: 'ride_matching_event', payload: completeBroadcast }); } catch(e){} }
+
       try {
         fetch('/api/ride-requests', {
           method: 'POST',
@@ -2805,8 +2835,25 @@ const db = {
       const client = getSupabaseClient();
       if (client) {
         try {
+          const completeNotes = JSON.stringify({
+            isRequest: true,
+            status: 'ride_completed',
+            completed_at: current.completed_at,
+            driver: {
+              id: current.driver_id,
+              name: current.driver_name,
+              phone: current.driver_phone,
+              avatar: current.driver_avatar,
+              vehicleName: current.driver_vehicle_name,
+              vehicleNumber: current.driver_vehicle_number,
+              vehicleType: current.driver_vehicle_type
+            }
+          });
           client.from('rides')
-            .update({ status: 'completed' })
+            .update({
+              status: 'completed',
+              notes: completeNotes
+            })
             .eq('vehicle_number', requestId)
             .then(() => {}).catch(() => {});
         } catch (e) {}
@@ -2825,6 +2872,11 @@ const db = {
       }
       this._activeRequest = null;
       try { localStorage.removeItem('routemate_active_ride_request'); } catch(e){}
+
+      // WebSocket cross-device channel broadcast
+      const cancelBroadcast = { event: 'ride_cancelled', request: { id: requestId, status: 'cancelled' } };
+      if (this._channel) { try { this._channel.send({ type: 'broadcast', event: 'ride_matching_event', payload: cancelBroadcast }); } catch(e){} }
+      if (this._driverChannel) { try { this._driverChannel.send({ type: 'broadcast', event: 'ride_matching_event', payload: cancelBroadcast }); } catch(e){} }
 
       try {
         fetch('/api/ride-requests', {
@@ -2986,8 +3038,8 @@ const db = {
             if (needsIncomingUiSync || !this._activeRequest || this._activeRequest.id !== incomingReq.id || this._activeRequest.status !== incomingReq.status) {
               this._handleIncomingEvent('new_ride_request', incomingReq);
             }
-          } else if (!foundOnServer && this._activeRequest && (this._activeRequest.status === 'searching' || this._activeRequest.status === 'active')) {
-            // B. If this device is a Rider waiting for driver acceptance, check if ride was accepted in Supabase
+          } else if (!foundOnServer && this._activeRequest && (this._activeRequest.status === 'searching' || this._activeRequest.status === 'active' || this._activeRequest.status === 'driver_accepted' || this._activeRequest.status === 'ride_started')) {
+            // B. If this device is a Rider, sync ride progress from Supabase
             try {
               const { data: myReqRows } = await client
                 .from('rides')
@@ -2998,7 +3050,14 @@ const db = {
                 const myRow = myReqRows[0];
                 let notesData = {};
                 try { notesData = JSON.parse(myRow.notes || '{}'); } catch(e){}
-                if (notesData.status === 'driver_accepted' || myRow.status === 'completed') {
+
+                if (notesData.status === 'ride_completed' && this._activeRequest.status !== 'ride_completed') {
+                  this._handleIncomingEvent('ride_completed', { ...this._activeRequest, ...notesData, status: 'ride_completed' });
+                  return;
+                } else if (notesData.status === 'ride_started' && this._activeRequest.status !== 'ride_started') {
+                  this._handleIncomingEvent('ride_started', { ...this._activeRequest, ...notesData, status: 'ride_started' });
+                  return;
+                } else if ((notesData.status === 'driver_accepted' || myRow.status === 'completed') && this._activeRequest.status !== 'driver_accepted' && this._activeRequest.status !== 'ride_started' && this._activeRequest.status !== 'ride_completed') {
                   const acceptedPayload = {
                     ...this._activeRequest,
                     ...notesData,
