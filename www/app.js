@@ -2359,16 +2359,83 @@ async function requestRideAction() {
   showToast(`📡 Radar activated! Broadcasting on ${pickup} ➔ ${drop} (₹${fare})`, 'info');
 
   try {
-    const res = await window.db.matching.createRequest({ ...reqPayload, pin, id: requestId });
+    let res = null;
+    if (window.db && window.db.matching && typeof window.db.matching.createRequest === 'function') {
+      res = await window.db.matching.createRequest({ ...reqPayload, pin, id: requestId });
+    }
+
+    // Direct PostgREST insertion fallback: guarantees row is written to Supabase even if window.db had any initialization issue
+    if (!res || !res.request) {
+      console.log('⚡ Performing direct Supabase REST fallback insert for ride:', requestId);
+      const dbVehicleType = (state.vehicleType === 'car') ? 'car' : 'bike';
+      const dbRow = {
+        driver_name: `${reqPayload.riderName} (Rider Request)`,
+        driver_role: reqPayload.riderRole || 'Commuter',
+        avatar: reqPayload.riderAvatar,
+        vehicle_type: dbVehicleType,
+        vehicle_name: reqPayload.vehiclePreferenceLabel || 'Any / Custom Vehicle',
+        vehicle_number: requestId,
+        pickup: pickup,
+        drop_location: drop,
+        departure_time: 'Immediate',
+        seats_available: 1,
+        per_seat_price: fare,
+        payment_preference: 'upi',
+        verified: true,
+        status: 'active',
+        notes: JSON.stringify({
+          isRequest: true,
+          status: 'searching',
+          riderId: reqPayload.riderId,
+          riderName: reqPayload.riderName,
+          riderPhone: reqPayload.riderPhone,
+          riderAvatar: reqPayload.riderAvatar,
+          riderRole: reqPayload.riderRole,
+          fare: fare,
+          distance: state.distance,
+          pin: pin,
+          pickup: pickup,
+          drop: drop,
+          pickup_lat: pCoords.lat,
+          pickup_lng: pCoords.lng,
+          drop_lat: dCoords.lat,
+          drop_lng: dCoords.lng,
+          vehicleType: state.vehicleType || 'any',
+          createdAt: new Date().toISOString()
+        })
+      };
+
+      try {
+        const restResp = await fetch('https://hjieeilzfbvubkhmlmdg.supabase.co/rest/v1/rides', {
+          method: 'POST',
+          headers: {
+            'apikey': 'sb_publishable_FD8-opedLq151SNuBbWp9g_bLI5hB_a',
+            'Authorization': 'Bearer sb_publishable_FD8-opedLq151SNuBbWp9g_bLI5hB_a',
+            'Content-Type': 'application/json',
+            'Prefer': 'return=representation'
+          },
+          body: JSON.stringify(dbRow)
+        });
+        if (restResp.ok) {
+          const rowData = await restResp.json();
+          console.log('✅ Direct REST insert successful:', rowData);
+          res = { success: true, request: initialReq };
+        }
+      } catch (fErr) {
+        console.warn('Direct REST fetch error:', fErr);
+      }
+    }
+
     if (res && res.request) {
       state.currentActiveRide = res.request;
       renderLiveTrackingStage(res.request, 'rider');
       renderRiderSearchingCard();
       updateActiveRideBanner();
-      showToast(`📡 Live Radar Scanning: Broadcasting on ${pickup} ➔ ${drop} (₹${fare})`, 'success');
+      showToast(`✅ Broadcast Live in Supabase Cloud! Waiting for driver...`, 'success');
     }
   } catch (e) {
     console.error('Ride request broadcast error:', e);
+    showToast(`⚠️ Cloud Broadcast Warning: ${e.message}`, 'warning');
   }
 }
 
@@ -4261,6 +4328,17 @@ function quickGuestAccess(role = 'rider') {
   }
 }
 window.quickGuestAccess = quickGuestAccess;
+
+async function manualCheckDriverRequests() {
+  const pill = document.getElementById('driverLivePollStatus');
+  if (pill) pill.textContent = '⏳ Checking Supabase Cloud...';
+  showToast('🔍 Checking Supabase for latest passenger requests...', 'info');
+  if (state.declinedRequestIds) state.declinedRequestIds.clear();
+  if (window.db && window.db.matching && typeof window.db.matching.pollLatestSearchingRides === 'function') {
+    await window.db.matching.pollLatestSearchingRides();
+  }
+}
+window.manualCheckDriverRequests = manualCheckDriverRequests;
 
 function initLocalhostTestDock() {
   if (typeof window === 'undefined') return;

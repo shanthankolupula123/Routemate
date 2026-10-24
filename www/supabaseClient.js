@@ -2340,7 +2340,33 @@ const db = {
           }
         }
 
+        const pollStatusEl = typeof document !== 'undefined' ? document.getElementById('driverLivePollStatus') : null;
+        if (pollStatusEl) {
+          const timeStr = new Date().toLocaleTimeString();
+          pollStatusEl.textContent = `🟢 Cloud Polling (${timeStr}): ${rideRows ? rideRows.length : 0} rows found`;
+        }
+
         if (incomingReq) {
+          const topAlert = typeof document !== 'undefined' ? document.getElementById('driverTopIncomingAlert') : null;
+          if (topAlert) {
+            topAlert.classList.remove('hidden');
+            topAlert.innerHTML = `
+              <div class="bg-gradient-to-r from-blue-700 via-indigo-700 to-blue-800 text-white rounded-3xl p-4 shadow-xl border-2 border-amber-300 animate-in fade-in duration-200 flex items-center justify-between gap-3">
+                <div class="min-w-0 flex-1">
+                  <div class="flex items-center gap-1.5 mb-1">
+                    <span class="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
+                    <span class="text-[9.5px] font-black uppercase tracking-wider bg-amber-400 text-slate-950 px-2 py-0.5 rounded-full">New Passenger Request</span>
+                  </div>
+                  <h4 class="font-extrabold text-sm text-white truncate">${incomingReq.name} (₹${incomingReq.fareOffer})</h4>
+                  <p class="text-[11px] text-blue-100 truncate">${incomingReq.pickup} ➔ ${incomingReq.drop}</p>
+                </div>
+                <button type="button" onclick="acceptDriverIncomingModal()" class="px-4 py-2.5 bg-emerald-500 hover:bg-emerald-600 active:scale-95 text-white font-black text-xs rounded-xl shadow-lg transition flex items-center gap-1 cursor-pointer flex-shrink-0">
+                  <span>ACCEPT</span>
+                </button>
+              </div>
+            `;
+          }
+
           const modal = typeof document !== 'undefined' ? document.getElementById('driverIncomingRideModal') : null;
           const isModalHidden = !modal || modal.classList.contains('hidden') || modal.style.display !== 'flex';
           const isDifferentReq = !appState || !appState.incomingRequest || appState.incomingRequest.id !== incomingReq.id;
@@ -2348,6 +2374,14 @@ const db = {
           if (isModalHidden || isDifferentReq) {
             console.log('⚡ [Driver Guaranteed 2s Polling]: Triggering incoming ride popup for', incomingReq.id);
             this._handleIncomingEvent('new_ride_request', incomingReq);
+            if (typeof openDriverIncomingModal === 'function') {
+              openDriverIncomingModal(incomingReq);
+            }
+          }
+        } else {
+          const topAlert = typeof document !== 'undefined' ? document.getElementById('driverTopIncomingAlert') : null;
+          if (topAlert && (!appState || !appState.incomingRequest)) {
+            topAlert.classList.add('hidden');
           }
         }
       } catch (err) {
