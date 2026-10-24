@@ -6,10 +6,19 @@ const SUPABASE_CONFIG = {
   publishableKey: 'sb_publishable_FD8-opedLq151SNuBbWp9g_bLI5hB_a'
 };
 
-// Initialize Supabase Client using global @supabase/supabase-js
+// Initialize Supabase Client using global @supabase/supabase-js with reconnect capability
 let supabase = null;
 
-function getSupabaseClient() {
+function getSupabaseClient(forceReconnect = false) {
+  if (forceReconnect && supabase) {
+    try {
+      if (typeof supabase.removeAllChannels === 'function') {
+        supabase.removeAllChannels();
+      }
+    } catch (e) {}
+    supabase = null;
+  }
+
   if (!supabase && typeof window !== 'undefined' && window.supabase && window.supabase.createClient) {
     try {
       supabase = window.supabase.createClient(SUPABASE_CONFIG.url, SUPABASE_CONFIG.publishableKey, {
@@ -24,6 +33,11 @@ function getSupabaseClient() {
           enabled: true,
           params: {
             eventsPerSecond: 10
+          }
+        },
+        global: {
+          headers: {
+            'x-client-info': 'routemate-web/2.0'
           }
         }
       });
@@ -45,11 +59,229 @@ function getGlobalState() {
   return null;
 }
 
-// Direct Native Fetch Helper for Supabase PostgREST
-// 100% independent of external CDN scripts; works in incognito, mobile web views, and slow connections
+// ==========================================================
+// RESILIENT CONNECTION MANAGER & HEALTH MONITOR
+// Handles regional API degradations, auto-reconnects, and status notifications
+// ==========================================================
+const connectionManager = {
+  status: 'connected', // 'connected' | 'degraded' | 'reconnecting' | 'offline'
+  isOnline: typeof navigator !== 'undefined' ? navigator.onLine : true,
+  lastCheckTime: Date.now(),
+  lastSuccessTime: Date.now(),
+  consecutiveFailures: 0,
+  listeners: new Set(),
+
+  subscribe(listener) {
+    this.listeners.add(listener);
+    try { listener(this.status, this.isOnline); } catch (e) {}
+    return () => this.listeners.delete(listener);
+  },
+
+  _setStatus(newStatus, isOnline = true) {
+    const changed = this.status !== newStatus || this.isOnline !== isOnline;
+    this.status = newStatus;
+    this.isOnline = isOnline;
+    if (changed) {
+      console.log(`🔌 [Supabase Connection] Status changed to: ${newStatus} (Online: ${isOnline})`);
+      this.listeners.forEach(fn => {
+        try { fn(newStatus, isOnline); } catch (e) {}
+      });
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('routemate_connection_change', {
+          detail: { status: newStatus, isOnline }
+        }));
+      }
+    }
+  },
+
+  // Ping health endpoint with strict timeout (non-blocking)
+  async checkHealth(quick = false) {
+    const timeoutMs = quick ? 2500 : 5000;
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      const res = await fetch(`${SUPABASE_CONFIG.url}/auth/v1/health`, {
+        method: 'GET',
+        headers: { apikey: SUPABASE_CONFIG.publishableKey },
+        signal: controller.signal
+      });
+      clearTimeout(timer);
+
+      if (res.ok || res.status === 200 || res.status === 204) {
+        this.consecutiveFailures = 0;
+        this.lastSuccessTime = Date.now();
+        this._setStatus('connected', true);
+        if (typeof offlineQueue !== 'undefined') {
+          offlineQueue.flush();
+        }
+        return { ok: true, status: 'connected' };
+      } else {
+        this.consecutiveFailures++;
+        this._setStatus('degraded', true);
+        return { ok: false, status: 'degraded', code: res.status };
+      }
+    } catch (err) {
+      this.consecutiveFailures++;
+      const isDeviceOffline = typeof navigator !== 'undefined' && !navigator.onLine;
+      const newStatus = isDeviceOffline ? 'offline' : 'degraded';
+      this._setStatus(newStatus, !isDeviceOffline);
+      return { ok: false, status: newStatus, error: err.message };
+    }
+  },
+
+  // Force reconnect Supabase client and channel transports
+  async reconnect(force = true) {
+    this._setStatus('reconnecting', this.isOnline);
+    console.log('🔄 Re-initializing Supabase client connection...');
+    getSupabaseClient(force);
+    if (typeof db !== 'undefined' && db.matching && typeof db.matching.init === 'function') {
+      try { db.matching.init(true); } catch (e) {}
+    }
+    const health = await this.checkHealth();
+    return health;
+  }
+};
+
+// Auto-recovery listeners on browser online/offline events
+if (typeof window !== 'undefined') {
+  window.addEventListener('online', () => {
+    console.log('🌐 Network online detected. Checking Supabase connectivity...');
+    connectionManager.reconnect(true);
+  });
+  window.addEventListener('offline', () => {
+    console.warn('⚠️ Network offline detected. Activating Local Fallback Mode...');
+    connectionManager._setStatus('offline', false);
+  });
+  // Gentle background heartbeat (every 30s)
+  setInterval(() => {
+    if (connectionManager.status === 'degraded' || connectionManager.status === 'reconnecting') {
+      connectionManager.checkHealth(true);
+    }
+  }, 30000);
+}
+
+// ==========================================================
+// OFFLINE QUEUE & BACKGROUND SYNCHRONIZATION
+// Guarantees rides, bookings, and updates are safely preserved during regional hiccups
+// ==========================================================
+const offlineQueue = {
+  QUEUE_KEY: 'routemate_offline_queue',
+  isFlushing: false,
+
+  getQueue() {
+    try {
+      return JSON.parse(localStorage.getItem(this.QUEUE_KEY) || '[]');
+    } catch (e) {
+      return [];
+    }
+  },
+
+  saveQueue(queue) {
+    try {
+      localStorage.setItem(this.QUEUE_KEY, JSON.stringify((queue || []).slice(0, 100)));
+    } catch (e) {}
+  },
+
+  enqueue(action, payload, uniqueKey = null) {
+    try {
+      const queue = this.getQueue();
+      const item = {
+        id: uniqueKey || ('op_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5)),
+        action,
+        payload,
+        createdAt: Date.now(),
+        retries: 0
+      };
+      const existingIdx = uniqueKey ? queue.findIndex(q => q.id === uniqueKey) : -1;
+      if (existingIdx >= 0) {
+        queue[existingIdx] = item;
+      } else {
+        queue.push(item);
+      }
+      this.saveQueue(queue);
+      console.log(`📦 [Offline Queue] Enqueued action "${action}":`, item.id);
+      return item;
+    } catch (e) {
+      console.warn('Error enqueuing offline action:', e);
+      return null;
+    }
+  },
+
+  async flush() {
+    if (this.isFlushing) return;
+    const queue = this.getQueue();
+    if (!queue || queue.length === 0) return;
+
+    this.isFlushing = true;
+    console.log(`⚡ [Offline Queue] Flushing ${queue.length} pending operations to Supabase...`);
+    const remaining = [];
+
+    for (const item of queue) {
+      try {
+        let success = false;
+        if (item.action === 'insert_ride') {
+          const res = await supabaseRest('rides', { method: 'POST', body: item.payload, retries: 0 });
+          success = res.ok;
+        } else if (item.action === 'update_ride') {
+          const { filter, body } = item.payload;
+          const res = await supabaseRest(`rides?${filter}`, { method: 'PATCH', body, retries: 0 });
+          success = res.ok;
+        } else if (item.action === 'insert_booking') {
+          const res = await supabaseRest('bookings', { method: 'POST', body: item.payload, retries: 0 });
+          success = res.ok;
+        } else if (item.action === 'upsert_profile') {
+          const res = await supabaseRest('profiles', { method: 'POST', body: item.payload, prefer: 'resolution=merge-duplicates', retries: 0 });
+          success = res.ok;
+        } else if (item.action === 'insert_feedback') {
+          const res = await supabaseRest('feedbacks', { method: 'POST', body: item.payload, retries: 0 });
+          success = res.ok;
+        } else if (item.action === 'insert_sos') {
+          const res = await supabaseRest('safety_alerts', { method: 'POST', body: item.payload, retries: 0 });
+          success = res.ok;
+        } else {
+          success = true;
+        }
+
+        if (!success) {
+          item.retries = (item.retries || 0) + 1;
+          if (item.retries < 5) {
+            remaining.push(item);
+          } else {
+            console.warn(`Dropped stale offline item after 5 failed sync attempts:`, item.action, item.id);
+          }
+        } else {
+          console.log(`✅ [Offline Queue] Synchronized ${item.action} (${item.id}) to Supabase cloud`);
+        }
+      } catch (err) {
+        item.retries = (item.retries || 0) + 1;
+        if (item.retries < 5) remaining.push(item);
+      }
+    }
+
+    this.saveQueue(remaining);
+    this.isFlushing = false;
+  }
+};
+
+// Initial flush attempt after load
+if (typeof window !== 'undefined') {
+  setTimeout(() => {
+    try { offlineQueue.flush(); } catch (e) {}
+  }, 2500);
+}
+
+// ==========================================================
+// DIRECT NATIVE FETCH HELPER FOR SUPABASE POSTGREST
+// With AbortController timeout, automatic exponential backoff retry,
+// and graceful degraded error handling. Never throws unhandled exceptions.
+// ==========================================================
 async function supabaseRest(endpoint, options = {}) {
   const cleanEndpoint = endpoint.startsWith('/') ? endpoint.slice(1) : endpoint;
   const url = `${SUPABASE_CONFIG.url}/rest/v1/${cleanEndpoint}`;
+  const method = (options.method || 'GET').toUpperCase();
+  const maxRetries = options.retries !== undefined ? options.retries : 1;
+  const timeoutMs = options.timeoutMs || 6000;
+
   const headers = {
     'apikey': SUPABASE_CONFIG.publishableKey,
     'Authorization': `Bearer ${SUPABASE_CONFIG.publishableKey}`,
@@ -57,28 +289,80 @@ async function supabaseRest(endpoint, options = {}) {
     'Prefer': options.prefer || 'return=representation',
     ...(options.headers || {})
   };
-  try {
-    const res = await fetch(url, {
-      method: options.method || 'GET',
-      headers,
-      body: options.body ? JSON.stringify(options.body) : undefined
-    });
-    const text = await res.text();
-    let data = null;
-    try { data = JSON.parse(text); } catch (e) { data = text; }
-    return { ok: res.ok, status: res.status, data, error: !res.ok ? (data && data.message ? data : { message: text }) : null };
-  } catch (err) {
-    console.warn(`Supabase direct REST error (${endpoint}):`, err);
-    return { ok: false, status: 0, data: null, error: err };
+
+  let lastError = null;
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+      const res = await fetch(url, {
+        method,
+        headers,
+        body: options.body ? JSON.stringify(options.body) : undefined,
+        signal: controller.signal
+      });
+      clearTimeout(timer);
+
+      const text = await res.text();
+      let data = null;
+      try { data = JSON.parse(text); } catch (e) { data = text; }
+
+      // Successful response
+      if (res.ok) {
+        connectionManager.consecutiveFailures = 0;
+        connectionManager.lastSuccessTime = Date.now();
+        if (connectionManager.status !== 'connected') {
+          connectionManager._setStatus('connected', true);
+        }
+        return { ok: true, status: res.status, data, error: null };
+      }
+
+      // 5xx Server / Gateway or 429 Rate Limit Errors
+      if (res.status >= 500 || res.status === 429) {
+        connectionManager._setStatus('degraded', true);
+        lastError = (data && data.message) ? data : { message: text || `HTTP ${res.status}` };
+        if (attempt < maxRetries) {
+          await new Promise(r => setTimeout(r, 400 * (attempt + 1)));
+          continue;
+        }
+      }
+
+      // 4xx Client Errors (e.g. 404, 400) - return error without useless retries
+      return {
+        ok: false,
+        status: res.status,
+        data,
+        error: !res.ok ? (data && data.message ? data : { message: text || `HTTP ${res.status}` }) : null
+      };
+    } catch (err) {
+      lastError = err;
+      connectionManager._setStatus('degraded', typeof navigator !== 'undefined' ? navigator.onLine : true);
+      if (attempt < maxRetries) {
+        await new Promise(r => setTimeout(r, 400 * (attempt + 1)));
+      }
+    }
   }
+
+  console.warn(`Supabase direct REST notice (${endpoint}):`, lastError ? (lastError.message || lastError) : 'Unavailable');
+  return { ok: false, status: 0, data: null, error: lastError, degraded: true };
 }
-if (typeof window !== 'undefined') window.supabaseRest = supabaseRest;
+if (typeof window !== 'undefined') {
+  window.supabaseRest = supabaseRest;
+  window.checkSupabaseConnection = () => connectionManager.checkHealth();
+  window.reconnectSupabase = () => connectionManager.reconnect(true);
+}
 
 // Database and Authentication helper functions
 const db = {
   get client() {
     return getSupabaseClient();
   },
+  connection: connectionManager,
+  offlineQueue: offlineQueue,
+  reconnect: (force = true) => connectionManager.reconnect(force),
+  checkHealth: (quick = false) => connectionManager.checkHealth(quick),
 
   // ==========================================
   // SUPABASE AUTH HELPERS (PHONE OTP)
@@ -344,74 +628,139 @@ const db = {
   // RIDES TABLE HELPERS
   // ==========================================
   rides: {
-    // Fetch all active rides from Supabase
+    // Fetch all active rides from Supabase with Local Cache Fallback
     async fetchAll(vehicleType = null) {
-      const client = getSupabaseClient();
-      if (!client) return null;
+      let rides = null;
+
+      // 1. Try direct Supabase PostgREST (robust across mobile & incognito)
       try {
-        let query = client
-          .from('rides')
-          .select('*')
-          .eq('status', 'active')
-          .order('created_at', { ascending: false });
-
-        if (vehicleType) {
-          query = query.eq('vehicle_type', vehicleType);
+        let endpoint = 'rides?status=eq.active&order=created_at.desc';
+        if (vehicleType) endpoint += `&vehicle_type=eq.${encodeURIComponent(vehicleType)}`;
+        const res = await supabaseRest(endpoint);
+        if (res.ok && Array.isArray(res.data)) {
+          rides = res.data;
         }
+      } catch (e) {}
 
-        const { data, error } = await query;
-        if (error) {
-          console.warn('Supabase rides.fetchAll error:', error.message);
-          return null;
+      // 2. Try SDK client if REST didn't return data
+      if (!rides) {
+        const client = getSupabaseClient();
+        if (client) {
+          try {
+            let query = client
+              .from('rides')
+              .select('*')
+              .eq('status', 'active')
+              .order('created_at', { ascending: false });
+
+            if (vehicleType) {
+              query = query.eq('vehicle_type', vehicleType);
+            }
+
+            const { data, error } = await query;
+            if (!error && Array.isArray(data)) {
+              rides = data;
+            }
+          } catch (e) {
+            console.warn('Supabase network error in rides.fetchAll:', e);
+          }
         }
-        return data;
-      } catch (e) {
-        console.warn('Supabase network error in rides.fetchAll:', e);
-        return null;
+      }
+
+      // 3. Fallback to Local Cache if Supabase is degraded or unreachable
+      if (rides && Array.isArray(rides)) {
+        try {
+          localStorage.setItem('routemate_cached_rides', JSON.stringify(rides));
+        } catch (e) {}
+        return rides;
+      } else {
+        try {
+          const cached = JSON.parse(localStorage.getItem('routemate_cached_rides') || '[]');
+          if (Array.isArray(cached) && cached.length > 0) {
+            console.log(`📦 [Local Mode] Serving ${cached.length} cached active rides due to Supabase API degradation`);
+            if (vehicleType) {
+              return cached.filter(r => r.vehicle_type === vehicleType);
+            }
+            return cached;
+          }
+        } catch (e) {}
+        return [];
       }
     },
 
-    // Insert new driver ride
+    // Insert new driver ride (optimistic local update + cloud sync + offline queue)
     async create(rideData) {
-      const client = getSupabaseClient();
-      if (!client) return { success: false, data: null };
+      const localId = 'RID-' + Date.now().toString(36).toUpperCase() + '-' + Math.floor(100 + Math.random() * 900);
+      const payload = {
+        driver_name: rideData.driverName || 'Verified Commuter',
+        driver_role: rideData.driverRole || 'Commuter',
+        rating: rideData.rating || 4.9,
+        avatar: rideData.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=120&h=120&q=80',
+        vehicle_type: rideData.vehicleType || 'bike',
+        vehicle_name: rideData.vehicleName || 'Commuter Vehicle',
+        vehicle_number: rideData.vehicleNumber || 'TS 08 TS 0001',
+        pickup: rideData.pickup || 'Uppal, Hyderabad',
+        drop_location: rideData.drop || 'Jangaon',
+        departure_time: rideData.departureTime || 'Today, 06:45 PM',
+        seats_available: parseInt(rideData.seatsAvailable || 1, 10),
+        per_seat_price: parseFloat(rideData.perSeatPrice || 108),
+        payment_preference: rideData.paymentPreference || 'both',
+        verified: true,
+        helmet_provided: Boolean(rideData.helmetProvided),
+        ac: Boolean(rideData.ac),
+        status: 'active',
+        notes: rideData.notes || 'Commuter ride on Highway corridor.',
+        created_at: new Date().toISOString()
+      };
+
+      // 1. Optimistically update local cache
       try {
-        const payload = {
-          driver_name: rideData.driverName || 'Verified Commuter',
-          driver_role: rideData.driverRole || 'Commuter',
-          rating: rideData.rating || 4.9,
-          avatar: rideData.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=120&h=120&q=80',
-          vehicle_type: rideData.vehicleType || 'bike',
-          vehicle_name: rideData.vehicleName || 'Commuter Vehicle',
-          vehicle_number: rideData.vehicleNumber || 'TS 08 TS 0001',
-          pickup: rideData.pickup || 'Uppal, Hyderabad',
-          drop_location: rideData.drop || 'Jangaon',
-          departure_time: rideData.departureTime || 'Today, 06:45 PM',
-          seats_available: parseInt(rideData.seatsAvailable || 1, 10),
-          per_seat_price: parseFloat(rideData.perSeatPrice || 108),
-          payment_preference: rideData.paymentPreference || 'both',
-          verified: true,
-          helmet_provided: Boolean(rideData.helmetProvided),
-          ac: Boolean(rideData.ac),
-          status: 'active',
-          notes: rideData.notes || 'Commuter ride on Highway corridor.'
-        };
+        const cached = JSON.parse(localStorage.getItem('routemate_cached_rides') || '[]');
+        cached.unshift(payload);
+        localStorage.setItem('routemate_cached_rides', JSON.stringify(cached.slice(0, 50)));
+      } catch (e) {}
 
-        const { data, error } = await client
-          .from('rides')
-          .insert([payload])
-          .select();
-
-        if (error) {
-          console.error('Error inserting ride into Supabase:', error.message);
-          return { success: false, error };
+      // 2. Broadcast immediately to local tabs
+      try {
+        if (typeof BroadcastChannel !== 'undefined') {
+          const bc = new BroadcastChannel('routemate_ride_matching');
+          bc.postMessage({ event: 'ride_published', ride: payload });
+          bc.close();
         }
+      } catch (e) {}
 
-        console.log('✅ Ride published to Supabase:', data);
-        return { success: true, data: data[0] };
-      } catch (e) {
-        console.error('Exception inserting ride into Supabase:', e);
-        return { success: false, error: e };
+      // 3. Direct REST Insert to Supabase cloud
+      let inserted = null;
+      try {
+        const restRes = await supabaseRest('rides', {
+          method: 'POST',
+          body: payload,
+          prefer: 'return=representation'
+        });
+        if (restRes.ok && restRes.data) {
+          inserted = Array.isArray(restRes.data) ? restRes.data[0] : restRes.data;
+        }
+      } catch (e) {}
+
+      // Fallback via client if REST didn't return
+      if (!inserted) {
+        const client = getSupabaseClient();
+        if (client) {
+          try {
+            const { data, error } = await client.from('rides').insert([payload]).select();
+            if (!error && data && data.length > 0) inserted = data[0];
+          } catch (e) {}
+        }
+      }
+
+      if (inserted) {
+        console.log('✅ Ride published to Supabase:', inserted);
+        return { success: true, data: inserted };
+      } else {
+        // Enqueue to offline queue so it syncs when cloud recovers
+        console.warn('⚠️ Supabase API degraded. Enqueued ride in offline queue.');
+        offlineQueue.enqueue('insert_ride', payload, 'ride_' + payload.vehicle_number);
+        return { success: true, data: payload, offlineQueued: true };
       }
     }
   },
@@ -420,9 +769,38 @@ const db = {
   // PROFILES TABLE HELPERS
   // ==========================================
   profiles: {
+    // Local profile caching helpers
+    _cacheProfile(profile) {
+      if (!profile) return;
+      try {
+        const key = 'routemate_profiles_cache';
+        let cache = JSON.parse(localStorage.getItem(key) || '{}');
+        if (profile.id) cache[profile.id] = profile;
+        if (profile.email) cache[String(profile.email).toLowerCase()] = profile;
+        if (profile.phone) cache[String(profile.phone).toLowerCase()] = profile;
+        localStorage.setItem(key, JSON.stringify(cache));
+      } catch (e) {}
+    },
+
+    _getCachedProfile(identifier) {
+      if (!identifier) return null;
+      try {
+        const clean = String(identifier).trim().toLowerCase();
+        const key = 'routemate_profiles_cache';
+        let cache = JSON.parse(localStorage.getItem(key) || '{}');
+        if (cache[clean]) return this._formatProfile(cache[clean]);
+        // Also check cached current logged in user
+        const curr = JSON.parse(localStorage.getItem('routemate_auth_user') || 'null');
+        if (curr && ((curr.email && curr.email.toLowerCase() === clean) || (curr.phone && curr.phone.toLowerCase() === clean) || curr.id === clean)) {
+          return this._formatProfile(curr);
+        }
+      } catch (e) {}
+      return null;
+    },
+
     async getById(profileId) {
       const client = getSupabaseClient();
-      if (!client) return null;
+      if (!client) return this._getCachedProfile(profileId);
       try {
         const { data, error } = await client
           .from('profiles')
@@ -430,10 +808,15 @@ const db = {
           .eq('id', profileId)
           .single();
         if (error) throw error;
-        return data;
+        if (data) {
+          const formatted = this._formatProfile(data);
+          this._cacheProfile(formatted);
+          return formatted;
+        }
+        return this._getCachedProfile(profileId);
       } catch (e) {
         console.warn('Error fetching profile from Supabase:', e);
-        return null;
+        return this._getCachedProfile(profileId);
       }
     },
 
@@ -479,9 +862,12 @@ const db = {
     async findByEmailOrPhone(identifier) {
       if (!identifier) return null;
       const client = getSupabaseClient();
-      if (!client) return null;
       const clean = String(identifier).trim().toLowerCase();
       const isEmail = clean.includes('@');
+
+      if (!client) {
+        return this._getCachedProfile(identifier);
+      }
 
       try {
         let existing = null;
@@ -528,10 +914,15 @@ const db = {
             } catch (e) {}
           }
         }
-        return existing ? this._formatProfile(existing) : null;
+        if (existing) {
+          const formatted = this._formatProfile(existing);
+          this._cacheProfile(formatted);
+          return formatted;
+        }
+        return this._getCachedProfile(identifier);
       } catch (err) {
         console.warn('Error in findByEmailOrPhone:', err);
-        return null;
+        return this._getCachedProfile(identifier);
       }
     },
 
@@ -1068,54 +1459,90 @@ const db = {
   // ==========================================
   bookings: {
     async create(bookingData) {
-      const client = getSupabaseClient();
-      if (!client) return { success: false };
+      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      const validRideId = (bookingData.rideId && uuidRegex.test(bookingData.rideId)) ? bookingData.rideId : null;
+
+      const payload = {
+        id: bookingData.id || ('BKG-' + Date.now().toString(36).toUpperCase() + '-' + Math.floor(100 + Math.random() * 900)),
+        ride_id: validRideId,
+        rider_name: bookingData.riderName || 'Commuter',
+        rider_phone: bookingData.riderPhone || '+91 98480 23145',
+        seats_booked: bookingData.seats || 1,
+        total_fare: bookingData.fare || 108,
+        payment_method: bookingData.paymentMethod || 'upi',
+        status: 'confirmed',
+        booking_pin: bookingData.pin || Math.floor(1000 + Math.random() * 9000).toString(),
+        created_at: new Date().toISOString()
+      };
+
+      // 1. Optimistic local cache
       try {
-        const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-        const validRideId = (bookingData.rideId && uuidRegex.test(bookingData.rideId)) ? bookingData.rideId : null;
+        const cached = JSON.parse(localStorage.getItem('routemate_cached_bookings') || '[]');
+        cached.unshift(payload);
+        localStorage.setItem('routemate_cached_bookings', JSON.stringify(cached.slice(0, 50)));
+      } catch (e) {}
 
-        const payload = {
-          ride_id: validRideId,
-          rider_name: bookingData.riderName || 'Commuter',
-          rider_phone: bookingData.riderPhone || '+91 98480 23145',
-          seats_booked: bookingData.seats || 1,
-          total_fare: bookingData.fare || 108,
-          payment_method: bookingData.paymentMethod || 'upi',
-          status: 'confirmed',
-          booking_pin: bookingData.pin || Math.floor(1000 + Math.random() * 9000).toString()
-        };
-
-        const { data, error } = await client
-          .from('bookings')
-          .insert([payload])
-          .select();
-
-        if (error) {
-          console.warn('Supabase booking create error:', error.message);
-          return { success: false, error };
+      // 2. Try direct Supabase PostgREST
+      let inserted = null;
+      try {
+        const restRes = await supabaseRest('bookings', { method: 'POST', body: payload });
+        if (restRes.ok && restRes.data) {
+          inserted = Array.isArray(restRes.data) ? restRes.data[0] : restRes.data;
         }
+      } catch (e) {}
 
-        console.log('✅ Booking stored in Supabase:', data);
-        return { success: true, data: data[0] };
-      } catch (e) {
-        console.warn('Exception creating booking in Supabase:', e);
-        return { success: false, error: e };
+      // Fallback via client
+      if (!inserted) {
+        const client = getSupabaseClient();
+        if (client) {
+          try {
+            const { data, error } = await client.from('bookings').insert([payload]).select();
+            if (!error && data && data.length > 0) inserted = data[0];
+          } catch (e) {}
+        }
+      }
+
+      if (inserted) {
+        console.log('✅ Booking stored in Supabase:', inserted);
+        return { success: true, data: inserted };
+      } else {
+        console.warn('⚠️ Supabase booking degraded. Enqueued offline.');
+        offlineQueue.enqueue('insert_booking', payload, 'bkg_' + payload.id);
+        return { success: true, data: payload, offlineQueued: true };
       }
     },
 
     async fetchAll() {
-      const client = getSupabaseClient();
-      if (!client) return null;
+      let bookings = null;
       try {
-        const { data, error } = await client
-          .from('bookings')
-          .select('*')
-          .order('created_at', { ascending: false });
-        if (error) throw error;
-        return data;
-      } catch (e) {
-        console.warn('Error fetching bookings:', e);
-        return null;
+        const res = await supabaseRest('bookings?order=created_at.desc');
+        if (res.ok && Array.isArray(res.data)) bookings = res.data;
+      } catch (e) {}
+
+      if (!bookings) {
+        const client = getSupabaseClient();
+        if (client) {
+          try {
+            const { data, error } = await client
+              .from('bookings')
+              .select('*')
+              .order('created_at', { ascending: false });
+            if (!error && data) bookings = data;
+          } catch (e) {
+            console.warn('Error fetching bookings:', e);
+          }
+        }
+      }
+
+      if (bookings && Array.isArray(bookings)) {
+        try { localStorage.setItem('routemate_cached_bookings', JSON.stringify(bookings)); } catch (e) {}
+        return bookings;
+      } else {
+        try {
+          return JSON.parse(localStorage.getItem('routemate_cached_bookings') || '[]');
+        } catch (e) {
+          return [];
+        }
       }
     }
   },
@@ -2221,10 +2648,37 @@ const db = {
           }
         }
 
+        // 3. Fallback: check local active request if cloud queries returned empty or degraded
+        if (!incomingReq) {
+          try {
+            const cachedStr = localStorage.getItem('routemate_active_ride_request');
+            if (cachedStr) {
+              const cReq = JSON.parse(cachedStr);
+              if (cReq && (cReq.status === 'searching' || cReq.status === 'active')) {
+                const reqId = cReq.id;
+                const isDeclined = appState && appState.declinedRequestIds && appState.declinedRequestIds.has(reqId);
+                const isThisTabTheActiveRider = Boolean(
+                  appState && appState.activeRideRole === 'rider' &&
+                  appState.currentActiveRide &&
+                  (appState.currentActiveRide.id === reqId)
+                );
+                if (!isDeclined && !isThisTabTheActiveRider) {
+                  incomingReq = cReq;
+                }
+              }
+            }
+          } catch (e) {}
+        }
+
         const pollStatusEl = typeof document !== 'undefined' ? document.getElementById('driverLivePollStatus') : null;
         if (pollStatusEl) {
-          const timeStr = new Date().toLocaleTimeString();
-          pollStatusEl.textContent = `🟢 Cloud Polling (${timeStr}): ${rideRows ? rideRows.length : 0} rows found`;
+          if (connectionManager.status === 'offline') {
+            pollStatusEl.textContent = '⚠️ Highway Radar (Offline Mode) • Active';
+          } else if (connectionManager.status === 'degraded') {
+            pollStatusEl.textContent = '⚡ Highway Radar (Local Fallback Mode) • Active';
+          } else {
+            pollStatusEl.textContent = '⚡ Connected to Realtime Highway Radar • Active';
+          }
         }
 
         if (incomingReq) {
@@ -2238,8 +2692,8 @@ const db = {
                     <span class="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
                     <span class="text-[9.5px] font-black uppercase tracking-wider bg-amber-400 text-slate-950 px-2 py-0.5 rounded-full">New Passenger Request</span>
                   </div>
-                  <h4 class="font-extrabold text-sm text-white truncate">${incomingReq.name} (₹${incomingReq.fareOffer})</h4>
-                  <p class="text-[11px] text-blue-100 truncate">${incomingReq.pickup} ➔ ${incomingReq.drop}</p>
+                  <h4 class="font-extrabold text-sm text-white truncate">${incomingReq.name || incomingReq.rider_name || 'Passenger'} (₹${incomingReq.fareOffer || incomingReq.fare || 110})</h4>
+                  <p class="text-[11px] text-blue-100 truncate">${incomingReq.pickup} ➔ ${incomingReq.drop || incomingReq.drop_location}</p>
                 </div>
                 <button type="button" onclick="acceptDriverIncomingModal()" class="px-4 py-2.5 bg-emerald-500 hover:bg-emerald-600 active:scale-95 text-white font-black text-xs rounded-xl shadow-lg transition flex items-center gap-1 cursor-pointer flex-shrink-0">
                   <span>ACCEPT</span>
@@ -2253,7 +2707,7 @@ const db = {
           const isDifferentReq = !appState || !appState.incomingRequest || appState.incomingRequest.id !== incomingReq.id;
 
           if (isModalHidden || isDifferentReq) {
-            console.log('⚡ [Driver Guaranteed 2s Polling]: Triggering incoming ride popup for', incomingReq.id);
+            console.log('⚡ [Driver Radar Match]: Triggering incoming ride popup for', incomingReq.id);
             this._handleIncomingEvent('new_ride_request', incomingReq);
             if (typeof openDriverIncomingModal === 'function') {
               openDriverIncomingModal(incomingReq);
@@ -2266,7 +2720,17 @@ const db = {
           }
         }
       } catch (err) {
-        console.warn('Driver polling fetch error:', err);
+        console.warn('Driver polling notice:', err.message || err);
+        // Fallback to local active request if any
+        try {
+          const cachedStr = localStorage.getItem('routemate_active_ride_request');
+          if (cachedStr) {
+            const cReq = JSON.parse(cachedStr);
+            if (cReq && (cReq.status === 'searching' || cReq.status === 'active')) {
+              this._handleIncomingEvent('new_ride_request', cReq);
+            }
+          }
+        } catch(e) {}
       }
     },
 
@@ -2510,6 +2974,12 @@ const db = {
         } catch (e) {}
       }
 
+      // If cloud was degraded or unreachable, enqueue to offline queue for automatic background sync
+      if (!data) {
+        console.warn('⚠️ Supabase insert degraded. Enqueueing ride request in offline queue.');
+        offlineQueue.enqueue('insert_ride', dbRow, 'req_' + request.id);
+      }
+
       // Immediately broadcast ride request packet across active WebSocket channels
       const broadcastPayload = { event: 'new_ride_request', request: { ...request, dbId: data && data[0] && data[0].id } };
       if (this._channel) {
@@ -2531,7 +3001,11 @@ const db = {
         status: 'confirmed',
         booking_pin: request.pin
       };
-      supabaseRest('bookings', { method: 'POST', body: bookingPayload }).catch(() => {});
+      supabaseRest('bookings', { method: 'POST', body: bookingPayload }).then(res => {
+        if (!res.ok) offlineQueue.enqueue('insert_booking', bookingPayload, 'bkg_' + request.id);
+      }).catch(() => {
+        offlineQueue.enqueue('insert_booking', bookingPayload, 'bkg_' + request.id);
+      });
 
       return { success: true, request };
     },
@@ -2625,7 +3099,6 @@ const db = {
       }
 
       // Broadcast immediately so other drivers get removed
-      // Broadcast immediately so other drivers get removed
       this._emit('ride_accepted', current);
 
       // WebSocket cross-device channel broadcast
@@ -2651,10 +3124,17 @@ const db = {
         });
 
         // 1. Direct REST PATCH (awaited so cloud reflects acceptance immediately)
-        await supabaseRest(`rides?vehicle_number=eq.${encodeURIComponent(current.id)}`, {
+        const patchRes = await supabaseRest(`rides?vehicle_number=eq.${encodeURIComponent(current.id)}`, {
           method: 'PATCH',
           body: { status: 'completed', notes: updateNotes }
         });
+
+        if (!patchRes.ok) {
+          offlineQueue.enqueue('update_ride', {
+            filter: `vehicle_number=eq.${encodeURIComponent(current.id)}`,
+            body: { status: 'completed', notes: updateNotes }
+          }, 'accept_' + current.id);
+        }
 
         // 2. Also try client if ready
         const client = getSupabaseClient();
