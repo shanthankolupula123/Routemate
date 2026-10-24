@@ -2232,7 +2232,7 @@ const db = {
 
     _getApiUrl(path = '/api/ride-requests') {
       const origin = (typeof window !== 'undefined' && window.location && window.location.origin) || '';
-      if (origin && origin.includes('routemate.pro')) {
+      if (origin && (origin.includes('localhost:') || origin.includes('127.0.0.1:'))) {
         return path;
       }
       return `https://www.routemate.pro${path}`;
@@ -2463,7 +2463,10 @@ const db = {
 
     startDriverPolling(intervalMs = 1200) {
       const effectiveInterval = Math.min(intervalMs, 1200);
-      if (this._driverPollTimer) return;
+      if (this._driverPollTimer) {
+        this.pollLatestSearchingRides();
+        return;
+      }
       console.log(`🔄 Starting guaranteed driver polling bridge (${effectiveInterval}ms)`);
       this.pollLatestSearchingRides();
       this._driverPollTimer = setInterval(() => {
@@ -2720,22 +2723,24 @@ const db = {
             `;
           }
 
-          // 3. Force Open the Full Driver Incoming Ride Modal Card
+          // 3. Ensure In-Page Passenger Request Card & Global State are Always Active
+          if (appState) {
+            appState.incomingRequest = incomingReq;
+          }
+          if (typeof renderDriverIncomingRequest === 'function') {
+            try { renderDriverIncomingRequest(); } catch (e) {}
+          }
+
+          // 4. Force Open the Full Driver Incoming Ride Modal Card
           const modal = typeof document !== 'undefined' ? document.getElementById('driverIncomingRideModal') : null;
           const isModalHidden = !modal || modal.classList.contains('hidden') || modal.style.display !== 'flex';
           const isDifferentReq = !appState || !appState.incomingRequest || appState.incomingRequest.id !== incomingReq.id;
 
           if (isModalHidden || isDifferentReq) {
             console.log('⚡ [Forced Driver Screen Notification]: Popping incoming ride modal card for', incomingReq.id);
-            if (appState) {
-              appState.incomingRequest = incomingReq;
-            }
             this._handleIncomingEvent('new_ride_request', incomingReq);
             if (typeof openDriverIncomingModal === 'function') {
               openDriverIncomingModal(incomingReq);
-            }
-            if (typeof renderDriverIncomingRequest === 'function') {
-              renderDriverIncomingRequest();
             }
           }
         } else {

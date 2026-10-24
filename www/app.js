@@ -2529,6 +2529,7 @@ function handleRealtimeMatchingEvent(event, request) {
         phone: request.rider_phone || request.phone || '+91 98480 23145',
         vehiclePreference: 'Any / Custom Vehicle',
         isFlexible: true,
+        status: request.status || 'searching',
         rawRequest: request
       };
 
@@ -2920,6 +2921,9 @@ function escapeHtml(str) {
 function openDriverIncomingModal(req) {
   const modal = document.getElementById('driverIncomingRideModal');
   if (!modal || !req) return;
+
+  if (!req.status) req.status = 'searching';
+  state.incomingRequest = req;
 
   const nameEl = document.getElementById('driverIncomingRiderName');
   const roleEl = document.getElementById('driverIncomingRiderRole');
