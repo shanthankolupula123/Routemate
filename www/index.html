@@ -148,26 +148,6 @@
             <span id="authToggleHint">Don't have an account yet?</span>
             <button type="button" id="authToggleAction" onclick="toggleAuthMode()" class="text-blue-600 font-bold hover:underline cursor-pointer ml-1">
               Create Account
-            </button>
-          </div>
-
-          <!-- Quick Guest Access / Instant Testing Mode for Incognito & Mobile -->
-          <div class="pt-2 border-t border-slate-100 flex flex-col gap-2">
-            <div class="flex items-center justify-between text-[10px] font-extrabold tracking-wider uppercase text-slate-400">
-              <div class="h-px bg-slate-200 flex-1"></div>
-              <span class="px-2">OR INSTANT TESTING ACCESS</span>
-              <div class="h-px bg-slate-200 flex-1"></div>
-            </div>
-            <div class="grid grid-cols-2 gap-2">
-              <button type="button" onclick="quickGuestAccess('rider')" class="py-2.5 px-3 bg-blue-50 hover:bg-blue-100 border border-blue-200/80 text-blue-700 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 shadow-xs cursor-pointer active:scale-95">
-                <i data-lucide="user" class="w-3.5 h-3.5 text-blue-600"></i>
-                <span>Enter as Rider</span>
-              </button>
-              <button type="button" onclick="quickGuestAccess('driver')" class="py-2.5 px-3 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200/80 text-emerald-700 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 shadow-xs cursor-pointer active:scale-95">
-                <i data-lucide="car" class="w-3.5 h-3.5 text-emerald-600"></i>
-                <span>Enter as Driver</span>
-              </button>
-            </div>
           </div>
         </div>
 
@@ -906,16 +886,15 @@
             <!-- Driver Top Incoming Ride Alert (Instant high-visibility banner) -->
             <div id="driverTopIncomingAlert" class="hidden"></div>
 
-            <!-- Driver Live Polling Status Pill -->
-            <div id="driverLivePollStatusBanner" class="bg-blue-50/80 border border-blue-200/90 rounded-2xl p-3 flex items-center justify-between text-xs shadow-xs">
+            <!-- Real-Time Corridor Radar Status Pill -->
+            <div id="driverLivePollStatusBanner" class="bg-slate-50 border border-slate-200/90 rounded-2xl px-3.5 py-2.5 flex items-center justify-between text-xs shadow-xs">
               <div class="flex items-center gap-2">
                 <span class="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
-                <span id="driverLivePollStatus" class="font-bold text-slate-800">🟢 Cloud Polling Active (Every 2s)</span>
+                <span id="driverLivePollStatus" class="font-bold text-slate-700">⚡ Connected to Realtime Highway Radar</span>
               </div>
-              <button type="button" onclick="manualCheckDriverRequests()" class="px-2.5 py-1 bg-white hover:bg-blue-100 border border-blue-300 text-blue-700 font-extrabold rounded-xl transition shadow-xs text-[11px] active:scale-95 cursor-pointer flex items-center gap-1">
-                <i data-lucide="refresh-cw" class="w-3 h-3"></i>
-                <span>Check Now</span>
-              </button>
+              <span class="text-[10px] font-black uppercase tracking-wider text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full">
+                0ms Realtime
+              </span>
             </div>
 
           <!-- 1. Master "Go Online" Toggle Card -->
@@ -3457,17 +3436,16 @@
       if (typeof initLeafletMap === 'function') initLeafletMap();
     };
   </script>
-  <!-- Interactive Maps Engine (Leaflet + OSM with Google Maps fallback) -->
-  <script src="maps.js?v=20261024_guaranteed_v13"></script>
+  <!-- Supabase JS Client SDK v2 (Required for Realtime WebSockets) -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <!-- Routemate Core App & Database Client -->
+  <script src="supabaseClient.js?v=20261024_pure_realtime_v14"></script>
+  <script src="app.js?v=20261024_pure_realtime_v14"></script>
+  <script src="maps.js?v=20261024_pure_realtime_v14"></script>
   <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCpZp3uUEEPF5ZJeVuuQRSGZxBDIgPuMqA&libraries=places,geometry&callback=initGoogleMap" async defer></script>
   <!-- Razorpay Standard Checkout SDK -->
   <script src="https://checkout.razorpay.com/v1/checkout.js" defer></script>
-  <script src="payment.js?v=20261024_guaranteed_v13" defer></script>
-  <!-- Supabase JS Client & Core App Logic -->
-  <script src="supabaseClient.js?v=20261024_guaranteed_v13"></script>
-  <script src="app.js?v=20261024_guaranteed_v13"></script>
-  <!-- Optional External Helpers (Async / Defer to prevent blocking mobile browsers) -->
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" async></script>
+  <script src="payment.js?v=20261024_pure_realtime_v14" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js" defer></script>
 </body>
 </html>
