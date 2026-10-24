@@ -767,6 +767,11 @@ function switchMode(newMode) {
     if (driverView) driverView.classList.remove('hidden');
 
     state.driverOnline = true;
+    state.activeRideRole = 'driver';
+    // Clear rider hold so driver radar immediately detects and shows active searching ride
+    if (state.currentActiveRide && (state.currentActiveRide.status === 'searching' || state.currentActiveRide.status === 'active')) {
+      state.currentActiveRide = null;
+    }
 
     renderDriverModeView();
     syncDriverOnlineToggleUI();
@@ -2351,6 +2356,9 @@ async function requestRideAction() {
   // Immediate 0ms UI transition: activate search radar and tracking modal instantly
   state.currentActiveRide = initialReq;
   state.activeRideRole = 'rider';
+  if (state.declinedRequestIds) {
+    state.declinedRequestIds.clear();
+  }
   renderLiveTrackingStage(initialReq, 'rider');
   renderRiderSearchingCard();
   updateActiveRideBanner();

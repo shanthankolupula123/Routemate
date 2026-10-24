@@ -2230,6 +2230,14 @@ const db = {
     _sseSource: null,
     _pollTimer: null,
 
+    _getApiUrl(path = '/api/ride-requests') {
+      const origin = (typeof window !== 'undefined' && window.location && window.location.origin) || '';
+      if (origin && origin.includes('routemate.pro')) {
+        return path;
+      }
+      return `https://www.routemate.pro${path}`;
+    },
+
     // Initialize Realtime Multi-Transport Bus
     init(forceReconnect = false) {
       if (forceReconnect && this._channel) {
@@ -2503,7 +2511,8 @@ const db = {
               const reqId = cReq.id;
               const isDeclined = appState && appState.declinedRequestIds && appState.declinedRequestIds.has(reqId);
               const isThisTabTheActiveRider = Boolean(
-                appState && appState.activeRideRole === 'rider' &&
+                appState && appState.mode !== 'driver' &&
+                appState.activeRideRole === 'rider' &&
                 appState.currentActiveRide &&
                 (appState.currentActiveRide.id === reqId)
               );
@@ -2520,7 +2529,7 @@ const db = {
         // =========================================================================
         if (!incomingReq) {
           try {
-            const apiRes = await fetch('/api/ride-requests', { cache: 'no-store' });
+            const apiRes = await fetch(this._getApiUrl('/api/ride-requests'), { cache: 'no-store' });
             if (apiRes.ok) {
               const apiData = await apiRes.json();
               if (apiData && apiData.activeRequest) {
@@ -2529,7 +2538,8 @@ const db = {
                   const reqId = sReq.id;
                   const isDeclined = appState && appState.declinedRequestIds && appState.declinedRequestIds.has(reqId);
                   const isThisTabTheActiveRider = Boolean(
-                    appState && appState.activeRideRole === 'rider' &&
+                    appState && appState.mode !== 'driver' &&
+                    appState.activeRideRole === 'rider' &&
                     appState.currentActiveRide &&
                     (appState.currentActiveRide.id === reqId)
                   );
@@ -2605,7 +2615,8 @@ const db = {
               }
 
               const isThisTabTheActiveRider = Boolean(
-                appState && appState.activeRideRole === 'rider' &&
+                appState && appState.mode !== 'driver' &&
+                appState.activeRideRole === 'rider' &&
                 appState.currentActiveRide &&
                 (appState.currentActiveRide.id === reqId || appState.currentActiveRide.id === r.id)
               );
@@ -2893,13 +2904,13 @@ const db = {
       try {
         const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
         const timeoutId = controller ? setTimeout(() => controller.abort(), 2500) : null;
-        await fetch('/api/ride-requests', {
+        await fetch(this._getApiUrl('/api/ride-requests'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ action: 'create', ...request }),
           signal: controller ? controller.signal : undefined
         }).catch(async () => {
-          return fetch('/api/ride-requests/create', {
+          return fetch(this._getApiUrl('/api/ride-requests/create'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(request)
@@ -3062,13 +3073,13 @@ const db = {
       // Try server atomic accept first if available
       let serverConfirmed = false;
       try {
-        let resp = await fetch('/api/ride-requests', {
+        let resp = await fetch(this._getApiUrl('/api/ride-requests'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ action: 'accept', requestId: current.id, driver: driverData })
         });
         if (!resp.ok && resp.status === 404) {
-          resp = await fetch('/api/ride-requests/accept', {
+          resp = await fetch(this._getApiUrl('/api/ride-requests/accept'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ requestId: current.id, driver: driverData })
@@ -3196,12 +3207,12 @@ const db = {
       if (this._driverChannel) { try { this._driverChannel.send({ type: 'broadcast', event: 'ride_matching_event', payload: startBroadcast }); } catch(e){} }
 
       try {
-        fetch('/api/ride-requests', {
+        fetch(this._getApiUrl('/api/ride-requests'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ action: 'start', requestId: current.id, pin: enteredPin })
         }).catch(() => {
-          fetch('/api/ride-requests/start', {
+          fetch(this._getApiUrl('/api/ride-requests/start'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ requestId: current.id, pin: enteredPin })
@@ -3274,12 +3285,12 @@ const db = {
       if (this._driverChannel) { try { this._driverChannel.send({ type: 'broadcast', event: 'ride_matching_event', payload: completeBroadcast }); } catch(e){} }
 
       try {
-        fetch('/api/ride-requests', {
+        fetch(this._getApiUrl('/api/ride-requests'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ action: 'complete', requestId })
         }).catch(() => {
-          fetch('/api/ride-requests/complete', {
+          fetch(this._getApiUrl('/api/ride-requests/complete'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ requestId })
@@ -3351,12 +3362,12 @@ const db = {
       if (this._driverChannel) { try { this._driverChannel.send({ type: 'broadcast', event: 'ride_matching_event', payload: cancelBroadcast }); } catch(e){} }
 
       try {
-        fetch('/api/ride-requests', {
+        fetch(this._getApiUrl('/api/ride-requests'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ action: 'cancel', requestId })
         }).catch(() => {
-          fetch('/api/ride-requests/cancel', {
+          fetch(this._getApiUrl('/api/ride-requests/cancel'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ requestId })
@@ -3381,9 +3392,9 @@ const db = {
     async syncActiveRequest() {
       let foundOnServer = false;
       try {
-        let resp = await fetch('/api/ride-requests');
+        let resp = await fetch(this._getApiUrl('/api/ride-requests'));
         if (!resp.ok) {
-          resp = await fetch('/api/ride-requests/active');
+          resp = await fetch(this._getApiUrl('/api/ride-requests/active'));
         }
         if (resp.ok) {
           const data = await resp.json();

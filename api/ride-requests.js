@@ -84,6 +84,56 @@ module.exports = async (req, res) => {
         created_at: new Date().toISOString()
       };
       saveActiveRide(activeRideRequest);
+
+      // Server-side dual-write to Supabase REST for multi-container synchronization
+      try {
+        const SUPABASE_URL = process.env.SUPABASE_URL || 'https://hjieeilzfbvubkhmlmdg.supabase.co';
+        const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || 'sb_publishable_FD8-opedLq151SNuBbWp9g_bLI5hB_a';
+        const reqType = activeRideRequest.vehicle_type || activeRideRequest.vehicleType || 'bike';
+        const dbRow = {
+          driver_name: `${activeRideRequest.rider_name || 'Passenger'} (Rider Request)`,
+          driver_role: activeRideRequest.rider_role || 'Commuter',
+          avatar: activeRideRequest.rider_avatar || 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=120&h=120&q=80',
+          vehicle_type: reqType === 'car' ? 'car' : 'bike',
+          vehicle_name: activeRideRequest.vehiclePreferenceLabel || (reqType === 'car' ? 'Car / Cab' : 'Any / Custom Vehicle'),
+          vehicle_number: activeRideRequest.id,
+          pickup: activeRideRequest.pickup || 'Pickup Location',
+          drop_location: activeRideRequest.drop_location || activeRideRequest.drop || 'Drop Location',
+          departure_time: 'Immediate',
+          seats_available: activeRideRequest.seats || 1,
+          per_seat_price: activeRideRequest.fare || 108,
+          payment_preference: 'upi',
+          verified: true,
+          status: 'active',
+          notes: JSON.stringify({
+            isRequest: true,
+            status: 'searching',
+            riderId: activeRideRequest.rider_id,
+            riderName: activeRideRequest.rider_name,
+            riderPhone: activeRideRequest.rider_phone,
+            fare: activeRideRequest.fare,
+            distance: activeRideRequest.distance,
+            pin: activeRideRequest.pin,
+            pickup: activeRideRequest.pickup,
+            drop: activeRideRequest.drop_location || activeRideRequest.drop,
+            vehicleType: reqType,
+            paymentMethod: activeRideRequest.payment_method || 'Direct UPI',
+            createdAt: activeRideRequest.created_at
+          })
+        };
+
+        fetch(`${SUPABASE_URL}/rest/v1/rides`, {
+          method: 'POST',
+          headers: {
+            'apikey': SUPABASE_ANON_KEY,
+            'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+            'Content-Type': 'application/json',
+            'Prefer': 'return=minimal'
+          },
+          body: JSON.stringify(dbRow)
+        }).catch(() => {});
+      } catch (e) {}
+
       return res.status(200).json({ success: true, request: activeRideRequest });
     }
 
