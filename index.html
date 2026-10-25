@@ -3433,6 +3433,11 @@
       </div>
     </div>
 
+  <!-- DEDICATED FLOATING BOTTOM SHEET / MODAL FOR INCOMING DRIVER RIDES -->
+  <div id="driverFloatingRidesOverlay" class="fixed bottom-0 left-0 right-0 z-[999999] p-3 sm:p-4 max-w-lg mx-auto pointer-events-none transition-all duration-300 ease-out transform translate-y-full opacity-0">
+    <div id="driverFloatingRidesContent" class="pointer-events-auto space-y-3">
+      <!-- Injected directly via standalone vanilla JS DOM event loop -->
+    </div>
   </div>
 
   <!-- Scripts -->
@@ -3446,13 +3451,13 @@
   <!-- Supabase JS Client SDK v2 (Required for Realtime WebSockets) -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <!-- Routemate Core App & Database Client -->
-  <script src="supabaseClient.js?v=20261025_debug_check_v25"></script>
-  <script src="app.js?v=20261025_debug_check_v25"></script>
-  <script src="maps.js?v=20261025_debug_check_v25"></script>
+  <script src="supabaseClient.js?v=20261025_debug_check_v26"></script>
+  <script src="app.js?v=20261025_debug_check_v26"></script>
+  <script src="maps.js?v=20261025_debug_check_v26"></script>
   <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCpZp3uUEEPF5ZJeVuuQRSGZxBDIgPuMqA&libraries=places,geometry&callback=initGoogleMap" async defer></script>
   <!-- Razorpay Standard Checkout SDK -->
   <script src="https://checkout.razorpay.com/v1/checkout.js" defer></script>
-  <script src="payment.js?v=20261025_debug_check_v25" defer></script>
+  <script src="payment.js?v=20261025_debug_check_v26" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js" defer></script>
 </body>
 </html>

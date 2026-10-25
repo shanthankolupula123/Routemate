@@ -2658,7 +2658,10 @@ const db = {
           }
         }
 
-        // Directly bind to UI DOM container and render cards feed
+        // Directly bind to UI DOM container and Floating Bottom Sheet
+        if (typeof window !== 'undefined' && typeof window.renderFloatingDriverRidesSheet === 'function') {
+          try { window.renderFloatingDriverRidesSheet(allActiveRides); } catch (e) {}
+        }
         if (typeof window !== 'undefined' && typeof window.renderLiveDriverRidesDOM === 'function') {
           try { window.renderLiveDriverRidesDOM(allActiveRides); } catch (e) {}
         }

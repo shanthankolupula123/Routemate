@@ -2013,6 +2013,176 @@ function getActiveTripCardHtml(activeTrip) {
   `;
 }
 
+// =========================================================================
+// 1. DEDICATED FLOATING BOTTOM SHEET / MODAL FOR INCOMING DRIVER RIDES
+// =========================================================================
+function renderFloatingDriverRidesSheet(activeRides) {
+  let overlay = document.getElementById('driverFloatingRidesOverlay');
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = 'driverFloatingRidesOverlay';
+    overlay.className = 'fixed bottom-0 left-0 right-0 z-[999999] p-3 sm:p-4 max-w-lg mx-auto pointer-events-none transition-all duration-300 ease-out transform translate-y-full opacity-0';
+    overlay.innerHTML = '<div id="driverFloatingRidesContent" class="pointer-events-auto space-y-3"></div>';
+    document.body.appendChild(overlay);
+  }
+
+  const content = document.getElementById('driverFloatingRidesContent');
+  if (!content) return;
+
+  const rides = Array.isArray(activeRides) ? activeRides : (activeRides ? [activeRides] : []);
+
+  // Filter valid, non-declined, non-completed rides
+  const validRides = rides.filter(r => {
+    if (!r) return false;
+    let meta = {};
+    if (typeof r.notes === 'string') {
+      try { meta = JSON.parse(r.notes || '{}'); } catch(e){}
+    } else if (r.notes && typeof r.notes === 'object') {
+      meta = r.notes;
+    }
+    const isDeclined = state.declinedRequestIds && state.declinedRequestIds.has(r.id || r.vehicle_number);
+    const isCompleted = r.status === 'completed' || r.status === 'cancelled' || meta.status === 'completed' || meta.status === 'cancelled';
+    return !isDeclined && !isCompleted;
+  });
+
+  const isDriverMode = Boolean(
+    state.mode === 'driver' || 
+    state.driverOnline || 
+    (document.getElementById('driverModeView') && !document.getElementById('driverModeView').classList.contains('hidden'))
+  );
+
+  // If no active rides or driver not active, slide down smoothly
+  if (validRides.length === 0 || !isDriverMode) {
+    overlay.classList.add('translate-y-full', 'opacity-0', 'pointer-events-none');
+    overlay.classList.remove('translate-y-0', 'opacity-100');
+    content.innerHTML = '';
+    return;
+  }
+
+  // Construct Floating Bottom Sheet HTML
+  let html = `
+    <div class="bg-slate-900/98 backdrop-blur-2xl text-white rounded-3xl p-5 shadow-2xl border-2 border-emerald-500/90 animate-in slide-in-from-bottom-8 duration-300">
+      <div class="flex items-center justify-between pb-3 border-b border-slate-700/80">
+        <div class="flex items-center gap-2">
+          <span class="w-3 h-3 rounded-full bg-emerald-400 live-pulse"></span>
+          <span class="text-xs font-black uppercase tracking-wider text-emerald-400">
+            ${validRides.length === 1 ? 'New Commuter Request Incoming' : `${validRides.length} Commuter Requests Waiting`}
+          </span>
+        </div>
+        <span class="text-[10px] font-mono font-bold bg-amber-400/20 text-amber-300 border border-amber-400/30 px-2.5 py-0.5 rounded-full flex items-center gap-1">
+          <i data-lucide="zap" class="w-3 h-3 text-amber-400"></i>
+          <span>Instant Match</span>
+        </span>
+      </div>
+
+      <div class="max-h-[65vh] overflow-y-auto divide-y divide-slate-800 space-y-4 pt-1 pr-1">
+  `;
+
+  for (let i = 0; i < validRides.length; i++) {
+    const ride = validRides[i];
+    let meta = {};
+    if (typeof ride.notes === 'string') {
+      try { meta = JSON.parse(ride.notes || '{}'); } catch(e){}
+    } else if (ride.notes && typeof ride.notes === 'object') {
+      meta = ride.notes;
+    }
+
+    const rideId = ride.id || ride.vehicle_number || ('REQ-' + (ride.dbId || Date.now()));
+    const fare = ride.fare || ride.fareOffer || ride.per_seat_price || 110;
+    const dist = ride.distance || ride.distance_km || meta.distance || 84;
+    const avatarUrl = ride.avatar || ride.rider_avatar || meta.riderAvatar || 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=120&h=120&q=80';
+    const riderName = ride.name || ride.rider_name || meta.riderName || (ride.driver_name ? ride.driver_name.replace(' (Rider Request)', '') : 'Verified Commuter');
+    const riderRole = ride.role || ride.rider_role || meta.riderRole || 'Daily Commuter';
+    const rating = ride.rating || 4.9;
+    const pickup = ride.pickup || 'Pickup Location';
+    const drop = ride.drop || ride.drop_location || 'Destination';
+    const payMethod = ride.payment_method || ride.paymentMethod || meta.paymentMethod || 'Direct UPI';
+
+    html += `
+      <div class="${i > 0 ? 'pt-4' : ''}">
+        <!-- Passenger Profile & Large Fare Badge -->
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-3">
+            <img src="${avatarUrl}" class="w-12 h-12 rounded-full object-cover border-2 border-emerald-400 shadow-md" />
+            <div>
+              <div class="flex items-center gap-1.5">
+                <h4 class="font-black text-white text-sm">${riderName}</h4>
+                <span class="text-[10px] font-bold text-amber-300 bg-amber-400/20 px-1.5 py-0.5 rounded">★ ${rating}</span>
+              </div>
+              <p class="text-[11px] text-slate-300 mt-0.5">${riderRole} • Verified</p>
+            </div>
+          </div>
+          <div class="text-right">
+            <div class="flex items-baseline justify-end gap-0.5">
+              <span class="text-xs font-bold text-emerald-400">₹</span>
+              <span class="text-3xl font-black text-emerald-400">${fare}</span>
+            </div>
+            <span class="text-[9.5px] font-extrabold uppercase tracking-wider text-emerald-300 bg-emerald-950 border border-emerald-500/40 px-2 py-0.5 rounded-full">Fuel Split</span>
+          </div>
+        </div>
+
+        <!-- Route Details -->
+        <div class="mt-3 bg-slate-800/90 rounded-2xl p-3 border border-slate-700/80 space-y-2 text-xs">
+          <div class="flex items-start gap-2">
+            <span class="w-2.5 h-2.5 rounded-full bg-emerald-400 mt-1 flex-shrink-0"></span>
+            <div>
+              <p class="text-[9px] uppercase font-bold text-slate-400 tracking-wider">Pickup Point</p>
+              <p class="font-bold text-white text-xs">${pickup}</p>
+            </div>
+          </div>
+          <div class="flex items-start gap-2">
+            <span class="w-2.5 h-2.5 rounded-full bg-blue-400 mt-1 flex-shrink-0"></span>
+            <div>
+              <p class="text-[9px] uppercase font-bold text-slate-400 tracking-wider">Destination</p>
+              <p class="font-bold text-white text-xs">${drop} (${dist} km)</p>
+            </div>
+          </div>
+          <div class="pt-1.5 border-t border-slate-700/60 flex items-center justify-between text-[10.5px] text-slate-300">
+            <span class="flex items-center gap-1 font-semibold text-emerald-300"><i data-lucide="clock" class="w-3 h-3"></i> Ready Now</span>
+            <span class="text-purple-300 bg-purple-950/80 border border-purple-500/40 font-bold px-2 py-0.5 rounded-full">${payMethod}</span>
+          </div>
+        </div>
+
+        <!-- Action Buttons -->
+        <div class="mt-3.5 grid grid-cols-3 gap-2">
+          <button type="button" onclick="rejectDriverRideCard('${rideId}')" class="py-3 border border-slate-600 hover:border-red-400 hover:bg-red-950/40 text-slate-300 hover:text-red-300 rounded-2xl text-xs font-black transition active:scale-95 cursor-pointer flex items-center justify-center gap-1 shadow-sm">
+            <i data-lucide="x" class="w-4 h-4"></i>
+            <span>Decline</span>
+          </button>
+          <button type="button" onclick="acceptDriverRideCard('${rideId}')" class="col-span-2 py-3 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-slate-950 font-black rounded-2xl text-xs shadow-lg shadow-emerald-500/30 transition active:scale-95 flex items-center justify-center gap-2 cursor-pointer">
+            <i data-lucide="check-circle" class="w-4 h-4 stroke-[2.5]"></i>
+            <span>ACCEPT RIDE (₹${fare})</span>
+          </button>
+        </div>
+      </div>
+    `;
+  }
+
+  html += `
+      </div>
+    </div>
+  `;
+
+  content.innerHTML = html;
+  overlay.classList.remove('translate-y-full', 'opacity-0', 'pointer-events-none');
+  overlay.classList.add('translate-y-0', 'opacity-100');
+
+  // Trigger sound/vibrate once
+  if (typeof playNotificationSound === 'function' && validRides.length > 0) {
+    const topId = validRides[0].id || validRides[0].vehicle_number;
+    if (window._lastFloatingAlertReqId !== topId) {
+      window._lastFloatingAlertReqId = topId;
+      try { playNotificationSound(); } catch(e){}
+      if (typeof navigator !== 'undefined' && navigator.vibrate) {
+        try { navigator.vibrate([300, 150, 300]); } catch(e){}
+      }
+    }
+  }
+
+  if (window.lucide) lucide.createIcons();
+}
+window.renderFloatingDriverRidesSheet = renderFloatingDriverRidesSheet;
+
 // Direct HTML Container & Vanilla JS Render (Bypassing all React lifecycle/state-sync)
 function renderLiveDriverRidesDOM(rides) {
   const container = document.getElementById('live-driver-rides-container') || document.getElementById('driverPassengerRequestSection');
@@ -2252,7 +2422,8 @@ function setActiveRides(data) {
     }
   }
 
-  // Force UI Re-render immediately via direct DOM injection fallback
+  // Force UI Re-render immediately via direct DOM injection fallback & Floating Bottom Sheet
+  renderFloatingDriverRidesSheet(normalized);
   renderLiveDriverRidesDOM(normalized);
 }
 window.setActiveRides = setActiveRides;
@@ -2260,7 +2431,9 @@ window.updateDriverActiveRides = setActiveRides;
 
 // Render Driver Incoming Request Alias
 function renderDriverIncomingRequest() {
-  renderLiveDriverRidesDOM(state.activeRides || state.activeSearchingRides || []);
+  const rides = state.activeRides || state.activeSearchingRides || [];
+  renderFloatingDriverRidesSheet(rides);
+  renderLiveDriverRidesDOM(rides);
 }
 window.renderDriverIncomingRequest = renderDriverIncomingRequest;
 
@@ -2307,6 +2480,8 @@ setInterval(async () => {
     }
 
     const liveList = Array.from(candMap.values());
+    renderFloatingDriverRidesSheet(liveList);
+    renderLiveDriverRidesDOM(liveList);
     if (liveList.length > 0 || (state.activeRides && state.activeRides.length > 0)) {
       setActiveRides(liveList);
     }
@@ -2317,6 +2492,12 @@ setInterval(async () => {
 async function acceptDriverRideCard(rideId) {
   if (typeof stopIncomingTimer === 'function') stopIncomingTimer();
   console.log('⚡ [RAPIDO DRIVER ACTION] Accepted ride request:', rideId);
+
+  const overlay = document.getElementById('driverFloatingRidesOverlay');
+  if (overlay) {
+    overlay.classList.add('translate-y-full', 'opacity-0', 'pointer-events-none');
+    overlay.classList.remove('translate-y-0', 'opacity-100');
+  }
 
   const target = (state.activeRides || state.activeSearchingRides || []).find(r => r.id === rideId);
   if (target) {
@@ -2332,6 +2513,8 @@ function rejectDriverRideCard(rideId) {
   if (rideId) state.declinedRequestIds.add(rideId);
 
   const updated = (state.activeRides || state.activeSearchingRides || []).filter(r => r.id !== rideId);
+  renderFloatingDriverRidesSheet(updated);
+  renderLiveDriverRidesDOM(updated);
   setActiveRides(updated);
 
   if (typeof closeModal === 'function') closeModal('driverIncomingRideModal');
@@ -2549,8 +2732,9 @@ async function driverCheckRidesAction() {
       return !isCompleted;
     });
 
-    console.log(`⚡ [CHECK RIDES] Passing ${activeRows.length} active rides directly into renderLiveDriverRidesDOM & setActiveRides!`);
+    console.log(`⚡ [CHECK RIDES] Passing ${activeRows.length} active rides directly into renderFloatingDriverRidesSheet, renderLiveDriverRidesDOM & setActiveRides!`);
     state.driverOnline = true;
+    renderFloatingDriverRidesSheet(activeRows);
     renderLiveDriverRidesDOM(activeRows);
     setActiveRides(activeRows);
 
