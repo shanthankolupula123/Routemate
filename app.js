@@ -2418,26 +2418,45 @@ function renderFloatingDriverRidesSheet(activeRides) {
   `;
 
   for (let i = 0; i < validRides.length; i++) {
-    const ride = validRides[i];
+    const rawRide = validRides[i];
+    let meta = {};
+    if (typeof rawRide.notes === 'string') {
+      try { meta = JSON.parse(rawRide.notes || '{}'); } catch(e){}
+    } else if (rawRide.notes && typeof rawRide.notes === 'object') {
+      meta = rawRide.notes;
+    }
+
+    // Explicit database property mapping with fallback (ride.pickup_location vs ride.pickup, ride.drop_location vs ride.drop, etc.)
+    const rideId = rawRide.vehicle_number || rawRide.id || meta.id || meta.requestId || 'REQ-RIDE';
+    const pickupLocation = rawRide.pickup_location || rawRide.pickup || rawRide.pickupLocation || meta.pickup_location || meta.pickup || 'Uppal Metro';
+    const dropLocation = rawRide.drop_location || rawRide.drop || rawRide.dropLocation || rawRide.destination || meta.drop_location || meta.drop || 'Jangaon Bus Depot';
+    const fare = Math.round(Number(rawRide.per_seat_price ?? rawRide.fare ?? rawRide.fuel_share ?? rawRide.price ?? meta.fare ?? meta.per_seat_price ?? 110) || 110);
+    const cleanDriverName = rawRide.driver_name ? String(rawRide.driver_name).replace(/\s*\([^)]*\)/g, '').trim() : '';
+    const riderName = meta.riderName || meta.rider_name || meta.name || rawRide.riderName || rawRide.rider_name || rawRide.name || cleanDriverName || 'Verified Commuter';
+    const avatarUrl = meta.riderAvatar || meta.rider_avatar || meta.avatar || rawRide.avatarUrl || rawRide.avatar || rawRide.rider_avatar || 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=120&h=120&q=80';
+    const riderRole = meta.riderRole || meta.rider_role || rawRide.riderRole || rawRide.rider_role || rawRide.driver_role || rawRide.role || 'Daily Commuter';
+    const rating = Number(rawRide.rating || meta.rating || 4.9).toFixed(1);
+    const dist = Math.round(Number(rawRide.distance || rawRide.distance_km || meta.distance || meta.distance_km || 84) || 84);
+    const payMethod = meta.paymentMethod || meta.payment_method || rawRide.paymentMethod || rawRide.payment_method || rawRide.payment_preference || 'Direct UPI';
 
     html += `
       <div class="${i > 0 ? 'pt-4' : ''}">
         <!-- Passenger Profile & Large Fare Badge -->
         <div class="flex items-center justify-between">
           <div class="flex items-center gap-3">
-            <img src="${ride.avatarUrl}" class="w-12 h-12 rounded-full object-cover border-2 border-emerald-400 shadow-md" onerror="this.src='https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=120&h=120&q=80'" />
+            <img src="${avatarUrl}" class="w-12 h-12 rounded-full object-cover border-2 border-emerald-400 shadow-md" onerror="this.src='https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=120&h=120&q=80'" />
             <div>
               <div class="flex items-center gap-1.5">
-                <h4 class="font-black text-white text-sm">${ride.riderName}</h4>
-                <span class="text-[10px] font-bold text-amber-300 bg-amber-400/20 px-1.5 py-0.5 rounded">★ ${ride.rating}</span>
+                <h4 class="font-black text-white text-sm">${riderName}</h4>
+                <span class="text-[10px] font-bold text-amber-300 bg-amber-400/20 px-1.5 py-0.5 rounded">★ ${rating}</span>
               </div>
-              <p class="text-[11px] text-slate-300 mt-0.5">${ride.riderRole} • Verified</p>
+              <p class="text-[11px] text-slate-300 mt-0.5">${riderRole} • Verified</p>
             </div>
           </div>
           <div class="text-right">
             <div class="flex items-baseline justify-end gap-0.5">
               <span class="text-xs font-bold text-emerald-400">₹</span>
-              <span class="text-3xl font-black text-emerald-400">${ride.fare}</span>
+              <span class="text-3xl font-black text-emerald-400">${fare}</span>
             </div>
             <span class="text-[9.5px] font-extrabold uppercase tracking-wider text-emerald-300 bg-emerald-950 border border-emerald-500/40 px-2 py-0.5 rounded-full">Fuel Split</span>
           </div>
@@ -2449,31 +2468,31 @@ function renderFloatingDriverRidesSheet(activeRides) {
             <span class="w-2.5 h-2.5 rounded-full bg-emerald-400 mt-1 flex-shrink-0"></span>
             <div>
               <p class="text-[9px] uppercase font-bold text-slate-400 tracking-wider">Pickup Point</p>
-              <p class="font-bold text-white text-xs">${ride.pickup}</p>
+              <p class="font-bold text-white text-xs">${pickupLocation}</p>
             </div>
           </div>
           <div class="flex items-start gap-2">
             <span class="w-2.5 h-2.5 rounded-full bg-blue-400 mt-1 flex-shrink-0"></span>
             <div>
               <p class="text-[9px] uppercase font-bold text-slate-400 tracking-wider">Destination</p>
-              <p class="font-bold text-white text-xs">${ride.drop} (${ride.distance} km)</p>
+              <p class="font-bold text-white text-xs">${dropLocation} (${dist} km)</p>
             </div>
           </div>
           <div class="pt-1.5 border-t border-slate-700/60 flex items-center justify-between text-[10.5px] text-slate-300">
             <span class="flex items-center gap-1 font-semibold text-emerald-300"><i data-lucide="clock" class="w-3 h-3"></i> Ready Now</span>
-            <span class="text-purple-300 bg-purple-950/80 border border-purple-500/40 font-bold px-2 py-0.5 rounded-full">${ride.paymentMethod}</span>
+            <span class="text-purple-300 bg-purple-950/80 border border-purple-500/40 font-bold px-2 py-0.5 rounded-full">${payMethod}</span>
           </div>
         </div>
 
         <!-- Action Buttons -->
         <div class="mt-3.5 grid grid-cols-3 gap-2">
-          <button type="button" onclick="rejectDriverRideCard('${ride.id}')" class="py-3 border border-slate-600 hover:border-red-400 hover:bg-red-950/40 text-slate-300 hover:text-red-300 rounded-2xl text-xs font-black transition active:scale-95 cursor-pointer flex items-center justify-center gap-1 shadow-sm">
+          <button type="button" onclick="rejectDriverRideCard('${rideId}')" class="py-3 border border-slate-600 hover:border-red-400 hover:bg-red-950/40 text-slate-300 hover:text-red-300 rounded-2xl text-xs font-black transition active:scale-95 cursor-pointer flex items-center justify-center gap-1 shadow-sm">
             <i data-lucide="x" class="w-4 h-4"></i>
             <span>Decline</span>
           </button>
-          <button type="button" onclick="acceptDriverRideCard('${ride.id}')" class="col-span-2 py-3 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-slate-950 font-black rounded-2xl text-xs shadow-lg shadow-emerald-500/30 transition active:scale-95 flex items-center justify-center gap-2 cursor-pointer">
+          <button type="button" onclick="acceptDriverRideCard('${rideId}')" class="col-span-2 py-3 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-slate-950 font-black rounded-2xl text-xs shadow-lg shadow-emerald-500/30 transition active:scale-95 flex items-center justify-center gap-2 cursor-pointer">
             <i data-lucide="check-circle" class="w-4 h-4 stroke-[2.5]"></i>
-            <span>ACCEPT RIDE (₹${ride.fare})</span>
+            <span>ACCEPT RIDE (₹${fare})</span>
           </button>
         </div>
       </div>
@@ -2576,9 +2595,51 @@ function renderLiveDriverRidesDOM(rides) {
     return;
   }
 
-  // Construct HTML string directly for every ride card using the normalized database keys
-  const htmlString = list.map(ride => `
-    <div class="ride-card interactive-card bg-white rounded-3xl p-5 border-2 border-blue-500 shadow-xl relative overflow-hidden animate-in fade-in duration-200 mb-3" data-ride-id="${ride.id}">
+  // Construct HTML string directly for every ride card using the explicit database keys
+  const htmlString = list.map(rawRide => {
+    // 1. Parse meta notes if stringified JSON
+    let meta = {};
+    if (typeof rawRide.notes === 'string') {
+      try { meta = JSON.parse(rawRide.notes || '{}'); } catch(e){}
+    } else if (rawRide.notes && typeof rawRide.notes === 'object') {
+      meta = rawRide.notes;
+    }
+
+    // 2. Database column mappings
+    const rideId = rawRide.vehicle_number || rawRide.id || meta.id || meta.requestId || 'REQ-RIDE';
+
+    // Pickup: explicit fallback between rawRide.pickup_location and rawRide.pickup (and meta)
+    const pickupLocation = rawRide.pickup_location || rawRide.pickup || rawRide.pickupLocation || meta.pickup_location || meta.pickup || 'Uppal Metro';
+
+    // Drop: explicit fallback between rawRide.drop_location and rawRide.drop (and meta)
+    const dropLocation = rawRide.drop_location || rawRide.drop || rawRide.dropLocation || rawRide.destination || meta.drop_location || meta.drop || 'Jangaon Bus Depot';
+
+    // Fare / Fuel Share: explicit fallback between rawRide.per_seat_price, rawRide.fare, rawRide.fuel_share (and meta)
+    const rawFare = rawRide.per_seat_price ?? rawRide.fare ?? rawRide.fuel_share ?? rawRide.price ?? meta.fare ?? meta.per_seat_price ?? 110;
+    const fare = Math.round(Number(rawFare) || 110);
+
+    // Rider Name: explicit fallback between meta.riderName, rawRide.riderName, rawRide.rider_name, and raw rawRide.driver_name
+    const cleanDriverName = rawRide.driver_name ? String(rawRide.driver_name).replace(/\s*\([^)]*\)/g, '').trim() : '';
+    const riderName = meta.riderName || meta.rider_name || meta.name || rawRide.riderName || rawRide.rider_name || rawRide.name || cleanDriverName || 'Verified Commuter';
+
+    // Avatar
+    const avatarUrl = meta.riderAvatar || meta.rider_avatar || meta.avatar || rawRide.avatarUrl || rawRide.avatar || rawRide.rider_avatar || 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=120&h=120&q=80';
+
+    // Role
+    const riderRole = meta.riderRole || meta.rider_role || rawRide.riderRole || rawRide.rider_role || rawRide.driver_role || rawRide.role || 'Daily Commuter';
+
+    // Rating
+    const rating = Number(rawRide.rating || meta.rating || 4.9).toFixed(1);
+
+    // Distance
+    let dist = rawRide.distance || rawRide.distance_km || meta.distance || meta.distance_km || 84;
+    dist = Math.round(Number(dist) || 84);
+
+    // Payment Method
+    const payMethod = meta.paymentMethod || meta.payment_method || rawRide.paymentMethod || rawRide.payment_method || rawRide.payment_preference || 'Direct UPI';
+
+    return `
+    <div class="ride-card interactive-card bg-white rounded-3xl p-5 border-2 border-blue-500 shadow-xl relative overflow-hidden animate-in fade-in duration-200 mb-3" data-ride-id="${rideId}">
       <!-- Card Header Banner -->
       <div class="flex items-center justify-between pb-3 border-b border-slate-100">
         <div class="flex items-center gap-2">
@@ -2586,7 +2647,7 @@ function renderLiveDriverRidesDOM(rides) {
           <span class="text-xs font-black text-blue-800 uppercase tracking-wider">Live Commuter Request</span>
         </div>
         <div class="flex items-center gap-1.5">
-          <span class="text-[10px] font-mono font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md">${ride.id}</span>
+          <span class="text-[10px] font-mono font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md">${rideId}</span>
           <span class="text-[10px] font-mono font-black text-amber-700 bg-amber-100 border border-amber-300 px-2.5 py-0.5 rounded-full flex items-center gap-1 shadow-xs">
             <i data-lucide="zap" class="w-3 h-3 text-amber-600"></i>
             <span>Instant Match</span>
@@ -2597,20 +2658,20 @@ function renderLiveDriverRidesDOM(rides) {
       <!-- Passenger Profile & Large Fare Split Badge -->
       <div class="mt-4 flex items-center justify-between">
         <div class="flex items-center gap-3">
-          <img src="${ride.avatarUrl}" alt="${ride.riderName}" class="w-12 h-12 rounded-full object-cover border-2 border-blue-600 shadow-sm" onerror="this.src='https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=120&h=120&q=80'" />
+          <img src="${avatarUrl}" alt="${riderName}" class="w-12 h-12 rounded-full object-cover border-2 border-blue-600 shadow-sm" onerror="this.src='https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=120&h=120&q=80'" />
           <div>
             <div class="flex items-center gap-1.5">
-              <h4 class="font-extrabold text-slate-900 text-sm">${ride.riderName}</h4>
-              <span class="text-[11px] font-bold text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded">★ ${ride.rating}</span>
+              <h4 class="font-extrabold text-slate-900 text-sm">${riderName}</h4>
+              <span class="text-[11px] font-bold text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded">★ ${rating}</span>
             </div>
-            <p class="text-[11px] text-slate-500 mt-0.5">${ride.riderRole} • Verified</p>
+            <p class="text-[11px] text-slate-500 mt-0.5">${riderRole} • Verified</p>
           </div>
         </div>
 
         <div class="text-right">
           <div class="flex items-baseline justify-end gap-0.5">
             <span class="text-xs font-bold text-slate-400">₹</span>
-            <span class="text-3xl font-black text-blue-700">${ride.fare}</span>
+            <span class="text-3xl font-black text-blue-700">${fare}</span>
           </div>
           <span class="text-[10px] font-extrabold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full uppercase tracking-wider">Fuel Split</span>
         </div>
@@ -2622,35 +2683,36 @@ function renderLiveDriverRidesDOM(rides) {
           <span class="w-2.5 h-2.5 rounded-full bg-emerald-500 mt-1 flex-shrink-0"></span>
           <div class="min-w-0 flex-1">
             <p class="text-[9.5px] text-slate-400 font-bold uppercase tracking-wider">Pickup Point</p>
-            <p class="font-extrabold text-slate-900 text-xs leading-snug break-words">${ride.pickup}</p>
+            <p class="font-extrabold text-slate-900 text-xs leading-snug break-words">${pickupLocation}</p>
           </div>
         </div>
         <div class="flex items-start gap-2.5">
           <span class="w-2.5 h-2.5 rounded-full bg-blue-600 mt-1 flex-shrink-0"></span>
           <div class="min-w-0 flex-1">
             <p class="text-[9.5px] text-slate-400 font-bold uppercase tracking-wider">Destination</p>
-            <p class="font-extrabold text-slate-900 text-xs leading-snug break-words">${ride.drop} <span class="text-blue-600 font-bold">(${ride.distance} km)</span></p>
+            <p class="font-extrabold text-slate-900 text-xs leading-snug break-words">${dropLocation} <span class="text-blue-600 font-bold">(${dist} km)</span></p>
           </div>
         </div>
         <div class="pt-2 border-t border-slate-200/70 flex items-center justify-between text-[11px] text-slate-600 font-medium">
           <span class="flex items-center gap-1 text-slate-700 font-semibold"><i data-lucide="clock" class="w-3.5 h-3.5 text-blue-600"></i> Ready in 5 mins</span>
-          <span class="text-purple-800 bg-purple-100 font-bold border border-purple-200 px-2.5 py-0.5 rounded-full">${ride.paymentMethod}</span>
+          <span class="text-purple-800 bg-purple-100 font-bold border border-purple-200 px-2.5 py-0.5 rounded-full">${payMethod}</span>
         </div>
       </div>
 
       <!-- Interactive Action Buttons (Rapido Style) -->
       <div class="mt-4 grid grid-cols-3 gap-2.5">
-        <button type="button" onclick="rejectDriverRideCard('${ride.id}')" class="py-3.5 border-2 border-slate-200 hover:border-red-300 hover:bg-red-50 text-slate-600 hover:text-red-600 rounded-2xl text-xs font-black transition active:scale-95 cursor-pointer flex items-center justify-center gap-1.5 shadow-xs">
+        <button type="button" onclick="rejectDriverRideCard('${rideId}')" class="py-3.5 border-2 border-slate-200 hover:border-red-300 hover:bg-red-50 text-slate-600 hover:text-red-600 rounded-2xl text-xs font-black transition active:scale-95 cursor-pointer flex items-center justify-center gap-1.5 shadow-xs">
           <i data-lucide="x" class="w-4 h-4"></i>
           <span>Reject</span>
         </button>
-        <button type="button" onclick="acceptDriverRideCard('${ride.id}')" class="col-span-2 py-3.5 bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 hover:from-emerald-700 hover:to-teal-800 text-white rounded-2xl text-xs font-black shadow-lg shadow-emerald-600/30 active:scale-95 transition-all flex items-center justify-center gap-2 cursor-pointer">
+        <button type="button" onclick="acceptDriverRideCard('${rideId}')" class="col-span-2 py-3.5 bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 hover:from-emerald-700 hover:to-teal-800 text-white rounded-2xl text-xs font-black shadow-lg shadow-emerald-600/30 active:scale-95 transition-all flex items-center justify-center gap-2 cursor-pointer">
           <i data-lucide="check-circle" class="w-4 h-4 stroke-[2.5]"></i>
-          <span>ACCEPT RIDE (₹${ride.fare})</span>
+          <span>ACCEPT RIDE (₹${fare})</span>
         </button>
       </div>
     </div>
-  `).join('');
+    `;
+  }).join('');
 
   // Directly inject using document.getElementById('live-driver-rides-container').innerHTML = htmlString
   const targetEl = document.getElementById('live-driver-rides-container') || container;
@@ -2674,10 +2736,10 @@ window.renderActiveRidesList = renderActiveRidesList;
 
 // React useState Equivalent Hook: Direct State Setter
 function setActiveRides(data) {
-  const rawList = Array.isArray(data) ? data : (data ? [data] : []);
+  const rawList = Array.isArray(data) ? [...data] : (data ? [data] : []);
   console.log('🔄 [setActiveRides] Setting active rides in UI state:', rawList.length, 'candidates');
 
-  const normalized = rawList
+  const normalized = [...rawList]
     .filter(item => {
       if (!item) return false;
       let meta = {};
@@ -2693,24 +2755,26 @@ function setActiveRides(data) {
     .map(extractRideCardData)
     .filter(Boolean);
 
-  state.activeRides = normalized;
-  state.activeSearchingRides = normalized;
-  if (normalized.length > 0) {
-    state.incomingRequest = normalized[0];
+  // Fresh array copy to force React-like state updates and trigger re-renders
+  const freshList = [...normalized];
+  state.activeRides = freshList;
+  state.activeSearchingRides = freshList;
+  if (freshList.length > 0) {
+    state.incomingRequest = freshList[0];
   }
 
   if (typeof window !== 'undefined') {
-    window.activeRides = normalized;
+    window.activeRides = [...freshList];
     if (window.state) {
-      window.state.activeRides = normalized;
-      window.state.activeSearchingRides = normalized;
-      if (normalized.length > 0) window.state.incomingRequest = normalized[0];
+      window.state.activeRides = [...freshList];
+      window.state.activeSearchingRides = [...freshList];
+      if (freshList.length > 0) window.state.incomingRequest = freshList[0];
     }
   }
 
-  // Force UI Re-render immediately via direct DOM injection fallback & Floating Bottom Sheet
-  renderFloatingDriverRidesSheet(normalized);
-  renderLiveDriverRidesDOM(normalized);
+  // Force UI Re-render immediately via fresh array copies
+  renderFloatingDriverRidesSheet([...freshList]);
+  renderLiveDriverRidesDOM([...freshList]);
 }
 window.setActiveRides = setActiveRides;
 window.updateDriverActiveRides = setActiveRides;
@@ -2718,8 +2782,8 @@ window.updateDriverActiveRides = setActiveRides;
 // Render Driver Incoming Request Alias
 function renderDriverIncomingRequest() {
   const rides = state.activeRides || state.activeSearchingRides || [];
-  renderFloatingDriverRidesSheet(rides);
-  renderLiveDriverRidesDOM(rides);
+  renderFloatingDriverRidesSheet([...rides]);
+  renderLiveDriverRidesDOM([...rides]);
 }
 window.renderDriverIncomingRequest = renderDriverIncomingRequest;
 
@@ -2744,10 +2808,11 @@ setInterval(async () => {
     } catch(e) {}
 
     // 2. Direct Supabase REST fetch
-    if (typeof supabaseRest === 'function') {
+    const restFn = (typeof supabaseRest === 'function') ? supabaseRest : (typeof window !== 'undefined' && typeof window.supabaseRest === 'function' ? window.supabaseRest : null);
+    if (restFn) {
       try {
         const recentCutoff = new Date(Date.now() - 3600000).toISOString();
-        const res = await supabaseRest(`rides?select=*&status=neq.cancelled&created_at=gte.${recentCutoff}&order=created_at.desc&limit=15`);
+        const res = await restFn(`rides?select=*&status=neq.cancelled&created_at=gte.${recentCutoff}&order=created_at.desc&limit=15`);
         if (res && res.ok && Array.isArray(res.data)) {
           res.data.forEach(candidate => {
             if (!candidate) return;
@@ -2767,10 +2832,10 @@ setInterval(async () => {
     }
 
     const liveList = Array.from(candMap.values());
-    if (liveList.length > 0 || (state.activeRides && state.activeRides.length > 0)) {
-      renderFloatingDriverRidesSheet(liveList);
-      renderLiveDriverRidesDOM(liveList);
-      setActiveRides(liveList);
+    if (liveList.length > 0) {
+      setActiveRides([...liveList]);
+      renderFloatingDriverRidesSheet([...liveList]);
+      renderLiveDriverRidesDOM([...liveList]);
     }
   } catch(e) {}
 }, 2000);
@@ -3024,11 +3089,11 @@ async function driverCheckRidesAction() {
       .map(extractRideCardData)
       .filter(Boolean);
 
-    console.log(`⚡ [CHECK RIDES] Passing ${activeRows.length} active rides directly into renderFloatingDriverRidesSheet, renderLiveDriverRidesDOM & setActiveRides!`);
+    console.log(`⚡ [CHECK RIDES] Passing fresh array copy of ${activeRows.length} active rides directly into setActiveRides([...activeRows]) to force state re-render!`);
     state.driverOnline = true;
-    renderFloatingDriverRidesSheet(activeRows);
-    renderLiveDriverRidesDOM(activeRows);
-    setActiveRides(activeRows);
+    setActiveRides([...activeRows]);
+    renderFloatingDriverRidesSheet([...activeRows]);
+    renderLiveDriverRidesDOM([...activeRows]);
 
     let summary = `Query Reached Supabase Database Successfully!\nFound ${rows.length} total ride(s) in 'rides' table (${activeRows.length} active commuter requests ready for match)!\n`;
     summary += `Response Time: ${elapsed}ms\n\n`;

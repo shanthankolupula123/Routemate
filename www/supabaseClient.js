@@ -2783,17 +2783,18 @@ const db = {
           }
         }
 
-        // Directly bind to UI DOM container and Floating Bottom Sheet
+        // Directly bind to UI DOM container and Floating Bottom Sheet with fresh array copies
+        const freshRides = [...allActiveRides];
+        if (typeof window !== 'undefined' && typeof window.setActiveRides === 'function') {
+          try { window.setActiveRides([...freshRides]); } catch (e) {}
+        } else if (typeof window !== 'undefined' && typeof window.updateDriverActiveRides === 'function') {
+          try { window.updateDriverActiveRides([...freshRides]); } catch (e) {}
+        }
         if (typeof window !== 'undefined' && typeof window.renderFloatingDriverRidesSheet === 'function') {
-          try { window.renderFloatingDriverRidesSheet(allActiveRides); } catch (e) {}
+          try { window.renderFloatingDriverRidesSheet([...freshRides]); } catch (e) {}
         }
         if (typeof window !== 'undefined' && typeof window.renderLiveDriverRidesDOM === 'function') {
-          try { window.renderLiveDriverRidesDOM(allActiveRides); } catch (e) {}
-        }
-        if (typeof window !== 'undefined' && typeof window.setActiveRides === 'function') {
-          try { window.setActiveRides(allActiveRides); } catch (e) {}
-        } else if (typeof window !== 'undefined' && typeof window.updateDriverActiveRides === 'function') {
-          try { window.updateDriverActiveRides(allActiveRides); } catch (e) {}
+          try { window.renderLiveDriverRidesDOM([...freshRides]); } catch (e) {}
         } else if (typeof renderDriverIncomingRequest === 'function') {
           try { renderDriverIncomingRequest(); } catch (e) {}
         }
