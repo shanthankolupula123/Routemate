@@ -2364,17 +2364,28 @@ async function requestRideAction() {
   updateActiveRideBanner();
   playNotificationSound();
 
+  console.log('🚀 [RIDER BOOKING] === "Book a Ride" Clicked ===');
+  console.log('👤 [RIDER BOOKING] User Profile:', state.currentUser);
+  console.log('📍 [RIDER BOOKING] Route:', `${pickup} ➔ ${drop} (${state.distance} km)`);
+  console.log('💰 [RIDER BOOKING] Fare: ₹' + fare, '| Vehicle Type:', state.vehicleType, '| Flexible:', isFlexible);
+  console.log('📦 [RIDER BOOKING] Full Outgoing Payload:', reqPayload);
+  console.log('🆔 [RIDER BOOKING] Request ID:', requestId, '| PIN:', pin);
+
   showToast(`📡 Radar activated! Broadcasting on ${pickup} ➔ ${drop} (₹${fare})`, 'info');
 
   try {
     let res = null;
     if (window.db && window.db.matching && typeof window.db.matching.createRequest === 'function') {
+      console.log('📡 [RIDER BOOKING] Invoking window.db.matching.createRequest()...');
       res = await window.db.matching.createRequest({ ...reqPayload, pin, id: requestId });
+      console.log('📦 [RIDER BOOKING] createRequest returned:', res);
+    } else {
+      console.warn('⚠️ [RIDER BOOKING] window.db.matching.createRequest not found on window.db!');
     }
 
     // Direct PostgREST insertion fallback: guarantees row is written to Supabase even if window.db had any initialization issue
     if (!res || !res.request) {
-      console.log('⚡ Performing direct Supabase REST fallback insert for ride:', requestId);
+      console.log('⚡ [RIDER BOOKING] Performing direct Supabase REST fallback insert for ride:', requestId);
       const dbVehicleType = (state.vehicleType === 'car') ? 'car' : 'bike';
       const dbRow = {
         driver_name: `${reqPayload.riderName} (Rider Request)`,
@@ -2414,6 +2425,8 @@ async function requestRideAction() {
       };
 
       try {
+        const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+        const toId = controller ? setTimeout(() => controller.abort(), 4000) : null;
         const restResp = await fetch('https://hjieeilzfbvubkhmlmdg.supabase.co/rest/v1/rides', {
           method: 'POST',
           headers: {
@@ -2422,15 +2435,21 @@ async function requestRideAction() {
             'Content-Type': 'application/json',
             'Prefer': 'return=representation'
           },
-          body: JSON.stringify(dbRow)
-        });
+          body: JSON.stringify(dbRow),
+          signal: controller ? controller.signal : undefined
+        }).finally(() => { if (toId) clearTimeout(toId); });
+
+        console.log('💾 [RIDER BOOKING] Direct REST fetch status:', restResp.status, restResp.statusText);
         if (restResp.ok) {
           const rowData = await restResp.json();
-          console.log('✅ Direct REST insert successful:', rowData);
+          console.log('✅ [RIDER BOOKING] Direct REST insert successful data:', rowData);
           res = { success: true, request: initialReq };
+        } else {
+          const errText = await restResp.text().catch(() => '');
+          console.warn('⚠️ [RIDER BOOKING] Direct REST insert non-200 response:', restResp.status, errText);
         }
       } catch (fErr) {
-        console.warn('Direct REST fetch error:', fErr);
+        console.warn('⚠️ [RIDER BOOKING] Direct REST fetch error:', fErr);
       }
     }
 
@@ -2439,11 +2458,15 @@ async function requestRideAction() {
       renderLiveTrackingStage(res.request, 'rider');
       renderRiderSearchingCard();
       updateActiveRideBanner();
-      showToast(`✅ Broadcast Live in Supabase Cloud! Waiting for driver...`, 'success');
+      console.log('🎉 [RIDER BOOKING] Ride successfully active and broadcasting:', state.currentActiveRide);
+      showToast(`✅ Broadcast Live! Waiting for nearby drivers...`, 'success');
+    } else {
+      console.warn('⚠️ [RIDER BOOKING] Fallback to initialReq for instant local broadcast:', initialReq);
+      state.currentActiveRide = initialReq;
     }
   } catch (e) {
-    console.error('Ride request broadcast error:', e);
-    showToast(`⚠️ Cloud Broadcast Warning: ${e.message}`, 'warning');
+    console.error('❌ [RIDER BOOKING] Ride request broadcast fatal error:', e);
+    showToast(`⚠️ Broadcast Warning: ${e.message}`, 'warning');
   }
 }
 
@@ -2497,16 +2520,18 @@ function handleRealtimeMatchingEvent(event, request) {
 
   // Skip only if driver explicitly declined this specific request ID in this session
   if (request && state.declinedRequestIds && state.declinedRequestIds.has(request.id)) {
+    console.log('⏭️ [Realtime Matching Event] Skipping explicitly declined request ID:', request.id);
     return;
   }
 
   // --- EVENT 1: New Ride Request Broadcasted ---
-  if ((event === 'new_ride_request' || event === 'searching') && request) {
+  if ((event === 'new_ride_request' || event === 'searching' || event === 'active') && request) {
     const isDriverActive = Boolean(
       state.driverOnline || 
       state.mode === 'driver' ||
       (typeof document !== 'undefined' && document.getElementById('driverModeView') && !document.getElementById('driverModeView').classList.contains('hidden'))
     );
+    console.log('🔔 [DRIVER EVENT EVALUATION] Is Driver Active?', isDriverActive, '| State Mode:', state.mode, '| Request ID:', request.id);
 
     // If driver is active/online, display incoming ride card & popup immediately without corridor/vehicle restrictions
     if (isDriverActive) {
@@ -2533,6 +2558,7 @@ function handleRealtimeMatchingEvent(event, request) {
         rawRequest: request
       };
 
+      console.log('🎉 [DRIVER NOTIFICATION] Popping incoming modal and rendering in-page card:', state.incomingRequest.id);
       openDriverIncomingModal(state.incomingRequest);
       renderDriverIncomingRequest();
       playNotificationSound();

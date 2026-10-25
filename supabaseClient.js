@@ -2501,6 +2501,7 @@ const db = {
 
       try {
         let incomingReq = null;
+        console.log('🔍 [DRIVER POLLING LOOP] Checking searching rides... (Driver Mode:', appState?.mode, '| Online:', appState?.driverOnline, ')');
 
         // =========================================================================
         // SOURCE 1: DIRECT LOCAL STORAGE BRIDGE (0ms instant cross-window sync)
@@ -2510,21 +2511,16 @@ const db = {
           const cachedStr = localStorage.getItem('routemate_active_ride_request');
           if (cachedStr) {
             const cReq = JSON.parse(cachedStr);
-            if (cReq && (cReq.status === 'searching' || cReq.status === 'active')) {
-              const reqId = cReq.id;
-              const isDeclined = appState && appState.declinedRequestIds && appState.declinedRequestIds.has(reqId);
-              const isThisTabTheActiveRider = Boolean(
-                appState && appState.mode !== 'driver' &&
-                appState.activeRideRole === 'rider' &&
-                appState.currentActiveRide &&
-                (appState.currentActiveRide.id === reqId)
-              );
-              if (!isDeclined && !isThisTabTheActiveRider) {
-                incomingReq = cReq;
-              }
+            console.log('📦 [DRIVER POLLING] Source 1 (LocalStorage) raw data:', cReq);
+            // BYPASS ALL STATUS CONSTRAINTS: Allow searching, active, or any non-completed request
+            if (cReq && cReq.status !== 'completed' && cReq.status !== 'cancelled') {
+              console.log('✅ [DRIVER POLLING] Source 1 accepted candidate:', cReq.id);
+              incomingReq = cReq;
             }
           }
-        } catch (e) {}
+        } catch (e) {
+          console.warn('⚠️ [DRIVER POLLING] Source 1 LocalStorage error:', e);
+        }
 
         // =========================================================================
         // SOURCE 2: DIRECT SERVERLESS STORAGE BRIDGE (/api/ride-requests on Vercel)
@@ -2532,53 +2528,52 @@ const db = {
         // =========================================================================
         if (!incomingReq) {
           try {
-            const apiRes = await fetch(this._getApiUrl('/api/ride-requests'), { cache: 'no-store' });
+            const bridgeUrl = this._getApiUrl('/api/ride-requests');
+            const apiRes = await fetch(bridgeUrl, { cache: 'no-store' });
+            console.log('🌐 [DRIVER POLLING] Source 2 fetch status:', apiRes.status, apiRes.statusText);
             if (apiRes.ok) {
               const apiData = await apiRes.json();
+              console.log('🌐 [DRIVER POLLING] Source 2 activeRequest data:', apiData?.activeRequest);
               if (apiData && apiData.activeRequest) {
                 const sReq = apiData.activeRequest;
-                if (sReq && (sReq.status === 'searching' || sReq.status === 'active')) {
-                  const reqId = sReq.id;
-                  const isDeclined = appState && appState.declinedRequestIds && appState.declinedRequestIds.has(reqId);
-                  const isThisTabTheActiveRider = Boolean(
-                    appState && appState.mode !== 'driver' &&
-                    appState.activeRideRole === 'rider' &&
-                    appState.currentActiveRide &&
-                    (appState.currentActiveRide.id === reqId)
-                  );
-                  if (!isDeclined && !isThisTabTheActiveRider) {
-                    incomingReq = {
-                      id: sReq.id || ('REQ-' + Date.now()),
-                      rider_id: sReq.rider_id || sReq.riderId,
-                      name: sReq.rider_name || sReq.name || 'Verified Commuter',
-                      rider_name: sReq.rider_name || sReq.name || 'Verified Commuter',
-                      phone: sReq.rider_phone || sReq.phone || '+91 98480 23145',
-                      rider_phone: sReq.rider_phone || sReq.phone || '+91 98480 23145',
-                      avatar: sReq.rider_avatar || sReq.avatar || 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=120&h=120&q=80',
-                      rider_avatar: sReq.rider_avatar || sReq.avatar || 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=120&h=120&q=80',
-                      role: sReq.rider_role || sReq.role || 'Daily Commuter',
-                      pickup: sReq.pickup || 'Pickup Location',
-                      drop: sReq.drop || sReq.drop_location || 'Destination',
-                      drop_location: sReq.drop_location || sReq.drop || 'Destination',
-                      seats: sReq.seats || 1,
-                      seatCount: sReq.seats || 1,
-                      fare: sReq.fare || sReq.fareOffer || 110,
-                      fareOffer: sReq.fare || sReq.fareOffer || 110,
-                      distance: sReq.distance || sReq.distance_km || 84,
-                      distance_km: sReq.distance || sReq.distance_km || 84,
-                      pin: sReq.pin || '4821',
-                      vehicle_type: sReq.vehicle_type || sReq.vehicleType || 'any',
-                      vehicleType: sReq.vehicle_type || sReq.vehicleType || 'any',
-                      isFlexible: true,
-                      payment_method: sReq.payment_method || 'Direct UPI',
-                      status: 'searching',
-                      created_at: sReq.created_at || sReq.createdAt || new Date().toISOString()
-                    };
-                  }
+                // BYPASS ALL STATUS CONSTRAINTS: Accept any request not completed/cancelled
+                if (sReq && sReq.status !== 'completed' && sReq.status !== 'cancelled') {
+                  console.log('✅ [DRIVER POLLING] Source 2 accepted candidate:', sReq.id);
+                  incomingReq = {
+                    id: sReq.id || ('REQ-' + Date.now()),
+                    rider_id: sReq.rider_id || sReq.riderId,
+                    name: sReq.rider_name || sReq.name || 'Verified Commuter',
+                    rider_name: sReq.rider_name || sReq.name || 'Verified Commuter',
+                    phone: sReq.rider_phone || sReq.phone || '+91 98480 23145',
+                    rider_phone: sReq.rider_phone || sReq.phone || '+91 98480 23145',
+                    avatar: sReq.rider_avatar || sReq.avatar || 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=120&h=120&q=80',
+                    rider_avatar: sReq.rider_avatar || sReq.avatar || 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=120&h=120&q=80',
+                    role: sReq.rider_role || sReq.role || 'Daily Commuter',
+                    pickup: sReq.pickup || 'Pickup Location',
+                    drop: sReq.drop || sReq.drop_location || 'Destination',
+                    drop_location: sReq.drop_location || sReq.drop || 'Destination',
+                    seats: sReq.seats || 1,
+                    seatCount: sReq.seats || 1,
+                    fare: sReq.fare || sReq.fareOffer || 110,
+                    fareOffer: sReq.fare || sReq.fareOffer || 110,
+                    distance: sReq.distance || sReq.distance_km || 84,
+                    distance_km: sReq.distance || sReq.distance_km || 84,
+                    pin: sReq.pin || '4821',
+                    vehicle_type: sReq.vehicle_type || sReq.vehicleType || 'any',
+                    vehicleType: sReq.vehicle_type || sReq.vehicleType || 'any',
+                    isFlexible: true,
+                    payment_method: sReq.payment_method || 'Direct UPI',
+                    status: 'searching',
+                    created_at: sReq.created_at || sReq.createdAt || new Date().toISOString()
+                  };
                 }
               }
+            } else {
+              console.warn('⚠️ [DRIVER POLLING] Source 2 non-200 response:', apiRes.status);
             }
-          } catch (e) {}
+          } catch (e) {
+            console.warn('⚠️ [DRIVER POLLING] Source 2 fetch error:', e);
+          }
         }
 
         // =========================================================================
@@ -2587,57 +2582,50 @@ const db = {
         if (!incomingReq) {
           let rideRows = null;
           try {
-            const restRes = await supabaseRest('rides?select=*&status=in.(searching,active)&order=created_at.desc&limit=10');
+            const restRes = await supabaseRest('rides?select=*&status=neq.cancelled&order=created_at.desc&limit=15');
+            console.log('☁️ [DRIVER POLLING] Source 3 Supabase REST status:', restRes.status);
             if (restRes.ok && Array.isArray(restRes.data) && restRes.data.length > 0) {
               rideRows = restRes.data;
             }
-          } catch (e) {}
+          } catch (e) {
+            console.warn('⚠️ [DRIVER POLLING] Source 3 REST error:', e);
+          }
 
           if (!rideRows || rideRows.length === 0) {
             const client = getSupabaseClient();
             if (client) {
-              const { data } = await client
-                .from('rides')
-                .select('*')
-                .in('status', ['searching', 'active'])
-                .order('created_at', { ascending: false })
-                .limit(10);
-              if (data && data.length > 0) rideRows = data;
+              try {
+                const { data, error } = await client
+                  .from('rides')
+                  .select('*')
+                  .neq('status', 'cancelled')
+                  .order('created_at', { ascending: false })
+                  .limit(15);
+                if (data && data.length > 0) rideRows = data;
+                if (error) console.warn('⚠️ [DRIVER POLLING] Source 3 Client query error:', error);
+              } catch (cErr) {
+                console.warn('⚠️ [DRIVER POLLING] Source 3 Client exception:', cErr);
+              }
             }
           }
 
+          console.log('☁️ [DRIVER POLLING] Source 3 raw rows count:', rideRows ? rideRows.length : 0);
           if (rideRows && rideRows.length > 0) {
+            // BYPASS ALL STRICT FILTERS: Find any non-completed ride row
             const candidate = rideRows.find(r => {
               if (!r) return false;
               let meta = {};
               try { meta = JSON.parse(r.notes || '{}'); } catch (e) {}
 
-              const reqId = r.vehicle_number || r.id;
-              if (appState && appState.declinedRequestIds && appState.declinedRequestIds.has(reqId)) {
-                return false;
-              }
-
-              const isThisTabTheActiveRider = Boolean(
-                appState && appState.mode !== 'driver' &&
-                appState.activeRideRole === 'rider' &&
-                appState.currentActiveRide &&
-                (appState.currentActiveRide.id === reqId || appState.currentActiveRide.id === r.id)
-              );
-              if (isThisTabTheActiveRider) return false;
-
-              const isAlreadyAccepted = meta.status === 'driver_accepted' || meta.status === 'ride_started' || meta.status === 'ride_completed' || r.status === 'completed' || r.status === 'cancelled';
-              if (isAlreadyAccepted) return false;
-
-              const isSearching = r.status === 'searching' || meta.status === 'searching';
-              const isRiderReq = meta.isRequest === true ||
-                                 String(r.vehicle_number || '').startsWith('REQ-') ||
-                                 (r.driver_name && r.driver_name.includes('(Rider Request)'));
-              return isSearching || isRiderReq;
+              const isCompleted = r.status === 'completed' || r.status === 'cancelled' ||
+                                  meta.status === 'ride_completed' || meta.status === 'cancelled';
+              return !isCompleted;
             });
 
             if (candidate) {
               let meta = {};
               try { meta = JSON.parse(candidate.notes || '{}'); } catch(e){}
+              console.log('✅ [DRIVER POLLING] Source 3 accepted candidate row:', candidate.id, candidate.vehicle_number);
               incomingReq = {
                 id: candidate.vehicle_number || ('REQ-' + (candidate.id ? String(candidate.id).slice(0, 8) : Date.now())),
                 dbId: candidate.id,
@@ -2902,19 +2890,24 @@ const db = {
         created_at: new Date().toISOString()
       };
 
+      console.log('📡 [MATCHING ENGINE] createRequest initiated with payload:', reqData);
       // 1. Local & Inter-tab Broadcast
+      console.log('⚡ [MATCHING ENGINE] Emitting local & broadcast event new_ride_request:', request.id);
       this._emit('new_ride_request', request);
 
       // 2. Serverless Storage Bridge (Immediate cross-device sync)
       try {
+        const bridgeUrl = this._getApiUrl('/api/ride-requests');
+        console.log('🌐 [MATCHING ENGINE] POSTing to Serverless Bridge URL:', bridgeUrl, { action: 'create', id: request.id });
         const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
-        const timeoutId = controller ? setTimeout(() => controller.abort(), 2500) : null;
-        await fetch(this._getApiUrl('/api/ride-requests'), {
+        const timeoutId = controller ? setTimeout(() => controller.abort(), 3000) : null;
+        const bridgeResp = await fetch(bridgeUrl, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ action: 'create', ...request }),
           signal: controller ? controller.signal : undefined
-        }).catch(async () => {
+        }).catch(async (fetchErr) => {
+          console.warn('⚠️ [MATCHING ENGINE] Primary Serverless Bridge error, trying fallback /api/ride-requests/create:', fetchErr);
           return fetch(this._getApiUrl('/api/ride-requests/create'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -2923,8 +2916,13 @@ const db = {
         }).finally(() => {
           if (timeoutId) clearTimeout(timeoutId);
         });
+
+        if (bridgeResp) {
+          const bridgeData = await bridgeResp.json().catch(() => null);
+          console.log('🌐 [MATCHING ENGINE] Serverless Bridge response status:', bridgeResp.status, bridgeData);
+        }
       } catch (e) {
-        console.warn('Serverless bridge create notice:', e);
+        console.warn('⚠️ [MATCHING ENGINE] Serverless bridge create notice:', e);
       }
 
       // Prepare PostgreSQL DB Row for Supabase 'rides' table
