@@ -3,12 +3,12 @@
   "appName": "Routemate",
   "webDir": "www",
   "server": {
-    "androidScheme": "https",
-    "cleartext": false
+    "url": "https://www.routemate.pro",
+    "cleartext": true
   },
   "android": {
-    "allowMixedContent": false,
-    "webContentsDebuggingEnabled": false
+    "allowMixedContent": true,
+    "webContentsDebuggingEnabled": true
   },
   "plugins": {
     "StatusBar": {

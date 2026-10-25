@@ -812,6 +812,7 @@ function renderDriverModeView() {
   syncDriverCorridorInputs();
   renderDriverIncomingRequest();
   renderKycStatus();
+  updateDriverSessionBanner();
 
   // Attach real-time address autocomplete to driver corridor inputs
   if (typeof attachPlacesAutocomplete === 'function') {
@@ -843,6 +844,54 @@ function renderDriverModeView() {
     }, 200);
   }
 }
+
+// Quick 1-Tap Switch to Phone 2 Test Driver (Prevents same-account collision when testing across 2 phones)
+function switchToTestDriverSession() {
+  const testDriver = {
+    id: 'driver_phone2_9494285249',
+    phone: '+91 94942 85249',
+    email: 'driver.phone2@routemate.pro',
+    name: 'Ramesh (Verified Driver)',
+    gender: 'male',
+    role: 'Verified Corridor Driver',
+    rating: 4.95,
+    avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=120&h=120&q=80',
+    avatar_url: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=120&h=120&q=80',
+    is_verified: true,
+    is_kyc_verified: true,
+    kyc_status: 'verified_success',
+    profile_completed: true,
+    rc_number: 'TS 08 AB 9494',
+    rc_vehicle_name: 'Hero Splendor Plus',
+    authenticatedAt: new Date().toISOString()
+  };
+  state.currentUser = testDriver;
+  try {
+    localStorage.setItem('routemate_auth_user', JSON.stringify(testDriver));
+    sessionStorage.setItem('routemate_auth_user', JSON.stringify(testDriver));
+  } catch(e) {}
+  state.mode = 'driver';
+  state.driverOnline = true;
+  updateDriverSessionBanner();
+  showToast('✅ Phone 2 Driver session active: Ramesh (Verified). Ready to match rides!', 'success');
+  if (typeof driverCheckRidesAction === 'function') {
+    driverCheckRidesAction();
+  }
+}
+window.switchToTestDriverSession = switchToTestDriverSession;
+
+function updateDriverSessionBanner() {
+  const el = document.getElementById('driverActiveSessionUser');
+  if (el) {
+    const user = state.currentUser;
+    if (user) {
+      el.textContent = `${user.name || 'Driver'} (${user.phone || user.email || user.id})`;
+    } else {
+      el.textContent = 'Guest Driver (Unauthenticated)';
+    }
+  }
+}
+window.updateDriverSessionBanner = updateDriverSessionBanner;
 
 // Render KYC Restriction Barrier for Unverified Drivers
 function renderDriverKycBlockedState(user) {
