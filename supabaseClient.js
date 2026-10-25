@@ -59,6 +59,72 @@ function getGlobalState() {
   return null;
 }
 
+// Session Isolation & Self-Booked Ride Filter Helper
+function isSelfBookedRide(ride, user) {
+  if (!ride) return false;
+
+  const appState = getGlobalState();
+
+  // If this client is actively in rider mode with this exact active ride, it's a self-booked ride
+  if (appState && appState.activeRideRole === 'rider' && appState.currentActiveRide) {
+    const activeId = appState.currentActiveRide.id || appState.currentActiveRide.vehicle_number;
+    const thisId = ride.id || ride.vehicle_number;
+    if (activeId && thisId && String(activeId).trim() === String(thisId).trim()) {
+      return true;
+    }
+  }
+
+  let currentUser = user || appState?.currentUser;
+  if (!currentUser && typeof localStorage !== 'undefined') {
+    try {
+      const cached = JSON.parse(localStorage.getItem('routemate_auth_user') || 'null');
+      if (cached && (cached.id || cached.email || cached.phone)) {
+        currentUser = cached;
+      }
+    } catch(e) {}
+  }
+  if (!currentUser) return false;
+
+  let meta = {};
+  if (typeof ride.notes === 'string') {
+    try { meta = JSON.parse(ride.notes || '{}'); } catch(e){}
+  } else if (ride.notes && typeof ride.notes === 'object') {
+    meta = ride.notes;
+  }
+
+  const riderId = String(ride.rider_id || ride.riderId || meta.riderId || meta.rider_id || '').trim();
+  const riderEmail = String(ride.rider_email || ride.riderEmail || meta.riderEmail || meta.rider_email || meta.email || '').toLowerCase().trim();
+  const riderPhone = String(ride.rider_phone || ride.riderPhone || meta.riderPhone || meta.rider_phone || meta.phone || '').replace(/\D/g, '');
+
+  const driverId = String(currentUser.id || '').trim();
+  const driverEmail = String(currentUser.email || '').toLowerCase().trim();
+  const driverPhone = String(currentUser.phone || '').replace(/\D/g, '');
+
+  // 1. Exclude if rider ID matches driver user ID
+  if (driverId && riderId && driverId === riderId) {
+    return true;
+  }
+
+  // 2. Exclude if rider email matches driver email
+  if (driverEmail && riderEmail && driverEmail === riderEmail) {
+    return true;
+  }
+
+  // 3. Exclude if rider phone matches driver phone (last 10 digits)
+  if (driverPhone.length >= 10 && riderPhone.length >= 10) {
+    const dLast10 = driverPhone.slice(-10);
+    const rLast10 = riderPhone.slice(-10);
+    if (dLast10 === rLast10) {
+      return true;
+    }
+  }
+
+  return false;
+}
+if (typeof window !== 'undefined') {
+  window.isSelfBookedRide = isSelfBookedRide;
+}
+
 // ==========================================================
 // RESILIENT CONNECTION MANAGER & HEALTH MONITOR
 // Handles regional API degradations, auto-reconnects, and status notifications
@@ -2524,6 +2590,10 @@ const db = {
           if (!cand || !cand.id) return;
           if (seenIds.has(cand.id)) return;
           if (appState?.declinedRequestIds && appState.declinedRequestIds.has(cand.id)) return;
+          if (isSelfBookedRide(cand, appState?.currentUser)) {
+            console.log('🚫 [DRIVER LISTENER LOOP] Excluded self-booked ride:', cand.id);
+            return;
+          }
           seenIds.add(cand.id);
           allActiveRides.push(cand);
         }
@@ -2536,7 +2606,9 @@ const db = {
           if (cachedStr) {
             const cReq = JSON.parse(cachedStr);
             if (cReq && cReq.status !== 'completed' && cReq.status !== 'cancelled') {
-              addCandidate(cReq);
+              if (!isSelfBookedRide(cReq, appState?.currentUser)) {
+                addCandidate(cReq);
+              }
             }
           }
         } catch (e) {}
@@ -2552,33 +2624,36 @@ const db = {
             if (apiData && apiData.activeRequest) {
               const sReq = apiData.activeRequest;
               if (sReq && sReq.status !== 'completed' && sReq.status !== 'cancelled') {
-                addCandidate({
-                  id: sReq.id || ('REQ-' + Date.now()),
-                  rider_id: sReq.rider_id || sReq.riderId,
-                  name: sReq.rider_name || sReq.name || 'Verified Commuter',
-                  rider_name: sReq.rider_name || sReq.name || 'Verified Commuter',
-                  phone: sReq.rider_phone || sReq.phone || '+91 98480 23145',
-                  rider_phone: sReq.rider_phone || sReq.phone || '+91 98480 23145',
-                  avatar: sReq.rider_avatar || sReq.avatar || 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=120&h=120&q=80',
-                  rider_avatar: sReq.rider_avatar || sReq.avatar || 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=120&h=120&q=80',
-                  role: sReq.rider_role || sReq.role || 'Daily Commuter',
-                  pickup: sReq.pickup || 'Pickup Location',
-                  drop: sReq.drop || sReq.drop_location || 'Destination',
-                  drop_location: sReq.drop_location || sReq.drop || 'Destination',
-                  seats: sReq.seats || 1,
-                  seatCount: sReq.seats || 1,
-                  fare: sReq.fare || sReq.fareOffer || 110,
-                  fareOffer: sReq.fare || sReq.fareOffer || 110,
-                  distance: sReq.distance || sReq.distance_km || 84,
-                  distance_km: sReq.distance || sReq.distance_km || 84,
-                  pin: sReq.pin || '4821',
-                  vehicle_type: sReq.vehicle_type || sReq.vehicleType || 'any',
-                  vehicleType: sReq.vehicle_type || sReq.vehicleType || 'any',
-                  isFlexible: true,
-                  payment_method: sReq.payment_method || 'Direct UPI',
-                  status: 'searching',
-                  created_at: sReq.created_at || sReq.createdAt || new Date().toISOString()
-                });
+                if (!isSelfBookedRide(sReq, appState?.currentUser)) {
+                  addCandidate({
+                    id: sReq.id || ('REQ-' + Date.now()),
+                    rider_id: sReq.rider_id || sReq.riderId,
+                    rider_email: sReq.rider_email || sReq.riderEmail || '',
+                    name: sReq.rider_name || sReq.name || 'Verified Commuter',
+                    rider_name: sReq.rider_name || sReq.name || 'Verified Commuter',
+                    phone: sReq.rider_phone || sReq.phone || '+91 98480 23145',
+                    rider_phone: sReq.rider_phone || sReq.phone || '+91 98480 23145',
+                    avatar: sReq.rider_avatar || sReq.avatar || 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=120&h=120&q=80',
+                    rider_avatar: sReq.rider_avatar || sReq.avatar || 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=120&h=120&q=80',
+                    role: sReq.rider_role || sReq.role || 'Daily Commuter',
+                    pickup: sReq.pickup || 'Pickup Location',
+                    drop: sReq.drop || sReq.drop_location || 'Destination',
+                    drop_location: sReq.drop_location || sReq.drop || 'Destination',
+                    seats: sReq.seats || 1,
+                    seatCount: sReq.seats || 1,
+                    fare: sReq.fare || sReq.fareOffer || 110,
+                    fareOffer: sReq.fare || sReq.fareOffer || 110,
+                    distance: sReq.distance || sReq.distance_km || 84,
+                    distance_km: sReq.distance || sReq.distance_km || 84,
+                    pin: sReq.pin || '4821',
+                    vehicle_type: sReq.vehicle_type || sReq.vehicleType || 'any',
+                    vehicleType: sReq.vehicle_type || sReq.vehicleType || 'any',
+                    isFlexible: true,
+                    payment_method: sReq.payment_method || 'Direct UPI',
+                    status: 'searching',
+                    created_at: sReq.created_at || sReq.createdAt || new Date().toISOString()
+                  });
+                }
               }
             }
           }
@@ -2599,10 +2674,16 @@ const db = {
                                   meta.status === 'ride_completed' || meta.status === 'cancelled';
               if (isCompleted) return;
 
+              if (isSelfBookedRide(candidate, appState?.currentUser)) {
+                console.log('🚫 [DRIVER LISTENER LOOP] PostgREST excluded self-booked ride:', candidate.vehicle_number || candidate.id);
+                return;
+              }
+
               addCandidate({
                 id: candidate.vehicle_number || ('REQ-' + (candidate.id ? String(candidate.id).slice(0, 8) : Date.now())),
                 dbId: candidate.id,
                 rider_id: meta.riderId || candidate.driver_id || ('rider_' + Date.now()),
+                rider_email: meta.riderEmail || meta.rider_email || '',
                 name: meta.riderName || (candidate.driver_name ? candidate.driver_name.replace(' (Rider Request)', '') : 'Verified Commuter'),
                 rider_name: meta.riderName || (candidate.driver_name ? candidate.driver_name.replace(' (Rider Request)', '') : 'Verified Commuter'),
                 phone: meta.riderPhone || '+91 98480 23145',
@@ -2817,9 +2898,10 @@ const db = {
 
       const request = {
         id: requestId,
-        rider_id: reqData.riderId || ('rider_' + Date.now()),
-        rider_name: reqData.riderName || 'Verified Commuter',
-        rider_phone: reqData.riderPhone || '+91 98480 23145',
+        rider_id: reqData.riderId || reqData.rider_id || ('rider_' + Date.now()),
+        rider_email: reqData.riderEmail || reqData.rider_email || '',
+        rider_name: reqData.riderName || reqData.rider_name || 'Verified Commuter',
+        rider_phone: reqData.riderPhone || reqData.rider_phone || '+91 98480 23145',
         rider_avatar: reqData.riderAvatar || 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=120&h=120&q=80',
         rider_role: reqData.riderRole || 'Daily Commuter',
         rider_rating: reqData.riderRating || 4.9,
@@ -2907,6 +2989,7 @@ const db = {
           isRequest: true,
           status: 'searching',
           riderId: request.rider_id,
+          riderEmail: request.rider_email,
           riderName: request.rider_name,
           riderPhone: request.rider_phone,
           riderAvatar: request.rider_avatar,
@@ -3031,6 +3114,16 @@ const db = {
         };
       }
       this._activeRequest = current;
+
+      // Session Isolation Check: A user cannot accept their own booked ride
+      if (current && isSelfBookedRide(current, driverData)) {
+        console.warn('🚫 [MATCHING ENGINE] Blocked driver acceptance of self-booked ride:', current.id);
+        return {
+          success: false,
+          isSelfRide: true,
+          error: 'A user cannot accept their own booked ride.'
+        };
+      }
 
       if (current.status !== 'searching' && current.status !== 'driver_accepted') {
         return {

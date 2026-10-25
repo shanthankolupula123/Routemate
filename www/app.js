@@ -2014,6 +2014,77 @@ function getActiveTripCardHtml(activeTrip) {
 }
 
 // =========================================================================
+// SESSION ISOLATION & SELF-BOOKED RIDE FILTER HELPER
+// =========================================================================
+function isSelfBookedRide(ride, user) {
+  if (typeof window !== 'undefined' && typeof window.isSelfBookedRide === 'function' && window.isSelfBookedRide !== isSelfBookedRide) {
+    return window.isSelfBookedRide(ride, user);
+  }
+  if (!ride) return false;
+
+  const appState = (typeof state !== 'undefined' ? state : null) || (typeof window !== 'undefined' ? window.state : null);
+
+  // If this client is actively in rider mode with this exact active ride, it's a self-booked ride
+  if (appState && appState.activeRideRole === 'rider' && appState.currentActiveRide) {
+    const activeId = appState.currentActiveRide.id || appState.currentActiveRide.vehicle_number;
+    const thisId = ride.id || ride.vehicle_number;
+    if (activeId && thisId && String(activeId).trim() === String(thisId).trim()) {
+      return true;
+    }
+  }
+
+  let currentUser = user || appState?.currentUser;
+  if (!currentUser && typeof localStorage !== 'undefined') {
+    try {
+      const cached = JSON.parse(localStorage.getItem('routemate_auth_user') || 'null');
+      if (cached && (cached.id || cached.email || cached.phone)) {
+        currentUser = cached;
+      }
+    } catch(e) {}
+  }
+  if (!currentUser) return false;
+
+  let meta = {};
+  if (typeof ride.notes === 'string') {
+    try { meta = JSON.parse(ride.notes || '{}'); } catch(e){}
+  } else if (ride.notes && typeof ride.notes === 'object') {
+    meta = ride.notes;
+  }
+
+  const riderId = String(ride.rider_id || ride.riderId || meta.riderId || meta.rider_id || '').trim();
+  const riderEmail = String(ride.rider_email || ride.riderEmail || meta.riderEmail || meta.rider_email || meta.email || '').toLowerCase().trim();
+  const riderPhone = String(ride.rider_phone || ride.riderPhone || meta.riderPhone || meta.rider_phone || meta.phone || '').replace(/\D/g, '');
+
+  const driverId = String(currentUser.id || '').trim();
+  const driverEmail = String(currentUser.email || '').toLowerCase().trim();
+  const driverPhone = String(currentUser.phone || '').replace(/\D/g, '');
+
+  // 1. Exclude if rider ID matches driver user ID
+  if (driverId && riderId && driverId === riderId) {
+    return true;
+  }
+
+  // 2. Exclude if rider email matches driver email
+  if (driverEmail && riderEmail && driverEmail === riderEmail) {
+    return true;
+  }
+
+  // 3. Exclude if rider phone matches driver phone (last 10 digits)
+  if (driverPhone.length >= 10 && riderPhone.length >= 10) {
+    const dLast10 = driverPhone.slice(-10);
+    const rLast10 = riderPhone.slice(-10);
+    if (dLast10 === rLast10) {
+      return true;
+    }
+  }
+
+  return false;
+}
+if (typeof window !== 'undefined') {
+  window.isSelfBookedRide = isSelfBookedRide;
+}
+
+// =========================================================================
 // 1. DEDICATED FLOATING BOTTOM SHEET / MODAL FOR INCOMING DRIVER RIDES
 // =========================================================================
 function renderFloatingDriverRidesSheet(activeRides) {
@@ -2031,7 +2102,7 @@ function renderFloatingDriverRidesSheet(activeRides) {
 
   const rides = Array.isArray(activeRides) ? activeRides : (activeRides ? [activeRides] : []);
 
-  // Filter valid, non-declined, non-completed rides
+  // Filter valid, non-declined, non-completed, non-self rides
   const validRides = rides.filter(r => {
     if (!r) return false;
     let meta = {};
@@ -2042,7 +2113,8 @@ function renderFloatingDriverRidesSheet(activeRides) {
     }
     const isDeclined = state.declinedRequestIds && state.declinedRequestIds.has(r.id || r.vehicle_number);
     const isCompleted = r.status === 'completed' || r.status === 'cancelled' || meta.status === 'completed' || meta.status === 'cancelled';
-    return !isDeclined && !isCompleted;
+    const isSelf = isSelfBookedRide(r, state.currentUser);
+    return !isDeclined && !isCompleted && !isSelf;
   });
 
   const isDriverMode = Boolean(
@@ -2198,7 +2270,7 @@ function renderLiveDriverRidesDOM(rides) {
     if (toggle && !toggle.checked) toggle.checked = true;
   }
 
-  const list = Array.isArray(rides) ? rides : (rides ? [rides] : []);
+  const list = (Array.isArray(rides) ? rides : (rides ? [rides] : [])).filter(r => !isSelfBookedRide(r, state.currentUser));
 
   if (list.length === 0) {
     const activeTrip = state.activeDriverTrip || (state.currentActiveRide && state.activeRideRole === 'driver' ? state.currentActiveRide : null);
@@ -2367,7 +2439,8 @@ function setActiveRides(data) {
       }
       const isDeclined = state.declinedRequestIds && state.declinedRequestIds.has(item.id || item.vehicle_number);
       const isCompleted = item.status === 'completed' || item.status === 'cancelled' || meta.status === 'completed' || meta.status === 'cancelled';
-      return !isDeclined && !isCompleted;
+      const isSelf = isSelfBookedRide(item, state.currentUser);
+      return !isDeclined && !isCompleted && !isSelf;
     })
     .map(item => {
       let meta = {};
@@ -2379,6 +2452,8 @@ function setActiveRides(data) {
       return {
         id: item.id || item.vehicle_number || ('REQ-' + (item.dbId || Date.now())),
         dbId: item.dbId || item.id,
+        rider_id: item.rider_id || item.riderId || meta.riderId || meta.rider_id || '',
+        rider_email: item.rider_email || item.riderEmail || meta.riderEmail || meta.rider_email || '',
         name: item.rider_name || item.name || meta.riderName || (item.driver_name ? item.driver_name.replace(' (Rider Request)', '') : 'Verified Commuter'),
         rider_name: item.rider_name || item.name || meta.riderName || (item.driver_name ? item.driver_name.replace(' (Rider Request)', '') : 'Verified Commuter'),
         phone: item.rider_phone || item.phone || meta.riderPhone || '+91 98480 23145',
@@ -2446,13 +2521,15 @@ setInterval(async () => {
 
     const candMap = new Map();
 
-    // 1. LocalStorage candidates
+    // 1. LocalStorage candidates (only if not self-booked)
     try {
       const localReq = localStorage.getItem('routemate_active_ride_request');
       if (localReq) {
         const parsed = JSON.parse(localReq);
         if (parsed && parsed.id && parsed.status !== 'completed' && parsed.status !== 'cancelled') {
-          candMap.set(parsed.id, parsed);
+          if (!isSelfBookedRide(parsed, state.currentUser)) {
+            candMap.set(parsed.id, parsed);
+          }
         }
       }
     } catch(e) {}
@@ -2470,6 +2547,9 @@ setInterval(async () => {
                                 meta.status === 'ride_completed' || meta.status === 'cancelled';
             if (isCompleted) return;
 
+            // Session Isolation: Exclude self-booked rides
+            if (isSelfBookedRide(candidate, state.currentUser)) return;
+
             const cId = candidate.vehicle_number || ('REQ-' + (candidate.id ? String(candidate.id).slice(0, 8) : Date.now()));
             if (!candMap.has(cId)) {
               candMap.set(cId, candidate);
@@ -2479,7 +2559,7 @@ setInterval(async () => {
       } catch(e) {}
     }
 
-    const liveList = Array.from(candMap.values());
+    const liveList = Array.from(candMap.values()).filter(r => !isSelfBookedRide(r, state.currentUser));
     renderFloatingDriverRidesSheet(liveList);
     renderLiveDriverRidesDOM(liveList);
     if (liveList.length > 0 || (state.activeRides && state.activeRides.length > 0)) {
@@ -2493,13 +2573,18 @@ async function acceptDriverRideCard(rideId) {
   if (typeof stopIncomingTimer === 'function') stopIncomingTimer();
   console.log('⚡ [RAPIDO DRIVER ACTION] Accepted ride request:', rideId);
 
+  const target = (state.activeRides || state.activeSearchingRides || []).find(r => r.id === rideId);
+  if (target && isSelfBookedRide(target, state.currentUser)) {
+    showToast('A user cannot accept their own booked ride.', 'warning');
+    return;
+  }
+
   const overlay = document.getElementById('driverFloatingRidesOverlay');
   if (overlay) {
     overlay.classList.add('translate-y-full', 'opacity-0', 'pointer-events-none');
     overlay.classList.remove('translate-y-0', 'opacity-100');
   }
 
-  const target = (state.activeRides || state.activeSearchingRides || []).find(r => r.id === rideId);
   if (target) {
     state.incomingRequest = target;
   }
@@ -2724,23 +2809,34 @@ async function driverCheckRidesAction() {
     console.log(`📋 [CHECK RIDES] Supabase returned ${rows.length} rows in ${elapsed}ms:`, rows);
 
     // DIRECT STATE SETTER: Pass response array directly into setActiveRides
+    let selfCount = 0;
     const activeRows = rows.filter(r => {
       if (!r) return false;
       let meta = {};
       try { meta = JSON.parse(r.notes || '{}'); } catch(e) {}
       const isCompleted = r.status === 'completed' || r.status === 'cancelled' || meta.status === 'completed' || meta.status === 'cancelled';
-      return !isCompleted;
+      if (isCompleted) return false;
+      if (isSelfBookedRide(r, state.currentUser)) {
+        selfCount++;
+        console.log('🚫 [CHECK RIDES] Excluded self-booked ride for session isolation:', r.vehicle_number || r.id);
+        return false;
+      }
+      return true;
     });
 
-    console.log(`⚡ [CHECK RIDES] Passing ${activeRows.length} active rides directly into renderFloatingDriverRidesSheet, renderLiveDriverRidesDOM & setActiveRides!`);
+    console.log(`⚡ [CHECK RIDES] Passing ${activeRows.length} active rides directly into renderFloatingDriverRidesSheet, renderLiveDriverRidesDOM & setActiveRides! (Excluded ${selfCount} self-booked rides)`);
     state.driverOnline = true;
     renderFloatingDriverRidesSheet(activeRows);
     renderLiveDriverRidesDOM(activeRows);
     setActiveRides(activeRows);
 
-    let summary = `Query Reached Supabase Database Successfully!\nFound ${rows.length} total ride(s) in 'rides' table (${activeRows.length} active)!\nResponse Time: ${elapsed}ms\n\n`;
+    let summary = `Query Reached Supabase Database Successfully!\nFound ${rows.length} total ride(s) in 'rides' table (${activeRows.length} incoming from other commuters)!\n`;
+    if (selfCount > 0) {
+      summary += `🔒 Excluded ${selfCount} self-booked ride(s) matching your account session.\n`;
+    }
+    summary += `Response Time: ${elapsed}ms\n\n`;
     if (activeRows.length === 0) {
-      summary += `No active rides found in database. Click "Book a Ride" from Rider mode first!`;
+      summary += `No other commuter rides found in database. Book a ride from another phone/device (Device A) to see it here on Device B!`;
     } else {
       activeRows.slice(0, 5).forEach((r, idx) => {
         let meta = {};
@@ -2787,6 +2883,7 @@ async function requestRideAction() {
     const guestUser = {
       id: 'usr_guest_' + Date.now() + '_' + guestRand,
       name: 'Verified Commuter',
+      email: 'guest_' + guestRand + '@routemate.local',
       phone: '+91 98480 ' + guestRand,
       role: 'Daily Commuter',
       rating: 4.95,
@@ -2832,6 +2929,7 @@ async function requestRideAction() {
 
   const reqPayload = {
     riderId: state.currentUser.id || ('rider_' + Date.now()),
+    riderEmail: state.currentUser.email || '',
     riderName: state.currentUser.name || 'Verified Rider',
     riderPhone: state.currentUser.phone || '+91 98480 23145',
     riderAvatar: state.currentUser.avatar_url || 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=120&h=120&q=80',
@@ -2910,6 +3008,7 @@ async function requestRideAction() {
       isRequest: true,
       status: 'searching',
       riderId: reqPayload.riderId,
+      riderEmail: reqPayload.riderEmail,
       riderName: reqPayload.riderName,
       riderPhone: reqPayload.riderPhone,
       riderAvatar: reqPayload.riderAvatar,
@@ -3067,6 +3166,12 @@ function handleRealtimeMatchingEvent(event, request) {
 
   // --- EVENT 1: New Ride Request Broadcasted ---
   if ((event === 'new_ride_request' || event === 'searching' || event === 'active') && request) {
+    // Session Isolation: Exclude self-booked rides from triggering driver popup
+    if (isSelfBookedRide(request, currentUser)) {
+      console.log('🚫 [Realtime Matching Event] Ignoring self-booked ride request for driver broadcast:', request.id);
+      return;
+    }
+
     const isDriverActive = Boolean(
       state.driverOnline || 
       state.mode === 'driver' ||
@@ -3489,6 +3594,12 @@ function openDriverIncomingModal(req) {
   const modal = document.getElementById('driverIncomingRideModal');
   if (!modal || !req) return;
 
+  // Session Isolation: Do not open incoming modal for self-booked ride
+  if (isSelfBookedRide(req, state.currentUser)) {
+    console.log('🚫 [openDriverIncomingModal] Blocked modal for self-booked ride:', req.id);
+    return;
+  }
+
   if (!req.status) req.status = 'searching';
   state.incomingRequest = req;
 
@@ -3589,6 +3700,13 @@ async function acceptDriverIncomingModal() {
   const req = state.incomingRequest?.rawRequest || state.incomingRequest;
   if (!req) {
     showToast('No active incoming ride request to accept.', 'warning');
+    closeModal('driverIncomingRideModal');
+    return;
+  }
+
+  // Session Isolation: A user cannot accept their own booked ride
+  if (isSelfBookedRide(req, state.currentUser)) {
+    showToast('A user cannot accept their own booked ride.', 'warning');
     closeModal('driverIncomingRideModal');
     return;
   }

@@ -33,6 +33,7 @@ module.exports = async (req, res) => {
             active = {
               id: row.vehicle_number,
               rider_id: meta.riderId || row.driver_id,
+              rider_email: meta.riderEmail || '',
               rider_name: meta.riderName || (row.driver_name ? row.driver_name.replace(' (Rider Request)', '') : 'Passenger'),
               rider_phone: meta.riderPhone || '+91 98480 23145',
               rider_avatar: meta.riderAvatar || row.avatar,
@@ -108,9 +109,10 @@ module.exports = async (req, res) => {
           notes: JSON.stringify({
             isRequest: true,
             status: 'searching',
-            riderId: activeRideRequest.rider_id,
-            riderName: activeRideRequest.rider_name,
-            riderPhone: activeRideRequest.rider_phone,
+            riderId: activeRideRequest.rider_id || activeRideRequest.riderId,
+            riderEmail: activeRideRequest.rider_email || activeRideRequest.riderEmail || '',
+            riderName: activeRideRequest.rider_name || activeRideRequest.riderName,
+            riderPhone: activeRideRequest.rider_phone || activeRideRequest.riderPhone,
             fare: activeRideRequest.fare,
             distance: activeRideRequest.distance,
             pin: activeRideRequest.pin,
@@ -145,6 +147,15 @@ module.exports = async (req, res) => {
 
       if (!active) {
         return res.status(404).json({ success: false, error: 'No active ride request found or already accepted.' });
+      }
+
+      // Session Isolation Check: A user cannot accept their own booked ride
+      const riderId = String(active.rider_id || active.riderId || '').trim();
+      const riderEmail = String(active.rider_email || active.riderEmail || '').toLowerCase().trim();
+      const driverId = String(driver.id || '').trim();
+      const driverEmail = String(driver.email || '').toLowerCase().trim();
+      if ((riderId && driverId && riderId === driverId) || (riderEmail && driverEmail && riderEmail === driverEmail)) {
+        return res.status(403).json({ success: false, error: 'A user cannot accept their own booked ride.' });
       }
 
       if (active.id !== requestId && requestId !== active.id) {
