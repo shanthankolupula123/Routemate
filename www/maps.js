@@ -1823,7 +1823,25 @@ function detectDriverCurrentLocation() {
 
 // Add passenger pickup marker to driver live map when a request arrives
 function addPassengerMarkerToDriverMap(lat, lng, name, pickup) {
-  if (!lDriverMap || !window.L || !lat || !lng) return;
+  if (!window.L) return;
+  if (!lDriverMap && typeof window.initDriverMap === 'function') {
+    try { window.initDriverMap(); } catch (e) {}
+  }
+  if (!lDriverMap) return;
+
+  if (!lat || !lng) {
+    if (typeof resolveLocationCoords === 'function') {
+      const coords = resolveLocationCoords(pickup || 'Uppal Ring Road Metro, Hyderabad');
+      lat = coords.lat;
+      lng = coords.lng;
+    } else {
+      lat = 17.4024;
+      lng = 78.5604;
+    }
+  }
+
+  console.log('📍 [MAP PASSENGER PIN] Plotting Passenger Marker on Driver Map:', { name, pickup, lat, lng });
+
   if (lDriverPassengerMarker) {
     try { lDriverMap.removeLayer(lDriverPassengerMarker); } catch(e){}
   }
@@ -1838,7 +1856,17 @@ function addPassengerMarkerToDriverMap(lat, lng, name, pickup) {
   lDriverPassengerMarker = L.marker([lat, lng], { icon: passengerIcon })
     .bindPopup(`<b>Passenger Pickup:</b><br>${name || 'Passenger'}<br><span style="font-size:11px;color:#666;">${pickup || ''}</span>`)
     .addTo(lDriverMap);
-  lDriverMap.setView([lat, lng], 13);
+  
+  try {
+    if (lDriverVehicleMarker) {
+      const group = L.featureGroup([lDriverVehicleMarker, lDriverPassengerMarker]);
+      lDriverMap.fitBounds(group.getBounds(), { padding: [40, 40], maxZoom: 14 });
+    } else {
+      lDriverMap.setView([lat, lng], 13);
+    }
+  } catch(e) {
+    lDriverMap.setView([lat, lng], 13);
+  }
   try { lDriverPassengerMarker.openPopup(); } catch(e){}
 }
 

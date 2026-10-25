@@ -2265,6 +2265,158 @@ function renderRiderSearchingCard() {
   if (window.lucide) lucide.createIcons();
 }
 
+// ==========================================
+// VISIBLE BIG SCREEN ALERT & DIAGNOSTIC MODAL
+// ==========================================
+function showBigScreenAlert(title, message, isSuccess = true, details = null) {
+  console.log(`📢 [BIG ALERT] ${isSuccess ? '✅ SUCCESS' : '❌ ERROR'}: ${title} - ${message}`);
+
+  // In-page prominent modal alert box
+  let overlay = document.getElementById('routemateBigAlertOverlay');
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = 'routemateBigAlertOverlay';
+    overlay.style.cssText = 'position:fixed; inset:0; z-index:999999; display:flex; align-items:center; justify-content:center; background:rgba(15,23,42,0.8); backdrop-filter:blur(6px); padding:16px;';
+    document.body.appendChild(overlay);
+  }
+
+  const borderCol = isSuccess ? 'border-emerald-500' : 'border-red-500';
+  const bgCol = isSuccess ? 'bg-emerald-50 text-emerald-900 border-emerald-300' : 'bg-red-50 text-red-900 border-red-300';
+  const icon = isSuccess ? '✅' : '❌';
+
+  overlay.innerHTML = `
+    <div style="max-width:480px; width:100%; max-height:90vh; overflow-y:auto;" class="bg-white rounded-3xl p-6 shadow-2xl border-4 ${borderCol} text-slate-900 animate-in zoom-in-95 duration-200">
+      <div class="flex items-center gap-3 pb-3 border-b border-slate-100">
+        <span style="font-size:36px;">${icon}</span>
+        <div>
+          <h3 class="text-xl font-black ${isSuccess ? 'text-emerald-700' : 'text-red-700'}">${title}</h3>
+          <p class="text-xs text-slate-500 font-semibold">Supabase Database Verification Alert</p>
+        </div>
+      </div>
+      <div class="mt-4 p-4 rounded-2xl ${bgCol} text-xs font-mono leading-relaxed whitespace-pre-wrap break-words border">
+${message}
+      </div>
+      ${details ? `
+        <div class="mt-3 p-3 bg-slate-900 text-slate-100 rounded-2xl text-[11px] font-mono max-h-40 overflow-y-auto whitespace-pre-wrap break-all shadow-inner">
+${typeof details === 'object' ? JSON.stringify(details, null, 2) : details}
+        </div>
+      ` : ''}
+      <button type="button" onclick="document.getElementById('routemateBigAlertOverlay').remove()" class="mt-5 w-full py-4 ${isSuccess ? 'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-600/30' : 'bg-red-600 hover:bg-red-700 shadow-red-600/30'} text-white font-black text-sm rounded-2xl shadow-lg transition active:scale-95 cursor-pointer">
+        Dismiss / OK
+      </button>
+    </div>
+  `;
+
+  // Also invoke native window.alert so it is impossible to miss on any device or tab
+  try {
+    const nativeMsg = `[${title}]\n\n${message}` + (details ? `\n\nDetails:\n${typeof details === 'object' ? JSON.stringify(details, null, 2) : details}` : '');
+    setTimeout(() => {
+      try { alert(nativeMsg); } catch(e) {}
+    }, 60);
+  } catch (e) {}
+}
+window.showBigScreenAlert = showBigScreenAlert;
+
+// ==========================================
+// MANUAL DRIVER TEST: CHECK RIDES IN SUPABASE
+// ==========================================
+async function driverCheckRidesAction() {
+  const dPCoords = resolveLocationCoords(state.driverCorridorPickup || 'Uppal Ring Road Metro, Hyderabad');
+  const dDCoords = resolveLocationCoords(state.driverCorridorDrop || 'Jangaon Bus Depot / Chowrasta');
+
+  console.log('🔍 [DRIVER CHECK RIDES] Manual "Check Rides" test triggered!');
+  console.log('📍 [DRIVER COORDS] Corridor Pickup:', state.driverCorridorPickup, '| Latitude:', dPCoords.lat, '| Longitude:', dPCoords.lng);
+  console.log('🏁 [DRIVER COORDS] Corridor Drop:', state.driverCorridorDrop, '| Latitude:', dDCoords.lat, '| Longitude:', dDCoords.lng);
+
+  showToast('🔍 Querying Supabase rides table for active rides...', 'info');
+
+  try {
+    const startTime = Date.now();
+    const restRes = await fetch('https://hjieeilzfbvubkhmlmdg.supabase.co/rest/v1/rides?select=*&status=neq.cancelled&order=created_at.desc&limit=15', {
+      method: 'GET',
+      headers: {
+        'apikey': 'sb_publishable_FD8-opedLq151SNuBbWp9g_bLI5hB_a',
+        'Authorization': 'Bearer sb_publishable_FD8-opedLq151SNuBbWp9g_bLI5hB_a'
+      }
+    });
+
+    const elapsed = Date.now() - startTime;
+    if (!restRes.ok) {
+      const errText = await restRes.text().catch(() => '');
+      console.error('❌ [CHECK RIDES FAILED HTTP]:', restRes.status, errText);
+      showBigScreenAlert(
+        "Check Rides Failed",
+        `Query to Supabase 'rides' table returned HTTP ${restRes.status}!\nError: ${errText}`,
+        false
+      );
+      return;
+    }
+
+    const rows = await restRes.json();
+    console.log(`📋 [CHECK RIDES] Supabase returned ${rows.length} rows in ${elapsed}ms:`, rows);
+
+    let summary = `Query Reached Supabase Database Successfully!\nFound ${rows.length} active ride(s) in 'rides' table!\nResponse Time: ${elapsed}ms\n\n`;
+    if (rows.length === 0) {
+      summary += `No rides found in database. Click "Book a Ride" from Rider mode first!`;
+    } else {
+      rows.slice(0, 5).forEach((r, idx) => {
+        let meta = {};
+        try { meta = JSON.parse(r.notes || '{}'); } catch(e) {}
+        summary += `${idx + 1}. [${r.vehicle_number || r.id}] ${r.driver_name || 'Rider'}\n`;
+        summary += `   Pickup: ${r.pickup} ➔ Drop: ${r.drop_location}\n`;
+        summary += `   Fare: ₹${r.per_seat_price} | Status: ${r.status}\n`;
+        summary += `   Created: ${new Date(r.created_at).toLocaleTimeString()}\n\n`;
+      });
+    }
+
+    showBigScreenAlert("Check Rides Result", summary, true, rows);
+
+    // If active searching ride exists, force it onto the driver screen immediately!
+    const candidate = rows.find(r => {
+      let meta = {};
+      try { meta = JSON.parse(r.notes || '{}'); } catch(e) {}
+      return r.status !== 'completed' && r.status !== 'cancelled' && meta.status !== 'completed';
+    });
+
+    if (candidate) {
+      console.log('⚡ [CHECK RIDES] Forcing top active ride onto driver screen:', candidate.vehicle_number);
+      let meta = {};
+      try { meta = JSON.parse(candidate.notes || '{}'); } catch(e) {}
+      const formattedReq = {
+        id: candidate.vehicle_number || ('REQ-' + candidate.id),
+        dbId: candidate.id,
+        name: meta.riderName || candidate.driver_name?.replace(' (Rider Request)', '') || 'Verified Commuter',
+        role: meta.riderRole || candidate.driver_role || 'Daily Commuter',
+        rating: 4.9,
+        avatar: meta.riderAvatar || candidate.avatar || 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=120&h=120&q=80',
+        pickup: candidate.pickup,
+        drop: candidate.drop_location,
+        drop_location: candidate.drop_location,
+        fare: candidate.per_seat_price,
+        fareOffer: candidate.per_seat_price,
+        distance: meta.distance || 84,
+        pin: meta.pin || '4821',
+        phone: meta.riderPhone || '+91 98480 23145',
+        status: 'searching',
+        pickup_lat: meta.pickup_lat || 17.4024,
+        pickup_lng: meta.pickup_lng || 78.5604,
+        drop_lat: meta.drop_lat || 17.7241,
+        drop_lng: meta.drop_lng || 79.1623
+      };
+      state.driverOnline = true;
+      handleRealtimeMatchingEvent('new_ride_request', formattedReq);
+    }
+  } catch (err) {
+    console.error('❌ [CHECK RIDES EXCEPTION]:', err);
+    showBigScreenAlert(
+      "Check Rides Error",
+      `Network/Client exception while checking rides:\n${err.message}`,
+      false
+    );
+  }
+}
+window.driverCheckRidesAction = driverCheckRidesAction;
+
 // 1. Rider Action: Broadcast Instant Ride Request
 async function requestRideAction() {
   console.log('🚀 [RIDER BOOKING CLICK HANDLER] "Book a Ride" button pressed at:', new Date().toISOString());
@@ -2321,6 +2473,10 @@ async function requestRideAction() {
 
   const pCoords = resolveLocationCoords(pickup);
   const dCoords = resolveLocationCoords(drop);
+
+  // 1. PRINT EXACT LATITUDE AND LONGITUDE OF RIDER TO CONSOLE
+  console.log('📍 [RIDER COORDS] Pickup Location:', pickup, '| Latitude:', pCoords.lat, '| Longitude:', pCoords.lng);
+  console.log('🏁 [RIDER COORDS] Destination Location:', drop, '| Latitude:', dCoords.lat, '| Longitude:', dCoords.lng);
 
   const calc = calculateFuelShare(state.distance, state.vehicleType);
   const fare = calc.perSeat || 110;
@@ -2384,84 +2540,111 @@ async function requestRideAction() {
 
   showToast(`📡 Radar activated! Broadcasting on ${pickup} ➔ ${drop} (₹${fare})`, 'info');
 
+  // =========================================================================
+  // STEP 1: DIRECT TEST INSERT INTO 'rides' TABLE WITH VISIBLE SCREEN ALERT
+  // =========================================================================
+  const dbVehicleType = (state.vehicleType === 'car') ? 'car' : 'bike';
+  const dbRow = {
+    driver_name: `${reqPayload.riderName} (Rider Request)`,
+    driver_role: reqPayload.riderRole || 'Commuter',
+    avatar: reqPayload.riderAvatar,
+    vehicle_type: dbVehicleType,
+    vehicle_name: reqPayload.vehiclePreferenceLabel || 'Any / Custom Vehicle',
+    vehicle_number: requestId,
+    pickup: pickup,
+    drop_location: drop,
+    departure_time: 'Immediate',
+    seats_available: 1,
+    per_seat_price: fare,
+    payment_preference: 'upi',
+    verified: true,
+    status: 'active',
+    notes: JSON.stringify({
+      isRequest: true,
+      status: 'searching',
+      riderId: reqPayload.riderId,
+      riderName: reqPayload.riderName,
+      riderPhone: reqPayload.riderPhone,
+      riderAvatar: reqPayload.riderAvatar,
+      riderRole: reqPayload.riderRole,
+      fare: fare,
+      distance: state.distance,
+      pin: pin,
+      pickup: pickup,
+      drop: drop,
+      pickup_lat: pCoords.lat,
+      pickup_lng: pCoords.lng,
+      drop_lat: dCoords.lat,
+      drop_lng: dCoords.lng,
+      pickupLat: pCoords.lat,
+      pickupLng: pCoords.lng,
+      dropLat: dCoords.lat,
+      dropLng: dCoords.lng,
+      vehicleType: state.vehicleType || 'any',
+      createdAt: new Date().toISOString()
+    })
+  };
+
+  try {
+    const insertStart = Date.now();
+    const restResp = await fetch('https://hjieeilzfbvubkhmlmdg.supabase.co/rest/v1/rides', {
+      method: 'POST',
+      headers: {
+        'apikey': 'sb_publishable_FD8-opedLq151SNuBbWp9g_bLI5hB_a',
+        'Authorization': 'Bearer sb_publishable_FD8-opedLq151SNuBbWp9g_bLI5hB_a',
+        'Content-Type': 'application/json',
+        'Prefer': 'return=representation'
+      },
+      body: JSON.stringify(dbRow)
+    });
+
+    const durationMs = Date.now() - insertStart;
+    console.log('💾 [RIDER TEST INSERT] Status:', restResp.status, restResp.statusText, 'in', durationMs, 'ms');
+
+    if (restResp.ok) {
+      const rowData = await restResp.json();
+      console.log('✅ [RIDER DIRECT TEST INSERT SUCCESS]:', rowData);
+      showBigScreenAlert(
+        "Insert Success",
+        `Ride Request ${requestId} inserted directly into Supabase 'rides' table!\n\n` +
+        `• Pickup: ${pickup}\n  Latitude: ${pCoords.lat}, Longitude: ${pCoords.lng}\n` +
+        `• Drop: ${drop}\n  Latitude: ${dCoords.lat}, Longitude: ${dCoords.lng}\n` +
+        `• Fuel Share Fare: ₹${fare} (${state.distance} km)\n` +
+        `• Database Status: active (Response: ${durationMs}ms)`,
+        true,
+        rowData[0] || rowData
+      );
+    } else {
+      const errText = await restResp.text().catch(() => '');
+      console.error('❌ [RIDER DIRECT TEST INSERT FAILED]:', restResp.status, errText);
+      showBigScreenAlert(
+        "Insert Failed",
+        `Direct insert to Supabase 'rides' table failed!\n\n` +
+        `• HTTP Status: ${restResp.status} ${restResp.statusText}\n` +
+        `• Error Details: ${errText || 'No error message returned from PostgREST'}\n\n` +
+        `The app will continue broadcasting locally and via serverless edge bridge.`,
+        false
+      );
+    }
+  } catch (netErr) {
+    console.error('❌ [RIDER DIRECT TEST INSERT ERROR]:', netErr);
+    showBigScreenAlert(
+      "Insert Network Error",
+      `Failed to connect to Supabase 'rides' table:\n${netErr.message}\n\n` +
+      `The app will continue broadcasting locally and via serverless edge bridge.`,
+      false
+    );
+  }
+
+  // =========================================================================
+  // STEP 2: BROADCAST TO MATCHING ENGINE, LOCAL STORAGE & SERVERLESS BRIDGE
+  // =========================================================================
   try {
     let res = null;
     if (window.db && window.db.matching && typeof window.db.matching.createRequest === 'function') {
       console.log('📡 [RIDER BOOKING] Invoking window.db.matching.createRequest()...');
       res = await window.db.matching.createRequest({ ...reqPayload, pin, id: requestId });
       console.log('📦 [RIDER BOOKING] createRequest returned:', res);
-    } else {
-      console.warn('⚠️ [RIDER BOOKING] window.db.matching.createRequest not found on window.db!');
-    }
-
-    // Direct PostgREST insertion fallback: guarantees row is written to Supabase even if window.db had any initialization issue
-    if (!res || !res.request) {
-      console.log('⚡ [RIDER BOOKING] Performing direct Supabase REST fallback insert for ride:', requestId);
-      const dbVehicleType = (state.vehicleType === 'car') ? 'car' : 'bike';
-      const dbRow = {
-        driver_name: `${reqPayload.riderName} (Rider Request)`,
-        driver_role: reqPayload.riderRole || 'Commuter',
-        avatar: reqPayload.riderAvatar,
-        vehicle_type: dbVehicleType,
-        vehicle_name: reqPayload.vehiclePreferenceLabel || 'Any / Custom Vehicle',
-        vehicle_number: requestId,
-        pickup: pickup,
-        drop_location: drop,
-        departure_time: 'Immediate',
-        seats_available: 1,
-        per_seat_price: fare,
-        payment_preference: 'upi',
-        verified: true,
-        status: 'active',
-        notes: JSON.stringify({
-          isRequest: true,
-          status: 'searching',
-          riderId: reqPayload.riderId,
-          riderName: reqPayload.riderName,
-          riderPhone: reqPayload.riderPhone,
-          riderAvatar: reqPayload.riderAvatar,
-          riderRole: reqPayload.riderRole,
-          fare: fare,
-          distance: state.distance,
-          pin: pin,
-          pickup: pickup,
-          drop: drop,
-          pickup_lat: pCoords.lat,
-          pickup_lng: pCoords.lng,
-          drop_lat: dCoords.lat,
-          drop_lng: dCoords.lng,
-          vehicleType: state.vehicleType || 'any',
-          createdAt: new Date().toISOString()
-        })
-      };
-
-      try {
-        const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
-        const toId = controller ? setTimeout(() => controller.abort(), 4000) : null;
-        const restResp = await fetch('https://hjieeilzfbvubkhmlmdg.supabase.co/rest/v1/rides', {
-          method: 'POST',
-          headers: {
-            'apikey': 'sb_publishable_FD8-opedLq151SNuBbWp9g_bLI5hB_a',
-            'Authorization': 'Bearer sb_publishable_FD8-opedLq151SNuBbWp9g_bLI5hB_a',
-            'Content-Type': 'application/json',
-            'Prefer': 'return=representation'
-          },
-          body: JSON.stringify(dbRow),
-          signal: controller ? controller.signal : undefined
-        }).finally(() => { if (toId) clearTimeout(toId); });
-
-        console.log('💾 [RIDER BOOKING] Direct REST fetch status:', restResp.status, restResp.statusText);
-        if (restResp.ok) {
-          const rowData = await restResp.json();
-          console.log('✅ [RIDER BOOKING] Direct REST insert successful data:', rowData);
-          res = { success: true, request: initialReq };
-        } else {
-          const errText = await restResp.text().catch(() => '');
-          console.warn('⚠️ [RIDER BOOKING] Direct REST insert non-200 response:', restResp.status, errText);
-        }
-      } catch (fErr) {
-        console.warn('⚠️ [RIDER BOOKING] Direct REST fetch error:', fErr);
-      }
     }
 
     if (res && res.request) {
@@ -9537,6 +9720,8 @@ window.openLiveTrackingForRide = openLiveTrackingForRide;
 window.openLiveTrackingForDriver = openLiveTrackingForDriver;
 window.openLiveTrackingModal = openLiveTrackingModal;
 window.playNotificationSound = playNotificationSound;
+window.driverCheckRidesAction = driverCheckRidesAction;
+window.showBigScreenAlert = showBigScreenAlert;
 
 // Customer Rating, Feedback & Admin Moderation window bindings
 window.openRatingModal = openRatingModal;

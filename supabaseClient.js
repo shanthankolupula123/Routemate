@@ -2497,6 +2497,9 @@ const db = {
         (appState.activeDriverTrip.status === 'driver_accepted' || appState.activeDriverTrip.status === 'ride_started')
       );
 
+      const dPickup = appState?.driverCorridorPickup || 'Uppal Ring Road Metro, Hyderabad';
+      const dDrop = appState?.driverCorridorDrop || 'Jangaon Bus Depot / Chowrasta';
+
       console.log('🔄 [DRIVER LISTENER LOOP] Polling iteration:', {
         time: new Date().toLocaleTimeString(),
         mode: appState?.mode,
@@ -2504,7 +2507,8 @@ const db = {
         isDriverViewVisible: Boolean(isDriverViewVisible),
         isDriverActive,
         isTripAccepted,
-        activeDriverTripId: appState?.activeDriverTrip?.id
+        activeDriverTripId: appState?.activeDriverTrip?.id,
+        driverCorridor: `${dPickup} ➔ ${dDrop}`
       });
 
       if (!isDriverActive) return;
@@ -2692,9 +2696,18 @@ const db = {
         }
 
         // =========================================================================
-        // FORCED DRIVER SCREEN NOTIFICATION & POPUP
+        // FORCED DRIVER SCREEN NOTIFICATION & POPUP (SPATIAL MATCH BYPASS ACTIVE)
         // =========================================================================
         if (incomingReq) {
+          console.log('📍 [SPATIAL MATCH BYPASS] Forcing ride request onto driver screen regardless of distance:', {
+            requestId: incomingReq.id,
+            riderPickup: incomingReq.pickup,
+            riderPickupLat: incomingReq.pickup_lat,
+            riderPickupLng: incomingReq.pickup_lng,
+            driverPickup: dPickup,
+            fare: incomingReq.fareOffer || incomingReq.fare
+          });
+
           // 1. Play sound notification and vibrate immediately
           if (typeof playNotificationSound === 'function') {
             try { playNotificationSound(); } catch (e) {}

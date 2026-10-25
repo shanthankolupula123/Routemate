@@ -886,6 +886,26 @@
             <!-- Driver Top Incoming Ride Alert (Instant high-visibility banner) -->
             <div id="driverTopIncomingAlert" class="hidden"></div>
 
+            <!-- Manual Check Rides Test Button & Diagnostic Panel -->
+            <div class="bg-gradient-to-r from-blue-50 via-indigo-50 to-blue-50 border-2 border-blue-300 rounded-3xl p-4 shadow-sm space-y-2.5">
+              <div class="flex items-center justify-between">
+                <span class="text-xs font-black text-blue-950 flex items-center gap-1.5">
+                  <i data-lucide="database" class="w-4 h-4 text-blue-600"></i>
+                  <span>Database Broadcast Test</span>
+                </span>
+                <span class="text-[10px] font-mono font-extrabold bg-blue-600 text-white px-2.5 py-0.5 rounded-full shadow-xs">
+                  Direct Table Query
+                </span>
+              </div>
+              <p class="text-[11px] text-slate-600 leading-tight">
+                Click below to instantly force-fetch active rides directly from Supabase and show an alert with the exact count & payload.
+              </p>
+              <button id="btnDriverCheckRides" onclick="driverCheckRidesAction()" type="button" class="w-full py-3.5 px-4 bg-gradient-to-r from-blue-600 via-indigo-600 to-blue-700 hover:from-blue-700 hover:to-indigo-800 active:scale-95 text-white font-black text-xs rounded-2xl shadow-md transition flex items-center justify-center gap-2 cursor-pointer">
+                <i data-lucide="refresh-cw" class="w-4 h-4 animate-spin-hover"></i>
+                <span>🔍 Check Rides (Force-Fetch Active Rides)</span>
+              </button>
+            </div>
+
             <!-- Real-Time Corridor Radar Status Pill -->
             <div id="driverLivePollStatusBanner" class="bg-slate-50 border border-slate-200/90 rounded-2xl px-3.5 py-2.5 flex items-center justify-between text-xs shadow-xs">
               <div class="flex items-center gap-2">
@@ -3439,13 +3459,13 @@
   <!-- Supabase JS Client SDK v2 (Required for Realtime WebSockets) -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <!-- Routemate Core App & Database Client -->
-  <script src="supabaseClient.js?v=20261025_debug_check_v20"></script>
-  <script src="app.js?v=20261025_debug_check_v20"></script>
-  <script src="maps.js?v=20261025_debug_check_v20"></script>
+  <script src="supabaseClient.js?v=20261025_debug_check_v21"></script>
+  <script src="app.js?v=20261025_debug_check_v21"></script>
+  <script src="maps.js?v=20261025_debug_check_v21"></script>
   <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCpZp3uUEEPF5ZJeVuuQRSGZxBDIgPuMqA&libraries=places,geometry&callback=initGoogleMap" async defer></script>
   <!-- Razorpay Standard Checkout SDK -->
   <script src="https://checkout.razorpay.com/v1/checkout.js" defer></script>
-  <script src="payment.js?v=20261025_debug_check_v20" defer></script>
+  <script src="payment.js?v=20261025_debug_check_v21" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js" defer></script>
 </body>
 </html>
