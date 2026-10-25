@@ -204,6 +204,7 @@ const state = {
   },
   isBetaSubscriber: localStorage.getItem('routemate_beta_subscriber') === 'true',
   incomingRequest: null,
+  activeSearchingRides: [],
   chatMessages: []
 };
 
@@ -1935,46 +1936,21 @@ function renderDriverIncomingRequest() {
   const container = document.getElementById('driverPassengerRequestSection');
   if (!container) return;
 
-  if (!state.driverOnline) {
-    const user = state.currentUser;
-    const isApproved = (typeof isDriverKycApproved === 'function') ? isDriverKycApproved(user) : false;
-
-    if (!isApproved) {
-      container.innerHTML = `
-        <div class="bg-white rounded-3xl p-6 border border-amber-200 text-center shadow-sm">
-          <div class="w-12 h-12 rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center mx-auto mb-3">
-            <i data-lucide="shield-alert" class="w-6 h-6"></i>
-          </div>
-          <h4 class="font-bold text-slate-800 text-sm">Driver Duty on Standby</h4>
-          <p class="text-xs text-slate-500 mt-1 max-w-xs mx-auto">Admin KYC verification is required before receiving passenger requests along this highway corridor.</p>
-          <button type="button" onclick="openKycModal()" class="mt-3 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition shadow-xs cursor-pointer active:scale-95 inline-flex items-center gap-1.5">
-            <i data-lucide="upload" class="w-3.5 h-3.5"></i>
-            <span>Upload KYC Documents</span>
-          </button>
-        </div>
-      `;
-    } else {
-      container.innerHTML = `
-        <div class="bg-white rounded-3xl p-6 border border-slate-200 text-center shadow-sm">
-          <div class="w-12 h-12 rounded-2xl bg-slate-100 text-slate-400 flex items-center justify-center mx-auto mb-3">
-            <i data-lucide="power-off" class="w-6 h-6"></i>
-          </div>
-          <h4 class="font-bold text-slate-800 text-sm">You are currently Offline</h4>
-          <p class="text-xs text-slate-400 mt-1 max-w-xs mx-auto">Toggle "Go Online" above to start receiving live passenger requests along your corridor.</p>
-        </div>
-      `;
-    }
-    if (window.lucide) lucide.createIcons();
-    return;
+  // Auto-activate driver online state when on driver view or mode
+  if (state.mode === 'driver' && !state.driverOnline) {
+    state.driverOnline = true;
+    const toggle = document.getElementById('driverOnlineToggle');
+    if (toggle && !toggle.checked) toggle.checked = true;
   }
 
   // 1. Active Accepted Trip Dashboard (Driver is heading to pickup or ride started)
+  let activeTripHtml = '';
   const activeTrip = state.activeDriverTrip || (state.currentActiveRide && state.activeRideRole === 'driver' ? state.currentActiveRide : null);
   if (activeTrip && activeTrip.status !== 'completed' && activeTrip.status !== 'cancelled') {
     const isHeading = activeTrip.status === 'driver_accepted';
     const isStarted = activeTrip.status === 'ride_started';
 
-    container.innerHTML = `
+    activeTripHtml = `
       <div class="bg-white rounded-3xl p-5 border-2 ${isStarted ? 'border-blue-500' : 'border-emerald-500'} shadow-lg relative overflow-hidden animate-in fade-in duration-200">
         <div class="flex items-center justify-between pb-3 border-b border-slate-100">
           <div class="flex items-center gap-2">
@@ -2045,8 +2021,6 @@ function renderDriverIncomingRequest() {
         `}
       </div>
     `;
-    if (window.lucide) lucide.createIcons();
-    return;
   }
 
   // 2. Incoming Requests Available (Rapido-Style Live Cards Feed)
@@ -2057,8 +2031,9 @@ function renderDriverIncomingRequest() {
     activeRides = [state.incomingRequest];
   }
 
+  let cardsHtml = '';
   if (activeRides.length > 0) {
-    const cardsHtml = activeRides.map(req => {
+    cardsHtml = activeRides.map(req => {
       const fare = req.fareOffer || req.fare || 110;
       const dist = req.distance || req.distance_km || 84;
       const avatarUrl = req.avatar || req.rider_avatar || 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=120&h=120&q=80';
@@ -2141,7 +2116,21 @@ function renderDriverIncomingRequest() {
         </div>
       `;
     }).join('');
+  }
 
+  if (activeTripHtml && cardsHtml) {
+    container.innerHTML = activeTripHtml + '<div class="mt-4 space-y-3"><div class="text-xs font-extrabold uppercase tracking-wider text-slate-500 pl-1">Other Available Commuter Requests</div>' + cardsHtml + '</div>';
+    if (window.lucide) lucide.createIcons();
+    return;
+  }
+
+  if (activeTripHtml) {
+    container.innerHTML = activeTripHtml;
+    if (window.lucide) lucide.createIcons();
+    return;
+  }
+
+  if (cardsHtml) {
     container.innerHTML = cardsHtml;
     if (window.lucide) lucide.createIcons();
     return;
@@ -2173,6 +2162,98 @@ function renderDriverIncomingRequest() {
   `;
   if (window.lucide) lucide.createIcons();
 }
+
+// Bind fetched active rides directly into state and update cards feed
+function updateDriverActiveRides(rides) {
+  state.activeSearchingRides = Array.isArray(rides) ? rides : [];
+  if (typeof window !== 'undefined' && window.state) {
+    window.state.activeSearchingRides = state.activeSearchingRides;
+  }
+  if (state.activeSearchingRides.length > 0 && !state.incomingRequest) {
+    state.incomingRequest = state.activeSearchingRides[0];
+  }
+  renderDriverIncomingRequest();
+}
+window.updateDriverActiveRides = updateDriverActiveRides;
+
+// Autonomous 2s Driver Active Rides Polling Loop (Fail-safe direct binding)
+setInterval(async () => {
+  try {
+    const driverViewEl = document.getElementById('driverModeView');
+    const isDriverViewVisible = driverViewEl && !driverViewEl.classList.contains('hidden') && driverViewEl.style.display !== 'none';
+    if (!state.driverOnline && state.mode !== 'driver' && !isDriverViewVisible) return;
+
+    const candMap = new Map();
+
+    // 1. LocalStorage candidates
+    try {
+      const localReq = localStorage.getItem('routemate_active_ride_request');
+      if (localReq) {
+        const parsed = JSON.parse(localReq);
+        if (parsed && parsed.id && parsed.status !== 'completed' && parsed.status !== 'cancelled') {
+          candMap.set(parsed.id, parsed);
+        }
+      }
+    } catch(e) {}
+
+    // 2. Direct Supabase REST fetch
+    if (typeof supabaseRest === 'function') {
+      try {
+        const res = await supabaseRest('rides?select=*&status=neq.cancelled&order=created_at.desc&limit=15');
+        if (res && res.ok && Array.isArray(res.data)) {
+          res.data.forEach(candidate => {
+            if (!candidate) return;
+            let meta = {};
+            try { meta = JSON.parse(candidate.notes || '{}'); } catch(e){}
+            const isCompleted = candidate.status === 'completed' || candidate.status === 'cancelled' ||
+                                meta.status === 'ride_completed' || meta.status === 'cancelled';
+            if (isCompleted) return;
+
+            const cId = candidate.vehicle_number || ('REQ-' + (candidate.id ? String(candidate.id).slice(0, 8) : Date.now()));
+            if (!candMap.has(cId)) {
+              candMap.set(cId, {
+                id: cId,
+                dbId: candidate.id,
+                rider_id: meta.riderId || candidate.driver_id || ('rider_' + Date.now()),
+                name: meta.riderName || (candidate.driver_name ? candidate.driver_name.replace(' (Rider Request)', '') : 'Verified Commuter'),
+                rider_name: meta.riderName || (candidate.driver_name ? candidate.driver_name.replace(' (Rider Request)', '') : 'Verified Commuter'),
+                phone: meta.riderPhone || '+91 98480 23145',
+                rider_phone: meta.riderPhone || '+91 98480 23145',
+                avatar: meta.riderAvatar || candidate.avatar || 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=120&h=120&q=80',
+                rider_avatar: meta.riderAvatar || candidate.avatar || 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=120&h=120&q=80',
+                role: meta.riderRole || candidate.driver_role || 'Daily Commuter',
+                rider_role: meta.riderRole || candidate.driver_role || 'Daily Commuter',
+                rating: 4.9,
+                pickup: candidate.pickup || 'Pickup Location',
+                pickup_lat: meta.pickup_lat || meta.pickupLat || 17.4024,
+                pickup_lng: meta.pickup_lng || meta.pickupLng || 78.5604,
+                drop: candidate.drop_location || 'Destination',
+                drop_location: candidate.drop_location || 'Destination',
+                drop_lat: meta.drop_lat || meta.dropLat || 17.7241,
+                drop_lng: meta.drop_lng || meta.dropLng || 79.1623,
+                seats: candidate.seats_available || 1,
+                fare: candidate.per_seat_price || 110,
+                fareOffer: candidate.per_seat_price || 110,
+                distance: meta.distance || 84,
+                distance_km: meta.distance || 84,
+                pin: meta.pin || '4821',
+                vehicle_type: meta.vehicleType || candidate.vehicle_type || 'any',
+                payment_method: meta.paymentMethod || 'Direct UPI',
+                status: 'searching',
+                created_at: candidate.created_at || new Date().toISOString()
+              });
+            }
+          });
+        }
+      } catch(e) {}
+    }
+
+    const liveList = Array.from(candMap.values());
+    if (liveList.length > 0 || (state.activeSearchingRides && state.activeSearchingRides.length > 0)) {
+      updateDriverActiveRides(liveList);
+    }
+  } catch(e) {}
+}, 2000);
 
 // Interactive Live Card Driver Actions (Rapido Style)
 async function acceptDriverRideCard(rideId) {

@@ -2513,8 +2513,7 @@ const db = {
 
       if (!isDriverActive) return;
       if (isTripAccepted) {
-        console.log('ℹ️ [DRIVER LISTENER LOOP] Driver already in transit with trip:', appState.activeDriverTrip.id);
-        return;
+        console.log('ℹ️ [DRIVER LISTENER LOOP] Driver in transit with trip:', appState.activeDriverTrip.id);
       }
 
       try {
@@ -2659,8 +2658,10 @@ const db = {
           }
         }
 
-        // Render Rapido-style interactive cards directly under broadcast radar
-        if (typeof renderDriverIncomingRequest === 'function') {
+        // Directly bind to UI component state and render cards feed
+        if (typeof window !== 'undefined' && typeof window.updateDriverActiveRides === 'function') {
+          try { window.updateDriverActiveRides(allActiveRides); } catch (e) {}
+        } else if (typeof renderDriverIncomingRequest === 'function') {
           try { renderDriverIncomingRequest(); } catch (e) {}
         }
 
