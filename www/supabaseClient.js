@@ -130,15 +130,20 @@ function isSelfBookedRide(ride, user) {
   }
 
   // 2. Exclude if rider email matches driver email
-  if (driverEmail && riderEmail && driverEmail === riderEmail) {
-    return true;
+  if (driverEmail && riderEmail) {
+    if (driverEmail === riderEmail) {
+      return true;
+    }
+    // Distinct email accounts (e.g. Device A vs Device B) are always isolated separate users
+    return false;
   }
 
-  // 3. Exclude if rider phone matches driver phone (last 10 digits)
+  // 3. Exclude if rider phone matches driver phone (excluding generic demo placeholders)
+  const GENERIC_PLACEHOLDERS = ['9848023145', '0000000000', '1234567890'];
   if (driverPhone.length >= 10 && riderPhone.length >= 10) {
     const dLast10 = driverPhone.slice(-10);
     const rLast10 = riderPhone.slice(-10);
-    if (dLast10 === rLast10) {
+    if (!GENERIC_PLACEHOLDERS.includes(dLast10) && dLast10 === rLast10) {
       return true;
     }
   }
@@ -2704,31 +2709,45 @@ const db = {
                 return;
               }
 
+              const cId = candidate.vehicle_number || ('REQ-' + (candidate.id ? String(candidate.id).slice(0, 8) : Date.now()));
+              const rName = meta.riderName || (candidate.driver_name ? candidate.driver_name.replace(' (Rider Request)', '') : 'Verified Commuter');
+              const rAvatar = meta.riderAvatar || candidate.avatar || 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=120&h=120&q=80';
+              const rFare = Number(candidate.per_seat_price || meta.fare || 110);
+              const rPickup = candidate.pickup || meta.pickup || 'Pickup Location';
+              const rDrop = candidate.drop_location || candidate.drop || meta.drop || 'Destination';
+
               addCandidate({
-                id: candidate.vehicle_number || ('REQ-' + (candidate.id ? String(candidate.id).slice(0, 8) : Date.now())),
+                id: cId,
                 dbId: candidate.id,
+                vehicle_number: cId,
                 rider_id: meta.riderId || candidate.driver_id || ('rider_' + Date.now()),
                 rider_email: meta.riderEmail || meta.rider_email || '',
-                name: meta.riderName || (candidate.driver_name ? candidate.driver_name.replace(' (Rider Request)', '') : 'Verified Commuter'),
-                rider_name: meta.riderName || (candidate.driver_name ? candidate.driver_name.replace(' (Rider Request)', '') : 'Verified Commuter'),
+                name: rName,
+                rider_name: rName,
+                riderName: rName,
                 phone: meta.riderPhone || '+91 98480 23145',
                 rider_phone: meta.riderPhone || '+91 98480 23145',
-                avatar: meta.riderAvatar || candidate.avatar || 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=120&h=120&q=80',
-                rider_avatar: meta.riderAvatar || candidate.avatar || 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=120&h=120&q=80',
+                avatar: rAvatar,
+                rider_avatar: rAvatar,
+                avatarUrl: rAvatar,
                 role: meta.riderRole || candidate.driver_role || 'Daily Commuter',
                 rider_role: meta.riderRole || candidate.driver_role || 'Daily Commuter',
+                riderRole: meta.riderRole || candidate.driver_role || 'Daily Commuter',
                 rating: 4.9,
-                pickup: candidate.pickup || 'Pickup Location',
+                pickup: rPickup,
+                pickup_location: rPickup,
                 pickup_lat: meta.pickup_lat || meta.pickupLat || 17.4024,
                 pickup_lng: meta.pickup_lng || meta.pickupLng || 78.5604,
-                drop: candidate.drop_location || 'Destination',
-                drop_location: candidate.drop_location || 'Destination',
+                drop: rDrop,
+                drop_location: rDrop,
                 drop_lat: meta.drop_lat || meta.dropLat || 17.7241,
                 drop_lng: meta.drop_lng || meta.dropLng || 79.1623,
                 seats: candidate.seats_available || 1,
                 seatCount: candidate.seats_available || 1,
-                fare: candidate.per_seat_price || 110,
-                fareOffer: candidate.per_seat_price || 110,
+                fare: rFare,
+                fareOffer: rFare,
+                fuel_share: rFare,
+                per_seat_price: rFare,
                 distance: meta.distance || 84,
                 distance_km: meta.distance || 84,
                 pin: meta.pin || '4821',

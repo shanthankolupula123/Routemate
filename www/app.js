@@ -2157,15 +2157,20 @@ function isSelfBookedRide(ride, user) {
   }
 
   // 2. Exclude if rider email matches driver email
-  if (driverEmail && riderEmail && driverEmail === riderEmail) {
-    return true;
+  if (driverEmail && riderEmail) {
+    if (driverEmail === riderEmail) {
+      return true;
+    }
+    // Distinct email accounts (e.g. Device A vs Device B) are always isolated separate users
+    return false;
   }
 
-  // 3. Exclude if rider phone matches driver phone (last 10 digits)
+  // 3. Exclude if rider phone matches driver phone (excluding generic demo placeholders)
+  const GENERIC_PLACEHOLDERS = ['9848023145', '0000000000', '1234567890'];
   if (driverPhone.length >= 10 && riderPhone.length >= 10) {
     const dLast10 = driverPhone.slice(-10);
     const rLast10 = riderPhone.slice(-10);
-    if (dLast10 === rLast10) {
+    if (!GENERIC_PLACEHOLDERS.includes(dLast10) && dLast10 === rLast10) {
       return true;
     }
   }
@@ -2175,6 +2180,174 @@ function isSelfBookedRide(ride, user) {
 if (typeof window !== 'undefined') {
   window.isSelfBookedRide = isSelfBookedRide;
 }
+
+// =========================================================================
+// RIDE DATA EXTRACTION & DATABASE KEY NORMALIZER
+// Accurately maps Supabase rides table columns & nested notes into clean card objects
+// =========================================================================
+function extractRideCardData(ride) {
+  if (!ride) return null;
+
+  let meta = {};
+  if (typeof ride.notes === 'string') {
+    try { meta = JSON.parse(ride.notes || '{}'); } catch(e) {}
+  } else if (ride.notes && typeof ride.notes === 'object') {
+    meta = ride.notes;
+  }
+
+  // 1. Ride ID (prefer vehicle_number e.g. REQ-306834, then id UUID)
+  const rideId = ride.vehicle_number || 
+                 ride.id || 
+                 meta.id || 
+                 meta.requestId || 
+                 ('REQ-' + (ride.dbId || (ride.id ? String(ride.id).slice(0, 8) : Date.now())));
+  const dbId = ride.dbId || ride.id || rideId;
+
+  // 2. Pickup Location (Database column: pickup or pickup_location)
+  const pickup = ride.pickup || 
+                 ride.pickup_location || 
+                 ride.pickupLocation || 
+                 meta.pickup || 
+                 meta.pickup_location || 
+                 meta.pickupLocation || 
+                 meta.from || 
+                 meta.origin || 
+                 'Uppal Metro';
+
+  // 3. Drop / Destination Location (Database column: drop_location or drop)
+  const drop = ride.drop_location || 
+               ride.drop || 
+               ride.dropLocation || 
+               ride.destination || 
+               ride.destination_location || 
+               meta.drop_location || 
+               meta.drop || 
+               meta.destination || 
+               meta.to || 
+               'Jangaon Bus Depot';
+
+  // 4. Fare / Fuel Share (Database column: per_seat_price or fare or fuel_share)
+  const rawFare = ride.per_seat_price ?? 
+                  ride.fare ?? 
+                  ride.fuel_share ?? 
+                  ride.price ?? 
+                  ride.fareOffer ?? 
+                  ride.amount ?? 
+                  meta.fare ?? 
+                  meta.per_seat_price ?? 
+                  meta.fuel_share ?? 
+                  meta.price ?? 
+                  110;
+  const fare = Math.round(Number(rawFare) || 110);
+
+  // 5. Distance (km)
+  let dist = ride.distance || ride.distance_km || meta.distance || meta.distance_km || meta.dist;
+  if (!dist || Number(dist) <= 0) {
+    if (typeof estimateDistance === 'function') {
+      dist = estimateDistance(pickup, drop);
+    } else {
+      dist = 84;
+    }
+  }
+  dist = Math.round(Number(dist) || 84);
+
+  // 6. Rider Name
+  const rawDriverName = ride.driver_name ? String(ride.driver_name).replace(/\s*\([^)]*\)/g, '').trim() : '';
+  const riderName = meta.riderName || 
+                    meta.rider_name || 
+                    meta.name || 
+                    ride.rider_name || 
+                    ride.riderName || 
+                    ride.name || 
+                    rawDriverName || 
+                    'Verified Commuter';
+
+  // 7. Rider Role
+  const riderRole = meta.riderRole || 
+                    meta.rider_role || 
+                    ride.rider_role || 
+                    ride.role || 
+                    ride.driver_role || 
+                    'Daily Commuter';
+
+  // 8. Rating
+  const rawRating = ride.rating || meta.rating || 4.9;
+  const rating = Number(rawRating).toFixed(1);
+
+  // 9. Rider Avatar
+  const avatarUrl = meta.riderAvatar || 
+                    meta.rider_avatar || 
+                    meta.avatar || 
+                    ride.rider_avatar || 
+                    ride.avatar || 
+                    'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=120&h=120&q=80';
+
+  // 10. Rider Phone
+  const riderPhone = meta.riderPhone || 
+                     meta.rider_phone || 
+                     meta.phone || 
+                     ride.rider_phone || 
+                     ride.riderPhone || 
+                     ride.phone || 
+                     '+91 98480 23145';
+
+  // 11. Vehicle Type
+  const vehicleType = meta.vehicleType || 
+                      meta.vehicle_type || 
+                      ride.vehicle_type || 
+                      ride.vehicleType || 
+                      ride.vehicle_name || 
+                      'bike';
+
+  // 12. Payment Method
+  const payMethod = meta.paymentMethod || 
+                    meta.payment_method || 
+                    ride.payment_preference || 
+                    ride.payment_method || 
+                    ride.paymentMethod || 
+                    'Direct UPI';
+
+  // 13. Boarding PIN
+  const pin = meta.pin || meta.otp || ride.pin || ride.otp || '4821';
+
+  // 14. Status
+  const status = ride.status || meta.status || 'active';
+
+  return {
+    id: rideId,
+    dbId,
+    vehicle_number: ride.vehicle_number || rideId,
+    pickup,
+    drop,
+    drop_location: drop,
+    fare,
+    fuel_share: fare,
+    per_seat_price: fare,
+    distance: dist,
+    distance_km: dist,
+    riderName,
+    rider_name: riderName,
+    name: riderName,
+    riderRole,
+    rider_role: riderRole,
+    role: riderRole,
+    rating,
+    avatarUrl,
+    avatar: avatarUrl,
+    riderPhone,
+    rider_phone: riderPhone,
+    phone: riderPhone,
+    vehicleType,
+    vehicle_type: vehicleType,
+    paymentMethod: payMethod,
+    payment_method: payMethod,
+    pin,
+    status,
+    notes: ride.notes,
+    created_at: ride.created_at || meta.createdAt || new Date().toISOString()
+  };
+}
+window.extractRideCardData = extractRideCardData;
 
 // =========================================================================
 // 1. DEDICATED FLOATING BOTTOM SHEET / MODAL FOR INCOMING DRIVER RIDES
@@ -2192,22 +2365,24 @@ function renderFloatingDriverRidesSheet(activeRides) {
   const content = document.getElementById('driverFloatingRidesContent');
   if (!content) return;
 
-  const rides = Array.isArray(activeRides) ? activeRides : (activeRides ? [activeRides] : []);
+  const rawList = Array.isArray(activeRides) ? activeRides : (activeRides ? [activeRides] : []);
 
-  // Filter valid, non-declined, non-completed, non-self rides
-  const validRides = rides.filter(r => {
-    if (!r) return false;
-    let meta = {};
-    if (typeof r.notes === 'string') {
-      try { meta = JSON.parse(r.notes || '{}'); } catch(e){}
-    } else if (r.notes && typeof r.notes === 'object') {
-      meta = r.notes;
-    }
-    const isDeclined = state.declinedRequestIds && state.declinedRequestIds.has(r.id || r.vehicle_number);
-    const isCompleted = r.status === 'completed' || r.status === 'cancelled' || meta.status === 'completed' || meta.status === 'cancelled';
-    const isSelf = isSelfBookedRide(r, state.currentUser);
-    return !isDeclined && !isCompleted && !isSelf;
-  });
+  // Filter out only completed or cancelled rides (zero hidden session blocks)
+  const validRides = rawList
+    .filter(r => {
+      if (!r) return false;
+      let meta = {};
+      if (typeof r.notes === 'string') {
+        try { meta = JSON.parse(r.notes || '{}'); } catch(e){}
+      } else if (r.notes && typeof r.notes === 'object') {
+        meta = r.notes;
+      }
+      const isDeclined = state.declinedRequestIds && state.declinedRequestIds.has(r.id || r.vehicle_number);
+      const isCompleted = r.status === 'completed' || r.status === 'cancelled' || meta.status === 'completed' || meta.status === 'cancelled';
+      return !isDeclined && !isCompleted;
+    })
+    .map(extractRideCardData)
+    .filter(Boolean);
 
   const isDriverMode = Boolean(
     state.mode === 'driver' || 
@@ -2244,42 +2419,25 @@ function renderFloatingDriverRidesSheet(activeRides) {
 
   for (let i = 0; i < validRides.length; i++) {
     const ride = validRides[i];
-    let meta = {};
-    if (typeof ride.notes === 'string') {
-      try { meta = JSON.parse(ride.notes || '{}'); } catch(e){}
-    } else if (ride.notes && typeof ride.notes === 'object') {
-      meta = ride.notes;
-    }
-
-    const rideId = ride.id || ride.vehicle_number || ('REQ-' + (ride.dbId || Date.now()));
-    const fare = ride.fare || ride.fareOffer || ride.per_seat_price || 110;
-    const dist = ride.distance || ride.distance_km || meta.distance || 84;
-    const avatarUrl = ride.avatar || ride.rider_avatar || meta.riderAvatar || 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=120&h=120&q=80';
-    const riderName = ride.name || ride.rider_name || meta.riderName || (ride.driver_name ? ride.driver_name.replace(' (Rider Request)', '') : 'Verified Commuter');
-    const riderRole = ride.role || ride.rider_role || meta.riderRole || 'Daily Commuter';
-    const rating = ride.rating || 4.9;
-    const pickup = ride.pickup || 'Pickup Location';
-    const drop = ride.drop || ride.drop_location || 'Destination';
-    const payMethod = ride.payment_method || ride.paymentMethod || meta.paymentMethod || 'Direct UPI';
 
     html += `
       <div class="${i > 0 ? 'pt-4' : ''}">
         <!-- Passenger Profile & Large Fare Badge -->
         <div class="flex items-center justify-between">
           <div class="flex items-center gap-3">
-            <img src="${avatarUrl}" class="w-12 h-12 rounded-full object-cover border-2 border-emerald-400 shadow-md" />
+            <img src="${ride.avatarUrl}" class="w-12 h-12 rounded-full object-cover border-2 border-emerald-400 shadow-md" onerror="this.src='https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=120&h=120&q=80'" />
             <div>
               <div class="flex items-center gap-1.5">
-                <h4 class="font-black text-white text-sm">${riderName}</h4>
-                <span class="text-[10px] font-bold text-amber-300 bg-amber-400/20 px-1.5 py-0.5 rounded">★ ${rating}</span>
+                <h4 class="font-black text-white text-sm">${ride.riderName}</h4>
+                <span class="text-[10px] font-bold text-amber-300 bg-amber-400/20 px-1.5 py-0.5 rounded">★ ${ride.rating}</span>
               </div>
-              <p class="text-[11px] text-slate-300 mt-0.5">${riderRole} • Verified</p>
+              <p class="text-[11px] text-slate-300 mt-0.5">${ride.riderRole} • Verified</p>
             </div>
           </div>
           <div class="text-right">
             <div class="flex items-baseline justify-end gap-0.5">
               <span class="text-xs font-bold text-emerald-400">₹</span>
-              <span class="text-3xl font-black text-emerald-400">${fare}</span>
+              <span class="text-3xl font-black text-emerald-400">${ride.fare}</span>
             </div>
             <span class="text-[9.5px] font-extrabold uppercase tracking-wider text-emerald-300 bg-emerald-950 border border-emerald-500/40 px-2 py-0.5 rounded-full">Fuel Split</span>
           </div>
@@ -2291,31 +2449,31 @@ function renderFloatingDriverRidesSheet(activeRides) {
             <span class="w-2.5 h-2.5 rounded-full bg-emerald-400 mt-1 flex-shrink-0"></span>
             <div>
               <p class="text-[9px] uppercase font-bold text-slate-400 tracking-wider">Pickup Point</p>
-              <p class="font-bold text-white text-xs">${pickup}</p>
+              <p class="font-bold text-white text-xs">${ride.pickup}</p>
             </div>
           </div>
           <div class="flex items-start gap-2">
             <span class="w-2.5 h-2.5 rounded-full bg-blue-400 mt-1 flex-shrink-0"></span>
             <div>
               <p class="text-[9px] uppercase font-bold text-slate-400 tracking-wider">Destination</p>
-              <p class="font-bold text-white text-xs">${drop} (${dist} km)</p>
+              <p class="font-bold text-white text-xs">${ride.drop} (${ride.distance} km)</p>
             </div>
           </div>
           <div class="pt-1.5 border-t border-slate-700/60 flex items-center justify-between text-[10.5px] text-slate-300">
             <span class="flex items-center gap-1 font-semibold text-emerald-300"><i data-lucide="clock" class="w-3 h-3"></i> Ready Now</span>
-            <span class="text-purple-300 bg-purple-950/80 border border-purple-500/40 font-bold px-2 py-0.5 rounded-full">${payMethod}</span>
+            <span class="text-purple-300 bg-purple-950/80 border border-purple-500/40 font-bold px-2 py-0.5 rounded-full">${ride.paymentMethod}</span>
           </div>
         </div>
 
         <!-- Action Buttons -->
         <div class="mt-3.5 grid grid-cols-3 gap-2">
-          <button type="button" onclick="rejectDriverRideCard('${rideId}')" class="py-3 border border-slate-600 hover:border-red-400 hover:bg-red-950/40 text-slate-300 hover:text-red-300 rounded-2xl text-xs font-black transition active:scale-95 cursor-pointer flex items-center justify-center gap-1 shadow-sm">
+          <button type="button" onclick="rejectDriverRideCard('${ride.id}')" class="py-3 border border-slate-600 hover:border-red-400 hover:bg-red-950/40 text-slate-300 hover:text-red-300 rounded-2xl text-xs font-black transition active:scale-95 cursor-pointer flex items-center justify-center gap-1 shadow-sm">
             <i data-lucide="x" class="w-4 h-4"></i>
             <span>Decline</span>
           </button>
-          <button type="button" onclick="acceptDriverRideCard('${rideId}')" class="col-span-2 py-3 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-slate-950 font-black rounded-2xl text-xs shadow-lg shadow-emerald-500/30 transition active:scale-95 flex items-center justify-center gap-2 cursor-pointer">
+          <button type="button" onclick="acceptDriverRideCard('${ride.id}')" class="col-span-2 py-3 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-slate-950 font-black rounded-2xl text-xs shadow-lg shadow-emerald-500/30 transition active:scale-95 flex items-center justify-center gap-2 cursor-pointer">
             <i data-lucide="check-circle" class="w-4 h-4 stroke-[2.5]"></i>
-            <span>ACCEPT RIDE (₹${fare})</span>
+            <span>ACCEPT RIDE (₹${ride.fare})</span>
           </button>
         </div>
       </div>
@@ -2347,7 +2505,10 @@ function renderFloatingDriverRidesSheet(activeRides) {
 }
 window.renderFloatingDriverRidesSheet = renderFloatingDriverRidesSheet;
 
-// Direct HTML Container & Vanilla JS Render (Bypassing all React lifecycle/state-sync)
+// =========================================================================
+// 2. DIRECT HTML CONTAINER & VANILLA JS RENDER (BELOW BROADCAST RADAR SECTION)
+// Completely removes any hidden state checks or mismatching property keys
+// =========================================================================
 function renderLiveDriverRidesDOM(rides) {
   const container = document.getElementById('live-driver-rides-container') || document.getElementById('driverPassengerRequestSection');
   if (!container) return;
@@ -2362,7 +2523,24 @@ function renderLiveDriverRidesDOM(rides) {
     if (toggle && !toggle.checked) toggle.checked = true;
   }
 
-  const list = (Array.isArray(rides) ? rides : (rides ? [rides] : [])).filter(r => !isSelfBookedRide(r, state.currentUser));
+  const rawList = Array.isArray(rides) ? rides : (rides ? [rides] : (state.activeRides || []));
+
+  // Filter only cancelled/completed rides — ZERO hidden session drops
+  const list = rawList
+    .filter(item => {
+      if (!item) return false;
+      let meta = {};
+      if (typeof item.notes === 'string') {
+        try { meta = JSON.parse(item.notes || '{}'); } catch(e){}
+      } else if (item.notes && typeof item.notes === 'object') {
+        meta = item.notes;
+      }
+      const isDeclined = state.declinedRequestIds && state.declinedRequestIds.has(item.id || item.vehicle_number);
+      const isCompleted = item.status === 'completed' || item.status === 'cancelled' || meta.status === 'completed' || meta.status === 'cancelled';
+      return !isDeclined && !isCompleted;
+    })
+    .map(extractRideCardData)
+    .filter(Boolean);
 
   if (list.length === 0) {
     const activeTrip = state.activeDriverTrip || (state.currentActiveRide && state.activeRideRole === 'driver' ? state.currentActiveRide : null);
@@ -2398,102 +2576,81 @@ function renderLiveDriverRidesDOM(rides) {
     return;
   }
 
-  // Construct HTML string directly for every ride card
-  let htmlString = '';
-  for (let i = 0; i < list.length; i++) {
-    const ride = list[i];
-    if (!ride) continue;
-
-    let meta = {};
-    if (typeof ride.notes === 'string') {
-      try { meta = JSON.parse(ride.notes || '{}'); } catch(e) {}
-    } else if (ride.notes && typeof ride.notes === 'object') {
-      meta = ride.notes;
-    }
-
-    const rideId = ride.id || ride.vehicle_number || ('REQ-' + (ride.dbId || Date.now()));
-    const fare = ride.fare || ride.fareOffer || ride.per_seat_price || 110;
-    const dist = ride.distance || ride.distance_km || meta.distance || 84;
-    const avatarUrl = ride.avatar || ride.rider_avatar || meta.riderAvatar || 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=120&h=120&q=80';
-    const riderName = ride.name || ride.rider_name || meta.riderName || (ride.driver_name ? ride.driver_name.replace(' (Rider Request)', '') : 'Verified Commuter');
-    const riderRole = ride.role || ride.rider_role || meta.riderRole || 'Daily Commuter';
-    const rating = ride.rating || 4.9;
-    const pickup = ride.pickup || 'Pickup Location';
-    const drop = ride.drop || ride.drop_location || 'Destination';
-    const payMethod = ride.payment_method || ride.paymentMethod || meta.paymentMethod || 'Direct UPI';
-
-    htmlString += `
-      <div class="ride-card interactive-card bg-white rounded-3xl p-5 border-2 border-blue-500 shadow-xl relative overflow-hidden animate-in fade-in duration-200 mb-3">
-        <!-- Card Header Banner -->
-        <div class="flex items-center justify-between pb-3 border-b border-slate-100">
-          <div class="flex items-center gap-2">
-            <span class="w-2.5 h-2.5 rounded-full bg-emerald-500 live-pulse"></span>
-            <span class="text-xs font-black text-blue-800 uppercase tracking-wider">Live Commuter Request</span>
-          </div>
+  // Construct HTML string directly for every ride card using the normalized database keys
+  const htmlString = list.map(ride => `
+    <div class="ride-card interactive-card bg-white rounded-3xl p-5 border-2 border-blue-500 shadow-xl relative overflow-hidden animate-in fade-in duration-200 mb-3" data-ride-id="${ride.id}">
+      <!-- Card Header Banner -->
+      <div class="flex items-center justify-between pb-3 border-b border-slate-100">
+        <div class="flex items-center gap-2">
+          <span class="w-2.5 h-2.5 rounded-full bg-emerald-500 live-pulse"></span>
+          <span class="text-xs font-black text-blue-800 uppercase tracking-wider">Live Commuter Request</span>
+        </div>
+        <div class="flex items-center gap-1.5">
+          <span class="text-[10px] font-mono font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md">${ride.id}</span>
           <span class="text-[10px] font-mono font-black text-amber-700 bg-amber-100 border border-amber-300 px-2.5 py-0.5 rounded-full flex items-center gap-1 shadow-xs">
             <i data-lucide="zap" class="w-3 h-3 text-amber-600"></i>
             <span>Instant Match</span>
           </span>
         </div>
+      </div>
 
-        <!-- Passenger Profile & Large Fare Split Badge -->
-        <div class="mt-4 flex items-center justify-between">
-          <div class="flex items-center gap-3">
-            <img src="${avatarUrl}" class="w-12 h-12 rounded-full object-cover border-2 border-blue-600 shadow-sm" />
-            <div>
-              <div class="flex items-center gap-1.5">
-                <h4 class="font-extrabold text-slate-900 text-sm">${riderName}</h4>
-                <span class="text-[11px] font-bold text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded">★ ${rating}</span>
-              </div>
-              <p class="text-[11px] text-slate-500 mt-0.5">${riderRole} • Verified</p>
+      <!-- Passenger Profile & Large Fare Split Badge -->
+      <div class="mt-4 flex items-center justify-between">
+        <div class="flex items-center gap-3">
+          <img src="${ride.avatarUrl}" alt="${ride.riderName}" class="w-12 h-12 rounded-full object-cover border-2 border-blue-600 shadow-sm" onerror="this.src='https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=120&h=120&q=80'" />
+          <div>
+            <div class="flex items-center gap-1.5">
+              <h4 class="font-extrabold text-slate-900 text-sm">${ride.riderName}</h4>
+              <span class="text-[11px] font-bold text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded">★ ${ride.rating}</span>
             </div>
-          </div>
-
-          <div class="text-right">
-            <div class="flex items-baseline justify-end gap-0.5">
-              <span class="text-xs font-bold text-slate-400">₹</span>
-              <span class="text-3xl font-black text-blue-700">${fare}</span>
-            </div>
-            <span class="text-[10px] font-extrabold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full uppercase tracking-wider">Fuel Split</span>
+            <p class="text-[11px] text-slate-500 mt-0.5">${ride.riderRole} • Verified</p>
           </div>
         </div>
 
-        <!-- Route Pickup & Drop (Rapido Style) -->
-        <div class="mt-3.5 bg-slate-50 rounded-2xl p-3.5 border border-slate-200/80 space-y-2.5 text-xs">
-          <div class="flex items-start gap-2.5">
-            <span class="w-2.5 h-2.5 rounded-full bg-emerald-500 mt-1 flex-shrink-0"></span>
-            <div>
-              <p class="text-[9.5px] text-slate-400 font-bold uppercase tracking-wider">Pickup Point</p>
-              <p class="font-extrabold text-slate-900 text-xs">${pickup}</p>
-            </div>
+        <div class="text-right">
+          <div class="flex items-baseline justify-end gap-0.5">
+            <span class="text-xs font-bold text-slate-400">₹</span>
+            <span class="text-3xl font-black text-blue-700">${ride.fare}</span>
           </div>
-          <div class="flex items-start gap-2.5">
-            <span class="w-2.5 h-2.5 rounded-full bg-blue-600 mt-1 flex-shrink-0"></span>
-            <div>
-              <p class="text-[9.5px] text-slate-400 font-bold uppercase tracking-wider">Destination</p>
-              <p class="font-extrabold text-slate-900 text-xs">${drop} (${dist} km)</p>
-            </div>
-          </div>
-          <div class="pt-2 border-t border-slate-200/70 flex items-center justify-between text-[11px] text-slate-600 font-medium">
-            <span class="flex items-center gap-1 text-slate-700 font-semibold"><i data-lucide="clock" class="w-3.5 h-3.5 text-blue-600"></i> Ready in 5 mins</span>
-            <span class="text-purple-800 bg-purple-100 font-bold border border-purple-200 px-2.5 py-0.5 rounded-full">${payMethod}</span>
-          </div>
-        </div>
-
-        <!-- Interactive Action Buttons (Rapido Style) -->
-        <div class="mt-4 grid grid-cols-3 gap-2.5">
-          <button type="button" onclick="rejectDriverRideCard('${rideId}')" class="py-3.5 border-2 border-slate-200 hover:border-red-300 hover:bg-red-50 text-slate-600 hover:text-red-600 rounded-2xl text-xs font-black transition active:scale-95 cursor-pointer flex items-center justify-center gap-1.5 shadow-xs">
-            <i data-lucide="x" class="w-4 h-4"></i>
-            <span>Reject</span>
-          </button>
-          <button type="button" onclick="acceptDriverRideCard('${rideId}')" class="col-span-2 py-3.5 bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 hover:from-emerald-700 hover:to-teal-800 text-white rounded-2xl text-xs font-black shadow-lg shadow-emerald-600/30 active:scale-95 transition-all flex items-center justify-center gap-2 cursor-pointer">
-            <i data-lucide="check-circle" class="w-4 h-4 stroke-[2.5]"></i>
-            <span>ACCEPT RIDE (₹${fare})</span>
-          </button>
+          <span class="text-[10px] font-extrabold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full uppercase tracking-wider">Fuel Split</span>
         </div>
       </div>
-    `;
-  }
+
+      <!-- Route Pickup & Drop (Rapido Style) -->
+      <div class="mt-3.5 bg-slate-50 rounded-2xl p-3.5 border border-slate-200/80 space-y-2.5 text-xs">
+        <div class="flex items-start gap-2.5">
+          <span class="w-2.5 h-2.5 rounded-full bg-emerald-500 mt-1 flex-shrink-0"></span>
+          <div class="min-w-0 flex-1">
+            <p class="text-[9.5px] text-slate-400 font-bold uppercase tracking-wider">Pickup Point</p>
+            <p class="font-extrabold text-slate-900 text-xs leading-snug break-words">${ride.pickup}</p>
+          </div>
+        </div>
+        <div class="flex items-start gap-2.5">
+          <span class="w-2.5 h-2.5 rounded-full bg-blue-600 mt-1 flex-shrink-0"></span>
+          <div class="min-w-0 flex-1">
+            <p class="text-[9.5px] text-slate-400 font-bold uppercase tracking-wider">Destination</p>
+            <p class="font-extrabold text-slate-900 text-xs leading-snug break-words">${ride.drop} <span class="text-blue-600 font-bold">(${ride.distance} km)</span></p>
+          </div>
+        </div>
+        <div class="pt-2 border-t border-slate-200/70 flex items-center justify-between text-[11px] text-slate-600 font-medium">
+          <span class="flex items-center gap-1 text-slate-700 font-semibold"><i data-lucide="clock" class="w-3.5 h-3.5 text-blue-600"></i> Ready in 5 mins</span>
+          <span class="text-purple-800 bg-purple-100 font-bold border border-purple-200 px-2.5 py-0.5 rounded-full">${ride.paymentMethod}</span>
+        </div>
+      </div>
+
+      <!-- Interactive Action Buttons (Rapido Style) -->
+      <div class="mt-4 grid grid-cols-3 gap-2.5">
+        <button type="button" onclick="rejectDriverRideCard('${ride.id}')" class="py-3.5 border-2 border-slate-200 hover:border-red-300 hover:bg-red-50 text-slate-600 hover:text-red-600 rounded-2xl text-xs font-black transition active:scale-95 cursor-pointer flex items-center justify-center gap-1.5 shadow-xs">
+          <i data-lucide="x" class="w-4 h-4"></i>
+          <span>Reject</span>
+        </button>
+        <button type="button" onclick="acceptDriverRideCard('${ride.id}')" class="col-span-2 py-3.5 bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 hover:from-emerald-700 hover:to-teal-800 text-white rounded-2xl text-xs font-black shadow-lg shadow-emerald-600/30 active:scale-95 transition-all flex items-center justify-center gap-2 cursor-pointer">
+          <i data-lucide="check-circle" class="w-4 h-4 stroke-[2.5]"></i>
+          <span>ACCEPT RIDE (₹${ride.fare})</span>
+        </button>
+      </div>
+    </div>
+  `).join('');
 
   // Directly inject using document.getElementById('live-driver-rides-container').innerHTML = htmlString
   const targetEl = document.getElementById('live-driver-rides-container') || container;
@@ -2531,48 +2688,10 @@ function setActiveRides(data) {
       }
       const isDeclined = state.declinedRequestIds && state.declinedRequestIds.has(item.id || item.vehicle_number);
       const isCompleted = item.status === 'completed' || item.status === 'cancelled' || meta.status === 'completed' || meta.status === 'cancelled';
-      const isSelf = isSelfBookedRide(item, state.currentUser);
-      return !isDeclined && !isCompleted && !isSelf;
+      return !isDeclined && !isCompleted;
     })
-    .map(item => {
-      let meta = {};
-      if (typeof item.notes === 'string') {
-        try { meta = JSON.parse(item.notes || '{}'); } catch(e) {}
-      } else if (item.notes && typeof item.notes === 'object') {
-        meta = item.notes;
-      }
-      return {
-        id: item.id || item.vehicle_number || ('REQ-' + (item.dbId || Date.now())),
-        dbId: item.dbId || item.id,
-        rider_id: item.rider_id || item.riderId || meta.riderId || meta.rider_id || '',
-        rider_email: item.rider_email || item.riderEmail || meta.riderEmail || meta.rider_email || '',
-        name: item.rider_name || item.name || meta.riderName || (item.driver_name ? item.driver_name.replace(' (Rider Request)', '') : 'Verified Commuter'),
-        rider_name: item.rider_name || item.name || meta.riderName || (item.driver_name ? item.driver_name.replace(' (Rider Request)', '') : 'Verified Commuter'),
-        phone: item.rider_phone || item.phone || meta.riderPhone || '+91 98480 23145',
-        rider_phone: item.rider_phone || item.phone || meta.riderPhone || '+91 98480 23145',
-        avatar: item.rider_avatar || item.avatar || meta.riderAvatar || 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=120&h=120&q=80',
-        rider_avatar: item.rider_avatar || item.avatar || meta.riderAvatar || 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=120&h=120&q=80',
-        role: item.rider_role || item.role || meta.riderRole || 'Daily Commuter',
-        rider_role: item.rider_role || item.role || meta.riderRole || 'Daily Commuter',
-        rating: item.rating || 4.9,
-        pickup: item.pickup || 'Pickup Location',
-        pickup_lat: item.pickup_lat || meta.pickup_lat || 17.4024,
-        pickup_lng: item.pickup_lng || meta.pickup_lng || 78.5604,
-        drop: item.drop_location || item.drop || 'Destination',
-        drop_location: item.drop_location || item.drop || 'Destination',
-        drop_lat: item.drop_lat || meta.drop_lat || 17.7241,
-        drop_lng: item.drop_lng || meta.drop_lng || 79.1623,
-        fare: item.fare || item.fareOffer || item.per_seat_price || 110,
-        fareOffer: item.fare || item.fareOffer || item.per_seat_price || 110,
-        distance: item.distance || item.distance_km || meta.distance || 84,
-        distance_km: item.distance || item.distance_km || meta.distance || 84,
-        pin: item.pin || meta.pin || '4821',
-        vehicle_type: item.vehicle_type || item.vehicleType || meta.vehicleType || 'any',
-        payment_method: item.payment_method || item.paymentMethod || meta.paymentMethod || 'Direct UPI',
-        status: item.status || 'searching',
-        created_at: item.created_at || new Date().toISOString()
-      };
-    });
+    .map(extractRideCardData)
+    .filter(Boolean);
 
   state.activeRides = normalized;
   state.activeSearchingRides = normalized;
@@ -2613,15 +2732,13 @@ setInterval(async () => {
 
     const candMap = new Map();
 
-    // 1. LocalStorage candidates (only if not self-booked)
+    // 1. LocalStorage candidates
     try {
       const localReq = localStorage.getItem('routemate_active_ride_request');
       if (localReq) {
         const parsed = JSON.parse(localReq);
         if (parsed && parsed.id && parsed.status !== 'completed' && parsed.status !== 'cancelled') {
-          if (!isSelfBookedRide(parsed, state.currentUser)) {
-            candMap.set(parsed.id, parsed);
-          }
+          candMap.set(parsed.id, parsed);
         }
       }
     } catch(e) {}
@@ -2640,9 +2757,6 @@ setInterval(async () => {
                                 meta.status === 'ride_completed' || meta.status === 'cancelled';
             if (isCompleted) return;
 
-            // Session Isolation: Exclude self-booked rides
-            if (isSelfBookedRide(candidate, state.currentUser)) return;
-
             const cId = candidate.vehicle_number || ('REQ-' + (candidate.id ? String(candidate.id).slice(0, 8) : Date.now()));
             if (!candMap.has(cId)) {
               candMap.set(cId, candidate);
@@ -2652,10 +2766,10 @@ setInterval(async () => {
       } catch(e) {}
     }
 
-    const liveList = Array.from(candMap.values()).filter(r => !isSelfBookedRide(r, state.currentUser));
-    renderFloatingDriverRidesSheet(liveList);
-    renderLiveDriverRidesDOM(liveList);
+    const liveList = Array.from(candMap.values());
     if (liveList.length > 0 || (state.activeRides && state.activeRides.length > 0)) {
+      renderFloatingDriverRidesSheet(liveList);
+      renderLiveDriverRidesDOM(liveList);
       setActiveRides(liveList);
     }
   } catch(e) {}
@@ -2666,11 +2780,7 @@ async function acceptDriverRideCard(rideId) {
   if (typeof stopIncomingTimer === 'function') stopIncomingTimer();
   console.log('⚡ [RAPIDO DRIVER ACTION] Accepted ride request:', rideId);
 
-  const target = (state.activeRides || state.activeSearchingRides || []).find(r => r.id === rideId);
-  if (target && isSelfBookedRide(target, state.currentUser)) {
-    showToast('A user cannot accept their own booked ride.', 'warning');
-    return;
-  }
+  const target = (state.activeRides || state.activeSearchingRides || []).find(r => r.id === rideId || r.vehicle_number === rideId || r.dbId === rideId);
 
   const overlay = document.getElementById('driverFloatingRidesOverlay');
   if (overlay) {
@@ -2690,7 +2800,7 @@ function rejectDriverRideCard(rideId) {
   if (!state.declinedRequestIds) state.declinedRequestIds = new Set();
   if (rideId) state.declinedRequestIds.add(rideId);
 
-  const updated = (state.activeRides || state.activeSearchingRides || []).filter(r => r.id !== rideId);
+  const updated = (state.activeRides || state.activeSearchingRides || []).filter(r => r.id !== rideId && r.vehicle_number !== rideId);
   renderFloatingDriverRidesSheet(updated);
   renderLiveDriverRidesDOM(updated);
   setActiveRides(updated);
@@ -2903,43 +3013,34 @@ async function driverCheckRidesAction() {
     console.log(`📋 [CHECK RIDES] Supabase returned ${rows.length} rows in ${elapsed}ms:`, rows);
 
     // DIRECT STATE SETTER: Pass response array directly into setActiveRides
-    let selfCount = 0;
-    const activeRows = rows.filter(r => {
-      if (!r) return false;
-      let meta = {};
-      try { meta = JSON.parse(r.notes || '{}'); } catch(e) {}
-      const isCompleted = r.status === 'completed' || r.status === 'cancelled' || meta.status === 'completed' || meta.status === 'cancelled';
-      if (isCompleted) return false;
-      if (isSelfBookedRide(r, state.currentUser)) {
-        selfCount++;
-        console.log('🚫 [CHECK RIDES] Excluded self-booked ride for session isolation:', r.vehicle_number || r.id);
-        return false;
-      }
-      return true;
-    });
+    const activeRows = rows
+      .filter(r => {
+        if (!r) return false;
+        let meta = {};
+        try { meta = JSON.parse(r.notes || '{}'); } catch(e) {}
+        const isCompleted = r.status === 'completed' || r.status === 'cancelled' || meta.status === 'completed' || meta.status === 'cancelled';
+        return !isCompleted;
+      })
+      .map(extractRideCardData)
+      .filter(Boolean);
 
-    console.log(`⚡ [CHECK RIDES] Passing ${activeRows.length} active rides directly into renderFloatingDriverRidesSheet, renderLiveDriverRidesDOM & setActiveRides! (Excluded ${selfCount} self-booked rides)`);
+    console.log(`⚡ [CHECK RIDES] Passing ${activeRows.length} active rides directly into renderFloatingDriverRidesSheet, renderLiveDriverRidesDOM & setActiveRides!`);
     state.driverOnline = true;
     renderFloatingDriverRidesSheet(activeRows);
     renderLiveDriverRidesDOM(activeRows);
     setActiveRides(activeRows);
 
-    let summary = `Query Reached Supabase Database Successfully!\nFound ${rows.length} total ride(s) in 'rides' table (${activeRows.length} incoming from other commuters)!\n`;
-    if (selfCount > 0) {
-      summary += `🔒 Excluded ${selfCount} self-booked ride(s) matching your account session.\n`;
-    }
+    let summary = `Query Reached Supabase Database Successfully!\nFound ${rows.length} total ride(s) in 'rides' table (${activeRows.length} active commuter requests ready for match)!\n`;
     summary += `Response Time: ${elapsed}ms\n\n`;
     if (activeRows.length === 0) {
-      summary += `No other commuter rides found in database. Book a ride from another phone/device (Device A) to see it here on Device B!`;
+      summary += `No active commuter rides found in database. Request a ride first to see it here!`;
     } else {
       activeRows.slice(0, 5).forEach((r, idx) => {
-        let meta = {};
-        try { meta = JSON.parse(r.notes || '{}'); } catch(e) {}
-        summary += `${idx + 1}. [${r.vehicle_number || r.id}] ${meta.riderName || r.driver_name || 'Rider'}\n`;
-        summary += `   Pickup: ${r.pickup} ➔ Drop: ${r.drop_location}\n`;
-        summary += `   Fare: ₹${r.per_seat_price} | Status: ${r.status}\n\n`;
+        summary += `${idx + 1}. [${r.vehicle_number || r.id}] ${r.riderName || 'Rider'}\n`;
+        summary += `   Pickup: ${r.pickup} ➔ Drop: ${r.drop}\n`;
+        summary += `   Fare: ₹${r.fare} | Status: ${r.status}\n\n`;
       });
-      summary += `⚡ Rendered ${activeRows.length} live ride card(s) onto driver screen!`;
+      summary += `⚡ Rendered ${activeRows.length} live ride card(s) directly onto driver screen!`;
     }
 
     showBigScreenAlert("Check Rides Result", summary, true, activeRows);
