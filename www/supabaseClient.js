@@ -2490,18 +2490,31 @@ const db = {
         (appState && (appState.driverOnline || appState.mode === 'driver')) ||
         isDriverViewVisible
       );
-      if (!isDriverActive) return;
 
       // Don't show incoming popup if driver has already accepted and is currently driving a ride
       const isTripAccepted = Boolean(
         appState && appState.activeDriverTrip && 
         (appState.activeDriverTrip.status === 'driver_accepted' || appState.activeDriverTrip.status === 'ride_started')
       );
-      if (isTripAccepted) return;
+
+      console.log('🔄 [DRIVER LISTENER LOOP] Polling iteration:', {
+        time: new Date().toLocaleTimeString(),
+        mode: appState?.mode,
+        driverOnline: appState?.driverOnline,
+        isDriverViewVisible: Boolean(isDriverViewVisible),
+        isDriverActive,
+        isTripAccepted,
+        activeDriverTripId: appState?.activeDriverTrip?.id
+      });
+
+      if (!isDriverActive) return;
+      if (isTripAccepted) {
+        console.log('ℹ️ [DRIVER LISTENER LOOP] Driver already in transit with trip:', appState.activeDriverTrip.id);
+        return;
+      }
 
       try {
         let incomingReq = null;
-        console.log('🔍 [DRIVER POLLING LOOP] Checking searching rides... (Driver Mode:', appState?.mode, '| Online:', appState?.driverOnline, ')');
 
         // =========================================================================
         // SOURCE 1: DIRECT LOCAL STORAGE BRIDGE (0ms instant cross-window sync)
@@ -2975,28 +2988,36 @@ const db = {
       // 3. Supabase Direct Cloud Insert (Guaranteed, zero CDN dependency, works on all devices & incognito)
       let data = null;
       try {
+        console.log('💾 [MATCHING ENGINE] Direct inserting into Supabase rides table (fast timeout protected)...');
         const restRes = await supabaseRest('rides', {
           method: 'POST',
           body: dbRow,
-          prefer: 'return=representation'
+          prefer: 'return=representation',
+          timeoutMs: 2500,
+          retries: 0
         });
         if (restRes.ok && restRes.data) {
           data = Array.isArray(restRes.data) ? restRes.data : [restRes.data];
-          console.log('✅ Supabase REST insert successful:', request.id, data);
+          console.log('✅ [MATCHING ENGINE] Supabase REST insert successful:', request.id, data);
         } else {
-          console.warn('⚠️ Supabase REST insert response:', restRes.status, restRes.error);
+          console.warn('⚠️ [MATCHING ENGINE] Supabase REST insert response:', restRes.status, restRes.error);
         }
       } catch (restErr) {
-        console.warn('⚠️ Supabase REST insert error:', restErr);
+        console.warn('⚠️ [MATCHING ENGINE] Supabase REST insert error:', restErr);
       }
 
-      // Also try via client if available and not yet inserted
+      // Also try via client with fast race timeout if available and not yet inserted
       const client = getSupabaseClient();
       if (!data && client) {
         try {
-          const insertRes = await client.from('rides').insert([dbRow]).select();
+          const insertPromise = client.from('rides').insert([dbRow]).select();
+          const toPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 2000));
+          const insertRes = await Promise.race([insertPromise, toPromise]);
           data = insertRes.data;
-        } catch (e) {}
+          console.log('✅ [MATCHING ENGINE] Supabase Client SDK insert successful:', request.id, data);
+        } catch (e) {
+          console.warn('⚠️ [MATCHING ENGINE] Supabase Client SDK insert note:', e.message || e);
+        }
       }
 
       // If cloud was degraded or unreachable, enqueue to offline queue for automatic background sync

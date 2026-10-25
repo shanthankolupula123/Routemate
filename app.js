@@ -2267,13 +2267,19 @@ function renderRiderSearchingCard() {
 
 // 1. Rider Action: Broadcast Instant Ride Request
 async function requestRideAction() {
+  console.log('🚀 [RIDER BOOKING CLICK HANDLER] "Book a Ride" button pressed at:', new Date().toISOString());
+  console.log('📊 [RIDER BOOKING CLICK HANDLER] Initial State:', { mode: state.mode, pickup: state.pickup, drop: state.drop, currentUser: state.currentUser });
+
   if (!state.currentUser) {
     try {
       const cached = JSON.parse(localStorage.getItem('routemate_auth_user') || 'null');
       if (cached && (cached.phone || cached.email)) {
         state.currentUser = cached;
+        console.log('👤 [RIDER BOOKING] Restored user from localStorage:', state.currentUser);
       }
-    } catch (e) {}
+    } catch (e) {
+      console.warn('⚠️ [RIDER BOOKING] Error parsing routemate_auth_user:', e);
+    }
   }
 
   // Auto-provision verified commuter guest session so booking never blocks
@@ -2292,12 +2298,17 @@ async function requestRideAction() {
     };
     state.currentUser = guestUser;
     try { localStorage.setItem('routemate_auth_user', JSON.stringify(guestUser)); } catch (e) {}
+    console.log('👤 [RIDER BOOKING] Auto-provisioned verified guest commuter:', state.currentUser);
   }
 
-  const pickup = (document.getElementById('inputPickup')?.value || state.pickup || 'Uppal Ring Road Metro, Hyderabad').trim();
-  const drop = (document.getElementById('inputDrop')?.value || state.drop || 'Jangaon Bus Depot / Chowrasta').trim();
+  const pickupInputEl = document.getElementById('inputPickup');
+  const dropInputEl = document.getElementById('inputDrop');
+  const pickup = (pickupInputEl?.value || state.pickup || 'Uppal Ring Road Metro, Hyderabad').trim();
+  const drop = (dropInputEl?.value || state.drop || 'Jangaon Bus Depot / Chowrasta').trim();
+  console.log('📍 [RIDER BOOKING] Locations retrieved:', { inputPickup: pickupInputEl?.value, inputDrop: dropInputEl?.value, resolvedPickup: pickup, resolvedDrop: drop });
 
   if (!pickup || !drop) {
+    console.warn('❌ [RIDER BOOKING] Aborted: pickup or destination location is empty!', { pickup, drop });
     showToast('Please set both pickup and destination locations.', 'warning');
     return;
   }
