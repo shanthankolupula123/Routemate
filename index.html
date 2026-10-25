@@ -935,10 +935,11 @@
               </div>
             </div>
 
-            <!-- Live Incoming Passenger Request Cards Section (Rapido-Style Live Cards Directly Under Broadcast Radar) -->
-            <div id="driverPassengerRequestSection" class="space-y-3">
-              <!-- Dynamically populated via setActiveRides() & activeRides.map() in app.js -->
+            <!-- Live Incoming Passenger Request Cards Container (Direct DOM Injection Fallback) -->
+            <div id="live-driver-rides-container" class="space-y-3">
+              <!-- Injected directly via document.getElementById('live-driver-rides-container').innerHTML -->
             </div>
+            <div id="driverPassengerRequestSection" class="hidden"></div>
 
           <!-- 2. Driver Corridor Route & Departure Settings -->
           <div class="bg-white rounded-3xl p-4.5 border border-slate-200 shadow-sm relative overflow-visible z-20 space-y-3">
@@ -3445,13 +3446,13 @@
   <!-- Supabase JS Client SDK v2 (Required for Realtime WebSockets) -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <!-- Routemate Core App & Database Client -->
-  <script src="supabaseClient.js?v=20261025_debug_check_v24"></script>
-  <script src="app.js?v=20261025_debug_check_v24"></script>
-  <script src="maps.js?v=20261025_debug_check_v24"></script>
+  <script src="supabaseClient.js?v=20261025_debug_check_v25"></script>
+  <script src="app.js?v=20261025_debug_check_v25"></script>
+  <script src="maps.js?v=20261025_debug_check_v25"></script>
   <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCpZp3uUEEPF5ZJeVuuQRSGZxBDIgPuMqA&libraries=places,geometry&callback=initGoogleMap" async defer></script>
   <!-- Razorpay Standard Checkout SDK -->
   <script src="https://checkout.razorpay.com/v1/checkout.js" defer></script>
-  <script src="payment.js?v=20261025_debug_check_v24" defer></script>
+  <script src="payment.js?v=20261025_debug_check_v25" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js" defer></script>
 </body>
 </html>

@@ -2013,12 +2013,11 @@ function getActiveTripCardHtml(activeTrip) {
   `;
 }
 
-// Unconditional Direct Mapping Loop: Renders every active ride card immediately
-function renderActiveRidesList(activeRides = state.activeRides || state.activeSearchingRides || []) {
-  const container = document.getElementById('driverPassengerRequestSection');
+// Direct HTML Container & Vanilla JS Render (Bypassing all React lifecycle/state-sync)
+function renderLiveDriverRidesDOM(rides) {
+  const container = document.getElementById('live-driver-rides-container') || document.getElementById('driverPassengerRequestSection');
   if (!container) return;
 
-  // Remove any conflicting conditional wrapper flags or hidden styles
   container.classList.remove('hidden');
   container.style.display = 'block';
 
@@ -2029,13 +2028,11 @@ function renderActiveRidesList(activeRides = state.activeRides || state.activeSe
     if (toggle && !toggle.checked) toggle.checked = true;
   }
 
-  const rides = Array.isArray(activeRides) ? activeRides : [];
-  const activeTrip = state.activeDriverTrip || (state.currentActiveRide && state.activeRideRole === 'driver' ? state.currentActiveRide : null);
-  const hasActiveTrip = activeTrip && activeTrip.status !== 'completed' && activeTrip.status !== 'cancelled';
+  const list = Array.isArray(rides) ? rides : (rides ? [rides] : []);
 
-  // 1. If no active incoming requests, show active trip or standby radar scanning card
-  if (rides.length === 0) {
-    if (hasActiveTrip) {
+  if (list.length === 0) {
+    const activeTrip = state.activeDriverTrip || (state.currentActiveRide && state.activeRideRole === 'driver' ? state.currentActiveRide : null);
+    if (activeTrip && activeTrip.status !== 'completed' && activeTrip.status !== 'cancelled') {
       container.innerHTML = getActiveTripCardHtml(activeTrip);
       if (window.lucide) lucide.createIcons();
       return;
@@ -2043,7 +2040,6 @@ function renderActiveRidesList(activeRides = state.activeRides || state.activeSe
 
     const pShort = (state.driverCorridorPickup || state.pickup || 'Uppal').split(',')[0].trim();
     const dShort = (state.driverCorridorDrop || state.drop || 'Jangaon').split(',')[0].trim();
-
     container.innerHTML = `
       <div class="bg-white rounded-3xl p-6 border border-slate-200 text-center shadow-xs space-y-3">
         <div class="relative w-14 h-14 mx-auto flex items-center justify-center">
@@ -2068,21 +2064,32 @@ function renderActiveRidesList(activeRides = state.activeRides || state.activeSe
     return;
   }
 
-  // 2. DIRECT MAPPING LOOP: activeRides.map((ride) => (...)) to render every single ride card unconditionally
-  const cardsHtml = rides.map((ride) => {
+  // Construct HTML string directly for every ride card
+  let htmlString = '';
+  for (let i = 0; i < list.length; i++) {
+    const ride = list[i];
+    if (!ride) continue;
+
+    let meta = {};
+    if (typeof ride.notes === 'string') {
+      try { meta = JSON.parse(ride.notes || '{}'); } catch(e) {}
+    } else if (ride.notes && typeof ride.notes === 'object') {
+      meta = ride.notes;
+    }
+
     const rideId = ride.id || ride.vehicle_number || ('REQ-' + (ride.dbId || Date.now()));
     const fare = ride.fare || ride.fareOffer || ride.per_seat_price || 110;
-    const dist = ride.distance || ride.distance_km || 84;
-    const avatarUrl = ride.avatar || ride.rider_avatar || 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=120&h=120&q=80';
-    const riderName = ride.name || ride.rider_name || (ride.driver_name ? ride.driver_name.replace(' (Rider Request)', '') : 'Verified Commuter');
-    const riderRole = ride.role || ride.rider_role || 'Daily Commuter';
+    const dist = ride.distance || ride.distance_km || meta.distance || 84;
+    const avatarUrl = ride.avatar || ride.rider_avatar || meta.riderAvatar || 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=120&h=120&q=80';
+    const riderName = ride.name || ride.rider_name || meta.riderName || (ride.driver_name ? ride.driver_name.replace(' (Rider Request)', '') : 'Verified Commuter');
+    const riderRole = ride.role || ride.rider_role || meta.riderRole || 'Daily Commuter';
     const rating = ride.rating || 4.9;
     const pickup = ride.pickup || 'Pickup Location';
     const drop = ride.drop || ride.drop_location || 'Destination';
-    const payMethod = ride.payment_method || ride.paymentMethod || 'Direct UPI';
+    const payMethod = ride.payment_method || ride.paymentMethod || meta.paymentMethod || 'Direct UPI';
 
-    return `
-      <div class="interactive-card bg-white rounded-3xl p-5 border-2 border-blue-500 shadow-xl relative overflow-hidden animate-in fade-in duration-200 mb-3">
+    htmlString += `
+      <div class="ride-card interactive-card bg-white rounded-3xl p-5 border-2 border-blue-500 shadow-xl relative overflow-hidden animate-in fade-in duration-200 mb-3">
         <!-- Card Header Banner -->
         <div class="flex items-center justify-between pb-3 border-b border-slate-100">
           <div class="flex items-center gap-2">
@@ -2152,22 +2159,27 @@ function renderActiveRidesList(activeRides = state.activeRides || state.activeSe
         </div>
       </div>
     `;
-  }).join('');
-
-  if (hasActiveTrip) {
-    container.innerHTML = getActiveTripCardHtml(activeTrip) + '<div class="mt-4 space-y-3"><div class="text-xs font-extrabold uppercase tracking-wider text-slate-500 pl-1">Other Available Commuter Requests</div>' + cardsHtml + '</div>';
-  } else {
-    container.innerHTML = cardsHtml;
   }
+
+  // Directly inject using document.getElementById('live-driver-rides-container').innerHTML = htmlString
+  const targetEl = document.getElementById('live-driver-rides-container') || container;
+  targetEl.innerHTML = htmlString;
 
   // Update status banner count
   const pollStatusEl = document.getElementById('driverLivePollStatus');
   if (pollStatusEl) {
-    pollStatusEl.textContent = `🟢 ${rides.length} Live Commuter Request${rides.length > 1 ? 's' : ''} • Ready to Accept`;
+    pollStatusEl.textContent = `🟢 ${list.length} Live Commuter Request${list.length > 1 ? 's' : ''} • Ready to Accept`;
   }
 
   if (window.lucide) lucide.createIcons();
 }
+window.renderLiveDriverRidesDOM = renderLiveDriverRidesDOM;
+
+// Alias to renderLiveDriverRidesDOM
+function renderActiveRidesList(activeRides = state.activeRides || state.activeSearchingRides || []) {
+  renderLiveDriverRidesDOM(activeRides);
+}
+window.renderActiveRidesList = renderActiveRidesList;
 
 // React useState Equivalent Hook: Direct State Setter
 function setActiveRides(data) {
@@ -2240,15 +2252,15 @@ function setActiveRides(data) {
     }
   }
 
-  // Force UI Re-render immediately via direct mapping loop
-  renderActiveRidesList(normalized);
+  // Force UI Re-render immediately via direct DOM injection fallback
+  renderLiveDriverRidesDOM(normalized);
 }
 window.setActiveRides = setActiveRides;
 window.updateDriverActiveRides = setActiveRides;
 
 // Render Driver Incoming Request Alias
 function renderDriverIncomingRequest() {
-  renderActiveRidesList(state.activeRides || state.activeSearchingRides || []);
+  renderLiveDriverRidesDOM(state.activeRides || state.activeSearchingRides || []);
 }
 window.renderDriverIncomingRequest = renderDriverIncomingRequest;
 
@@ -2537,8 +2549,9 @@ async function driverCheckRidesAction() {
       return !isCompleted;
     });
 
-    console.log(`⚡ [CHECK RIDES] Passing ${activeRows.length} active rides directly into setActiveRides!`);
+    console.log(`⚡ [CHECK RIDES] Passing ${activeRows.length} active rides directly into renderLiveDriverRidesDOM & setActiveRides!`);
     state.driverOnline = true;
+    renderLiveDriverRidesDOM(activeRows);
     setActiveRides(activeRows);
 
     let summary = `Query Reached Supabase Database Successfully!\nFound ${rows.length} total ride(s) in 'rides' table (${activeRows.length} active)!\nResponse Time: ${elapsed}ms\n\n`;

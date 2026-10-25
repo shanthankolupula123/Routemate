@@ -2658,7 +2658,10 @@ const db = {
           }
         }
 
-        // Directly bind to UI component state and render cards feed
+        // Directly bind to UI DOM container and render cards feed
+        if (typeof window !== 'undefined' && typeof window.renderLiveDriverRidesDOM === 'function') {
+          try { window.renderLiveDriverRidesDOM(allActiveRides); } catch (e) {}
+        }
         if (typeof window !== 'undefined' && typeof window.setActiveRides === 'function') {
           try { window.setActiveRides(allActiveRides); } catch (e) {}
         } else if (typeof window !== 'undefined' && typeof window.updateDriverActiveRides === 'function') {
