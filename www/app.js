@@ -1,32 +1,75 @@
 // Routemate - Peer-to-Peer Ride-Sharing Platform Engine
 // Clean startup blue & white UI logic with dynamic fuel-share calculation
 
-// Purge any stale legacy demo drivers or mock bookings from local storage
-(function purgeLegacyDemoData() {
-  try {
-    const DEMO_NAMES = ['ramesh kumar', 'priya sharma', 'vikram reddy', 'live corridor commuter', 'test passenger', 'test rider'];
-    const rawBookings = localStorage.getItem('routemate_my_bookings');
-    if (rawBookings) {
-      const parsed = JSON.parse(rawBookings);
-      if (Array.isArray(parsed)) {
-        const clean = parsed.filter(b => {
-          const d = String(b.driver || b.driverName || '').toLowerCase();
-          return !DEMO_NAMES.some(name => d.includes(name));
-        });
-        localStorage.setItem('routemate_my_bookings', JSON.stringify(clean));
+// Routemate Fresh Storage Reset Engine (v29)
+// Performs automated fresh reset of app data, user sessions, and local storage cache
+const ROUTEMATE_RESET_VERSION_KEY = 'routemate_fresh_reset_v29';
+
+function performFreshAppReset(force = false) {
+  const urlParams = (typeof window !== 'undefined' && window.location) ? new URLSearchParams(window.location.search) : null;
+  const isUrlRequested = urlParams && (urlParams.get('reset') === '1' || urlParams.get('clean') === '1');
+
+  if (force || isUrlRequested || localStorage.getItem(ROUTEMATE_RESET_VERSION_KEY) !== 'true') {
+    console.log('🧹 [FRESH RESET] Purging all stored sessions, cached rides, and app state (v29)...');
+    try {
+      const keysToRemove = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && k !== ROUTEMATE_RESET_VERSION_KEY && (k.startsWith('routemate_') || k.startsWith('sb-'))) {
+          keysToRemove.push(k);
+        }
+      }
+      keysToRemove.forEach(k => {
+        try { localStorage.removeItem(k); } catch(e){}
+      });
+      try { sessionStorage.clear(); } catch(e){}
+      localStorage.setItem(ROUTEMATE_RESET_VERSION_KEY, 'true');
+    } catch (e) {
+      console.warn('Storage purge error:', e);
+    }
+
+    if (typeof document !== 'undefined' && document.documentElement) {
+      document.documentElement.classList.remove('has-persisted-session');
+    }
+
+    // Reset in-memory application state
+    if (typeof state !== 'undefined' && state) {
+      state.currentUser = null;
+      state.currentActiveRide = null;
+      state.activeDriverTrip = null;
+      state.incomingRequest = null;
+      state.activeRides = [];
+      state.activeSearchingRides = [];
+      state.myBookings = [];
+      state.registeredVehicles = [];
+      state.declinedRequestIds = new Set();
+      state.chatMessages = [];
+      state.mode = 'rider';
+      state.activeRideRole = 'rider';
+    }
+
+    if (typeof availableRides !== 'undefined') {
+      availableRides = [];
+    }
+
+    if (typeof matching !== 'undefined' && matching) {
+      matching._activeRequest = null;
+      if (matching._listeners && typeof matching._listeners.clear === 'function') {
+        matching._listeners.clear();
       }
     }
-    const rawReq = localStorage.getItem('routemate_active_ride_request');
-    if (rawReq) {
-      const parsedReq = JSON.parse(rawReq);
-      const rName = String(parsedReq?.rider_name || parsedReq?.name || '').toLowerCase();
-      const dName = String(parsedReq?.driver_name || '').toLowerCase();
-      if (DEMO_NAMES.some(name => rName.includes(name) || dName.includes(name))) {
-        localStorage.removeItem('routemate_active_ride_request');
+
+    if (force || isUrlRequested) {
+      if (typeof window !== 'undefined' && window.location) {
+        window.location.href = window.location.origin + window.location.pathname;
       }
     }
-  } catch(e) {}
-})();
+  }
+}
+
+// Run immediately on script execution
+performFreshAppReset(false);
+window.performFreshAppReset = performFreshAppReset;
 
 // Route distances dictionary (km)
 const ROUTE_DISTANCES = {
@@ -2586,7 +2629,8 @@ setInterval(async () => {
     // 2. Direct Supabase REST fetch
     if (typeof supabaseRest === 'function') {
       try {
-        const res = await supabaseRest('rides?select=*&status=neq.cancelled&order=created_at.desc&limit=15');
+        const recentCutoff = new Date(Date.now() - 3600000).toISOString();
+        const res = await supabaseRest(`rides?select=*&status=neq.cancelled&created_at=gte.${recentCutoff}&order=created_at.desc&limit=15`);
         if (res && res.ok && Array.isArray(res.data)) {
           res.data.forEach(candidate => {
             if (!candidate) return;
@@ -2834,7 +2878,8 @@ async function driverCheckRidesAction() {
 
   try {
     const startTime = Date.now();
-    const restRes = await fetch('https://hjieeilzfbvubkhmlmdg.supabase.co/rest/v1/rides?select=*&status=neq.cancelled&order=created_at.desc&limit=15', {
+    const recentCutoff = new Date(Date.now() - 3600000).toISOString();
+    const restRes = await fetch(`https://hjieeilzfbvubkhmlmdg.supabase.co/rest/v1/rides?select=*&status=neq.cancelled&created_at=gte.${recentCutoff}&order=created_at.desc&limit=15`, {
       method: 'GET',
       headers: {
         'apikey': 'sb_publishable_FD8-opedLq151SNuBbWp9g_bLI5hB_a',
@@ -6283,15 +6328,39 @@ async function handleOnboardingSubmit() {
 
 function handleSignOut() {
   if (confirm('Are you sure you want to log out of Routemate?')) {
-    localStorage.removeItem('routemate_auth_user');
-    sessionStorage.removeItem('routemate_auth_user');
+    try {
+      localStorage.removeItem('routemate_auth_user');
+      sessionStorage.removeItem('routemate_auth_user');
+      localStorage.removeItem('routemate_supabase_auth_token');
+      localStorage.removeItem('routemate_active_ride_request');
+      sessionStorage.removeItem('routemate_active_ride_request');
+      localStorage.removeItem('routemate_registered_vehicles');
+      localStorage.removeItem('routemate_app_mode');
+      localStorage.removeItem('routemate_my_bookings');
+    } catch(e) {}
+
     if (document.documentElement) {
       document.documentElement.classList.remove('has-persisted-session');
     }
     if (window.db && window.db.auth) {
-      window.db.auth.signOut();
+      window.db.auth.signOut().catch(() => {});
     }
+
     state.currentUser = null;
+    state.currentActiveRide = null;
+    state.activeDriverTrip = null;
+    state.incomingRequest = null;
+    state.activeRides = [];
+    state.activeSearchingRides = [];
+    state.myBookings = [];
+    state.registeredVehicles = [];
+    state.chatMessages = [];
+    if (typeof availableRides !== 'undefined') availableRides = [];
+
+    if (typeof matching !== 'undefined' && matching) {
+      matching._activeRequest = null;
+    }
+
     showToast('Signed out of Routemate', 'info');
     showAuthView();
   }

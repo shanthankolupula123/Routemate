@@ -1,6 +1,30 @@
 // Routemate - Supabase Database Client & ORM Helpers
 // Configured with Project URL & Publishable Key
 
+// Automated Fresh Reset Check (v29)
+(function checkFreshStorageReset() {
+  try {
+    const RESET_KEY = 'routemate_fresh_reset_v29';
+    const urlParams = (typeof window !== 'undefined' && window.location) ? new URLSearchParams(window.location.search) : null;
+    const forceClean = urlParams && (urlParams.get('reset') === '1' || urlParams.get('clean') === '1');
+    if (forceClean || localStorage.getItem(RESET_KEY) !== 'true') {
+      const toRemove = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && k !== RESET_KEY && (k.startsWith('routemate_') || k.startsWith('sb-'))) {
+          toRemove.push(k);
+        }
+      }
+      toRemove.forEach(k => {
+        try { localStorage.removeItem(k); } catch(e){}
+      });
+      try { sessionStorage.clear(); } catch(e){}
+      localStorage.setItem(RESET_KEY, 'true');
+      console.log('🧹 [SUPABASE CLIENT] Storage cache and sessions cleanly reset (v29).');
+    }
+  } catch(e) {}
+})();
+
 const SUPABASE_CONFIG = {
   url: 'https://hjieeilzfbvubkhmlmdg.supabase.co',
   publishableKey: 'sb_publishable_FD8-opedLq151SNuBbWp9g_bLI5hB_a'
@@ -2663,7 +2687,8 @@ const db = {
         // SOURCE 3: SUPABASE CLOUD POSTGREST (rides table)
         // =========================================================================
         try {
-          const restRes = await supabaseRest('rides?select=*&status=neq.cancelled&order=created_at.desc&limit=15');
+          const recentCutoff = new Date(Date.now() - 3600000).toISOString();
+          const restRes = await supabaseRest(`rides?select=*&status=neq.cancelled&created_at=gte.${recentCutoff}&order=created_at.desc&limit=15`);
           if (restRes.ok && Array.isArray(restRes.data)) {
             restRes.data.forEach(candidate => {
               if (!candidate) return;
