@@ -125,11 +125,13 @@ async function sendResendEmailOtp(email, otp) {
 /**
  * Persists active OTP in Supabase database for rock-solid cross-device / refresh verification
  */
-async function storeOtpInDb(email, code, expiresAt) {
+async function storeOtpInDb(email, code, expiresAt, name, role) {
   try {
     const supabaseUrl = process.env.SUPABASE_URL || 'https://hjieeilzfbvubkhmlmdg.supabase.co';
     const supabaseKey = process.env.SUPABASE_ANON_KEY || 'sb_publishable_FD8-opedLq151SNuBbWp9g_bLI5hB_a';
     const otpVal = `OTP:${code}:${expiresAt}`;
+    const userRole = role === 'driver' ? 'driver' : 'rider';
+    const userName = name || email.split('@')[0];
 
     // 1. Try PATCH on existing profile
     const patchRes = await fetch(`${supabaseUrl}/rest/v1/profiles?phone=eq.${encodeURIComponent(email)}`, {
@@ -140,7 +142,11 @@ async function storeOtpInDb(email, code, expiresAt) {
         'Content-Type': 'application/json',
         'Prefer': 'return=representation'
       },
-      body: JSON.stringify({ avatar_url: otpVal })
+      body: JSON.stringify({
+        avatar_url: otpVal,
+        ...(name ? { name: userName } : {}),
+        ...(role ? { role: userRole } : {})
+      })
     });
 
     if (patchRes.ok) {
@@ -148,7 +154,7 @@ async function storeOtpInDb(email, code, expiresAt) {
       if (updated && updated.length > 0) return true;
     }
 
-    // 2. If profile did not exist, insert row with valid default name
+    // 2. If profile did not exist, insert row with valid default name and role
     await fetch(`${supabaseUrl}/rest/v1/profiles`, {
       method: 'POST',
       headers: {
@@ -158,7 +164,8 @@ async function storeOtpInDb(email, code, expiresAt) {
       },
       body: JSON.stringify({
         phone: email,
-        name: email.split('@')[0],
+        name: userName,
+        role: userRole,
         avatar_url: otpVal,
         is_verified: false
       })
@@ -221,7 +228,7 @@ module.exports = async (req, res) => {
       // Parallel execution: Dispatch email and store in DB concurrently
       const [emailResult] = await Promise.all([
         sendResendEmailOtp(cleanTarget, otpCode),
-        storeOtpInDb(cleanTarget, otpCode, expiresAt)
+        storeOtpInDb(cleanTarget, otpCode, expiresAt, body.name, body.role)
       ]);
 
       if (!emailResult.success) {

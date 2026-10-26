@@ -93,81 +93,173 @@
   // =========================================================================
   const auth = {
     /**
-     * Send 6-digit OTP code to user's email inbox
+     * Send 6-digit OTP code to user's email inbox via high-speed Resend Email Gateway
+     * Dispatches from auth@routemate.pro directly to user's Gmail/email inbox
      */
     async sendOtp(email, { name, role, phone } = {}) {
-      const client = getSupabase();
-      if (!client) throw new Error('Authentication service is initializing. Please try again.');
-
       const cleanEmail = String(email || '').trim().toLowerCase();
       if (!cleanEmail || !cleanEmail.includes('@')) {
         throw new Error('Please enter a valid email address.');
       }
 
-      console.log('📧 [SUPABASE AUTH] Sending 6-digit OTP to:', cleanEmail);
-      const { data, error } = await client.auth.signInWithOtp({
-        email: cleanEmail,
-        options: {
-          shouldCreateUser: true,
-          data: {
-            name: name || cleanEmail.split('@')[0] || 'Verified Commuter',
-            role: role || 'rider',
-            phone: phone || '',
-            avatar: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=120&h=120&q=80'
-          }
-        }
-      });
+      console.log('📧 [ROUTEMATE AUTH] Sending 6-digit OTP to:', cleanEmail);
 
-      if (error) {
-        console.error('Supabase Send OTP Error:', error);
-        throw error;
+      const apiBase = (typeof window !== 'undefined' && window.location.origin && window.location.origin.startsWith('http') && !window.location.origin.includes('localhost') && !window.location.origin.includes('127.0.0.1'))
+        ? window.location.origin
+        : 'https://www.routemate.pro';
+
+      let lastError = null;
+
+      // 1. Primary: Direct High-Deliverability Resend Email Gateway
+      try {
+        const resp = await fetch(`${apiBase}/api/send-otp`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            email: cleanEmail,
+            name: name || cleanEmail.split('@')[0],
+            role: role || 'rider',
+            phone: phone || ''
+          })
+        });
+
+        const data = await resp.json().catch(() => ({}));
+
+        if (resp.ok && data.success) {
+          console.log('✅ [RESEND OTP] Successfully dispatched OTP to email:', cleanEmail);
+          try {
+            sessionStorage.setItem('routemate_otp_token', data.otpToken || '');
+            sessionStorage.setItem('routemate_otp_expires', String(data.expiresAt || ''));
+            sessionStorage.setItem('routemate_otp_email', cleanEmail);
+          } catch (e) {}
+          return { success: true, email: cleanEmail, provider: 'resend', data };
+        } else {
+          lastError = new Error(data.error || 'Failed to dispatch verification email.');
+        }
+      } catch (networkErr) {
+        console.warn('⚠️ [ROUTEMATE AUTH] Gateway fetch notice:', networkErr.message);
+        lastError = networkErr;
       }
 
-      return { success: true, email: cleanEmail, data };
+      // 2. Secondary Fallback: Supabase Built-in Auth
+      const client = getSupabase();
+      if (client) {
+        try {
+          const { data, error } = await client.auth.signInWithOtp({
+            email: cleanEmail,
+            options: {
+              shouldCreateUser: true,
+              data: {
+                name: name || cleanEmail.split('@')[0] || 'Verified Commuter',
+                role: role || 'rider'
+              }
+            }
+          });
+          if (!error) {
+            return { success: true, email: cleanEmail, provider: 'supabase', data };
+          }
+          console.warn('⚠️ [SUPABASE AUTH FALLBACK] Error:', error.message);
+        } catch (supaErr) {
+          console.warn('⚠️ [SUPABASE AUTH FALLBACK] Exception:', supaErr);
+        }
+      }
+
+      throw lastError || new Error('Failed to send verification code. Please check your email and try again.');
     },
 
     /**
      * Verify 6-digit OTP code entered by the user
      */
     async verifyOtp(email, token, { name, role } = {}) {
-      const client = getSupabase();
-      if (!client) throw new Error('Authentication service is initializing. Please try again.');
-
       const cleanEmail = String(email || '').trim().toLowerCase();
-      const cleanToken = String(token || '').trim();
+      const cleanToken = String(token || '').replace(/\D/g, '').trim();
 
       if (!cleanToken || cleanToken.length < 6) {
         throw new Error('Please enter the complete 6-digit OTP code.');
       }
 
-      console.log('🔑 [SUPABASE AUTH] Verifying OTP for:', cleanEmail);
+      console.log('🔑 [ROUTEMATE AUTH] Verifying OTP for:', cleanEmail);
 
-      // Attempt 1: Standard email OTP type
-      let { data, error } = await client.auth.verifyOtp({
-        email: cleanEmail,
-        token: cleanToken,
-        type: 'email'
-      });
+      const apiBase = (typeof window !== 'undefined' && window.location.origin && window.location.origin.startsWith('http') && !window.location.origin.includes('localhost') && !window.location.origin.includes('127.0.0.1'))
+        ? window.location.origin
+        : 'https://www.routemate.pro';
 
-      // Attempt 2: Signup OTP type if new user registration
-      if (error && !error.message?.includes('expired')) {
-        const signupAttempt = await client.auth.verifyOtp({
+      let otpToken = '';
+      let expiresAt = '';
+      try {
+        otpToken = sessionStorage.getItem('routemate_otp_token') || '';
+        expiresAt = sessionStorage.getItem('routemate_otp_expires') || '';
+      } catch (e) {}
+
+      // 1. Primary: Verify via Routemate API Gateway (Supabase DB + HMAC)
+      try {
+        const resp = await fetch(`${apiBase}/api/verify-otp`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            email: cleanEmail,
+            code: cleanToken,
+            name: name || '',
+            role: role || 'rider',
+            otpToken,
+            expiresAt
+          })
+        });
+
+        const data = await resp.json().catch(() => ({}));
+        if (resp.ok && data.success && data.verified) {
+          console.log('✅ [ROUTEMATE AUTH] OTP verified successfully!');
+          return {
+            user: data.user || {
+              id: 'usr_' + Date.now(),
+              email: cleanEmail,
+              name: name || cleanEmail.split('@')[0],
+              role: role || 'rider',
+              phone: cleanEmail,
+              rating: 4.95,
+              avatar: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=120&h=120&q=80'
+            }
+          };
+        } else if (data && data.error && !data.error.includes('Server error')) {
+          throw new Error(data.error);
+        }
+      } catch (gatewayErr) {
+        if (gatewayErr.message && (gatewayErr.message.includes('Invalid') || gatewayErr.message.includes('expired'))) {
+          throw gatewayErr;
+        }
+        console.warn('⚠️ [ROUTEMATE AUTH] Gateway verify notice:', gatewayErr.message);
+      }
+
+      // 2. Secondary Fallback: Supabase Client verifyOtp
+      const client = getSupabase();
+      if (client) {
+        let { data, error } = await client.auth.verifyOtp({
           email: cleanEmail,
           token: cleanToken,
-          type: 'signup'
+          type: 'email'
         });
-        if (!signupAttempt.error) {
-          data = signupAttempt.data;
-          error = null;
+
+        if (error && !error.message?.includes('expired')) {
+          const signupAttempt = await client.auth.verifyOtp({
+            email: cleanEmail,
+            token: cleanToken,
+            type: 'signup'
+          });
+          if (!signupAttempt.error) {
+            data = signupAttempt.data;
+            error = null;
+          }
+        }
+
+        if (data?.user) {
+          return data;
+        }
+        if (error) {
+          throw error;
         }
       }
 
-      if (error) {
-        console.error('Supabase Verify OTP Error:', error);
-        throw error;
-      }
-
-      return data;
+      throw new Error('Invalid verification code. Please check your email and try again.');
     },
 
     /**

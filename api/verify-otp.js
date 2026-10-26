@@ -83,16 +83,15 @@ module.exports = async (req, res) => {
     }
 
     // 1. Primary Check: Supabase Persistent Database
+    let matchedProfile = null;
     try {
       const supabaseUrl = process.env.SUPABASE_URL || 'https://hjieeilzfbvubkhmlmdg.supabase.co';
       const supabaseKey = process.env.SUPABASE_ANON_KEY || 'sb_publishable_FD8-opedLq151SNuBbWp9g_bLI5hB_a';
       
       for (const cand of candidates) {
         if (isVerified) break;
-        const filterStr = cand.includes('@') 
-          ? `or=(email.ilike.${encodeURIComponent(cand)},phone.ilike.${encodeURIComponent(cand)})`
-          : `phone=eq.${encodeURIComponent(cand)}`;
-        const dbRes = await fetch(`${supabaseUrl}/rest/v1/profiles?${filterStr}&select=id,phone,avatar_url`, {
+        const filterStr = `phone=ilike.${encodeURIComponent(cand)}`;
+        const dbRes = await fetch(`${supabaseUrl}/rest/v1/profiles?${filterStr}&select=id,name,role,rating,phone,avatar_url`, {
           headers: {
             'apikey': supabaseKey,
             'Authorization': `Bearer ${supabaseKey}`
@@ -108,8 +107,14 @@ module.exports = async (req, res) => {
             if (storedCode === cleanCode) {
               if (Date.now() <= storedExpires) {
                 isVerified = true;
+                matchedProfile = rows[0];
                 console.log(`[Verify] OTP successfully verified via database for ${cand}`);
-                // Clear stored code to prevent replay attacks
+                
+                // Clear stored code to prevent replay attacks and update profile
+                const updatePayload = { avatar_url: null, is_verified: true };
+                if (body.name) updatePayload.name = body.name;
+                if (body.role) updatePayload.role = body.role === 'driver' ? 'driver' : 'rider';
+
                 fetch(`${supabaseUrl}/rest/v1/profiles?id=eq.${rows[0].id}`, {
                   method: 'PATCH',
                   headers: {
@@ -117,7 +122,7 @@ module.exports = async (req, res) => {
                     'Authorization': `Bearer ${supabaseKey}`,
                     'Content-Type': 'application/json'
                   },
-                  body: JSON.stringify({ avatar_url: null, is_verified: true })
+                  body: JSON.stringify(updatePayload)
                 }).catch(() => {});
                 break;
               } else {
@@ -148,10 +153,21 @@ module.exports = async (req, res) => {
     }
 
     if (isVerified) {
+      const userObj = {
+        id: (matchedProfile && matchedProfile.id) || ('usr_' + Date.now()),
+        email: cleanIdentifier,
+        name: (body && body.name) || (matchedProfile && matchedProfile.name) || cleanIdentifier.split('@')[0],
+        role: (body && body.role) || (matchedProfile && matchedProfile.role) || 'rider',
+        phone: (matchedProfile && matchedProfile.phone) || cleanIdentifier,
+        rating: (matchedProfile && matchedProfile.rating) || 4.95,
+        avatar: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=120&h=120&q=80'
+      };
+
       return res.status(200).json({
         success: true,
         verified: true,
         status: 'approved',
+        user: userObj,
         to: cleanIdentifier,
         dateUpdated: new Date().toISOString()
       });

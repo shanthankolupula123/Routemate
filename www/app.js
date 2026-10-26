@@ -114,11 +114,11 @@
     return {
       id: user.id || ('usr_' + Date.now()),
       email: user.email || 'user@routemate.local',
-      name: meta.name || user.email?.split('@')[0] || 'Verified Commuter',
-      phone: meta.phone || '+91 98480 23145',
-      role: meta.role || state.pendingAuth.role || 'rider',
-      rating: 4.95,
-      avatar: meta.avatar || meta.avatar_url || meta.picture || 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=120&h=120&q=80'
+      name: user.name || meta.name || user.email?.split('@')[0] || 'Verified Commuter',
+      phone: user.phone || meta.phone || '+91 98480 23145',
+      role: user.role || meta.role || state.pendingAuth.role || 'rider',
+      rating: user.rating || 4.95,
+      avatar: user.avatar || meta.avatar || meta.avatar_url || meta.picture || 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=120&h=120&q=80'
     };
   }
 
