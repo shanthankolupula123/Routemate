@@ -161,7 +161,7 @@
         console.log('👤 [AUTH EVENT]:', event);
         if (session && session.user) {
           const userObj = normalizeAuthUser(session.user);
-          unlockAppWithUser(userObj);
+          unlockAppWithUser(userObj, event === 'SIGNED_IN');
         } else if (event === 'SIGNED_OUT') {
           lockAppToAuthScreen();
         }
@@ -202,7 +202,7 @@
     };
   }
 
-  function unlockAppWithUser(user) {
+  function unlockAppWithUser(user, isExplicitLogin = false) {
     state.currentUser = user;
     try { localStorage.setItem('routemate_user', JSON.stringify(user)); } catch (e) {}
 
@@ -220,17 +220,22 @@
 
     updateProfileUI();
 
-    // If user's registered role is driver, switch to driver view
-    if (user.role === 'driver' && state.mode !== 'driver') {
-      switchMode('driver');
-    } else {
-      setTimeout(() => initMapWidget('riderInteractiveMap', 'rider'), 150);
+    // Determine initial active mode preference
+    const preferredMode = state.pendingAuth?.role || user.role || 'rider';
+    switchMode(preferredMode);
+
+    // Prompt user to pick their travel mode whenever they log in or on fresh session
+    if (isExplicitLogin || !sessionStorage.getItem('mode_prompted')) {
+      setTimeout(() => {
+        openModeSelectionModal();
+      }, 400);
     }
   }
 
   function lockAppToAuthScreen() {
     state.currentUser = null;
     localStorage.removeItem('routemate_user');
+    sessionStorage.removeItem('mode_prompted');
 
     // Show Auth Screen & reset to Step 1
     const authScreen = document.getElementById('authScreen');
@@ -254,6 +259,7 @@
     const pEmailEl = document.getElementById('profileUserEmail');
     const pRoleEl = document.getElementById('profileUserRole');
     const pAvatarEl = document.getElementById('profileUserAvatar');
+    const modeText = document.getElementById('profileCurrentModeText');
 
     if (state.currentUser) {
       const shortName = state.currentUser.name.split(' ')[0];
@@ -261,10 +267,39 @@
       if (avatarEl) avatarEl.src = state.currentUser.avatar;
       if (pNameEl) pNameEl.textContent = state.currentUser.name;
       if (pEmailEl) pEmailEl.textContent = state.currentUser.email;
-      if (pRoleEl) pRoleEl.textContent = `${state.currentUser.role === 'driver' ? 'Verified Driver' : 'Commuter'} • 4.95 ★`;
+      if (pRoleEl) pRoleEl.textContent = `Dual Commuter & Driver • 4.95 ★`;
       if (pAvatarEl) pAvatarEl.src = state.currentUser.avatar;
     }
+
+    if (modeText) {
+      modeText.textContent = state.mode === 'driver' ? '🛵 Driver Mode (Offering Rides)' : '🚗 Commuter Mode (Booking Rides)';
+    }
   }
+
+  window.openModeSelectionModal = function () {
+    const modal = document.getElementById('modeSelectionModal');
+    if (modal) {
+      modal.classList.remove('hidden');
+      if (window.lucide) lucide.createIcons();
+    }
+  };
+
+  window.closeModeSelectionModal = function () {
+    const modal = document.getElementById('modeSelectionModal');
+    if (modal) modal.classList.add('hidden');
+  };
+
+  window.selectModeFromModal = function (chosenMode) {
+    closeModeSelectionModal();
+    sessionStorage.setItem('mode_prompted', 'true');
+    switchMode(chosenMode);
+    if (chosenMode === 'driver') {
+      navigateToTab('drive');
+    } else {
+      navigateToTab('book');
+    }
+    showToast(chosenMode === 'driver' ? '🛵 Mode: Driver • Realtime radar active!' : '🚗 Mode: Commuter • Ready to find & book rides!', 'success');
+  };
 
   window.setAuthTab = function (tab) {
     state.authTab = tab;
@@ -287,7 +322,7 @@
       btnIn.className = 'w-1/2 py-2.5 rounded-full bg-white text-blue-700 shadow-sm transition cursor-pointer';
       btnUp.className = 'w-1/2 py-2.5 rounded-full text-slate-500 hover:text-slate-700 transition cursor-pointer';
       if (nameField) nameField.classList.add('hidden');
-      if (roleField) roleField.classList.add('hidden');
+      if (roleField) roleField.classList.remove('hidden'); // ALWAYS visible on both sign in and sign up
       if (submitBtn) submitBtn.innerHTML = `<i data-lucide="mail" class="w-4 h-4 text-cyan-200"></i><span>Send 6-Digit OTP</span>`;
     }
     if (window.lucide) lucide.createIcons();
@@ -376,7 +411,7 @@
         const userObj = normalizeAuthUser(data.user);
         userObj.name = state.pendingAuth.name || userObj.name;
         userObj.role = state.pendingAuth.role || userObj.role;
-        unlockAppWithUser(userObj);
+        unlockAppWithUser(userObj, true);
         showToast('🎉 Successfully verified! Welcome to Routemate.', 'success');
       } else {
         // Fallback user session construction
@@ -389,7 +424,7 @@
           rating: 4.95,
           avatar: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=120&h=120&q=80'
         };
-        unlockAppWithUser(localUser);
+        unlockAppWithUser(localUser, true);
         showToast('🎉 Verified! Welcome to Routemate.', 'success');
       }
     } catch (err) {
@@ -1100,6 +1135,8 @@
       setActiveNavPill('drive');
       showToast('Switched to Driver Mode • Realtime Radar Live', 'info');
     }
+
+    updateProfileUI();
   };
 
   window.navigateToTab = function (tabName) {

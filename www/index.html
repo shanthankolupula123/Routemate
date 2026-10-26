@@ -39,7 +39,7 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
   <!-- Official Brand Stylesheet -->
-  <link rel="stylesheet" href="styles.css?v=20261026_realtime_broadcast_v39" />
+  <link rel="stylesheet" href="styles.css?v=20261026_dual_mode_selection_v40" />
 </head>
 <body class="bg-slate-50 min-h-screen text-slate-800 pb-28 select-none">
 
@@ -96,18 +96,25 @@
               <input type="text" id="authNameInput" placeholder="Full Name" class="w-full px-3.5 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-semibold focus:outline-none focus:border-blue-600 focus:bg-white transition" />
             </div>
 
-            <div id="authRoleField" class="hidden">
-              <label class="block text-[11px] font-black uppercase text-slate-400 mb-1">Select Primary Role</label>
+            <div id="authRoleField" class="space-y-1.5">
+              <label class="block text-[11px] font-black uppercase tracking-wider text-slate-500">I want to enter as</label>
               <div class="grid grid-cols-2 gap-2 text-xs">
-                <label class="p-2.5 rounded-xl border border-slate-200 flex items-center gap-2 cursor-pointer has-[:checked]:border-blue-600 has-[:checked]:bg-blue-50">
-                  <input type="radio" name="authRole" value="rider" checked class="accent-blue-600" />
-                  <span class="font-bold text-slate-800">Commuter</span>
+                <label class="p-3 rounded-2xl border-2 border-slate-200 flex items-center gap-2.5 cursor-pointer has-[:checked]:border-blue-600 has-[:checked]:bg-blue-50/80 hover:border-slate-300 transition shadow-sm">
+                  <input type="radio" name="authRole" value="rider" checked class="accent-blue-600 w-4 h-4" />
+                  <div>
+                    <span class="font-black text-slate-900 block leading-tight">🚗 Commuter</span>
+                    <span class="text-[10px] text-slate-500 font-medium">Find rides</span>
+                  </div>
                 </label>
-                <label class="p-2.5 rounded-xl border border-slate-200 flex items-center gap-2 cursor-pointer has-[:checked]:border-blue-600 has-[:checked]:bg-blue-50">
-                  <input type="radio" name="authRole" value="driver" class="accent-blue-600" />
-                  <span class="font-bold text-slate-800">Driver</span>
+                <label class="p-3 rounded-2xl border-2 border-slate-200 flex items-center gap-2.5 cursor-pointer has-[:checked]:border-blue-600 has-[:checked]:bg-blue-50/80 hover:border-slate-300 transition shadow-sm">
+                  <input type="radio" name="authRole" value="driver" class="accent-blue-600 w-4 h-4" />
+                  <div>
+                    <span class="font-black text-slate-900 block leading-tight">🛵 Driver</span>
+                    <span class="text-[10px] text-slate-500 font-medium">Offer rides</span>
+                  </div>
                 </label>
               </div>
+              <p class="text-[10px] text-slate-400 font-medium text-center pt-0.5">💡 Both modes are available on your account anytime</p>
             </div>
 
             <div>
@@ -485,6 +492,35 @@
           </div>
         </div>
 
+        <div class="mt-4 p-4 rounded-2xl bg-slate-50 border border-slate-200/80 space-y-3">
+          <div class="flex items-center justify-between">
+            <div>
+              <span class="text-[10px] font-black uppercase text-slate-400">Current Active Mode</span>
+              <h4 id="profileCurrentModeText" class="text-xs font-black text-slate-900">🚗 Commuter Mode</h4>
+            </div>
+            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 text-blue-800 border border-blue-200">
+              Dual Access Enabled
+            </span>
+          </div>
+          <p class="text-[11px] text-slate-500 leading-tight">
+            You can use Routemate to find rides as a commuter or offer rides as a driver. Switch anytime based on your need today.
+          </p>
+          <div class="grid grid-cols-2 gap-2 pt-1">
+            <button type="button" onclick="switchMode('rider'); navigateToTab('book');" class="py-2.5 px-3 rounded-xl border border-slate-200 hover:border-blue-500 bg-white text-xs font-bold text-slate-700 flex items-center justify-center gap-1.5 transition shadow-sm cursor-pointer">
+              <i data-lucide="car" class="w-4 h-4 text-blue-600"></i>
+              <span>Use Commuter</span>
+            </button>
+            <button type="button" onclick="switchMode('driver'); navigateToTab('drive');" class="py-2.5 px-3 rounded-xl border border-slate-200 hover:border-emerald-500 bg-white text-xs font-bold text-slate-700 flex items-center justify-center gap-1.5 transition shadow-sm cursor-pointer">
+              <i data-lucide="bike" class="w-4 h-4 text-emerald-600"></i>
+              <span>Use Driver</span>
+            </button>
+          </div>
+          <button type="button" onclick="openModeSelectionModal()" class="w-full py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 border border-blue-200 transition cursor-pointer">
+            <i data-lucide="compass" class="w-3.5 h-3.5"></i>
+            <span>Change Default Experience</span>
+          </button>
+        </div>
+
         <div class="mt-5 pt-4 border-t border-slate-100 space-y-2">
           <button type="button" onclick="triggerEmergencySOS()" class="w-full py-3 btn-pill-danger text-xs flex items-center justify-center gap-2 cursor-pointer">
             <i data-lucide="alert-triangle" class="w-4 h-4 text-rose-600"></i>
@@ -521,6 +557,57 @@
       <span class="text-[10px] font-bold mt-0.5">Profile</span>
     </button>
   </nav>
+
+  <!-- ========================================================================= -->
+  <!-- MODAL: DUAL-ROLE MODE SELECTION (ASK DRIVER OR COMMUTER UPON SIGN IN) -->
+  <!-- ========================================================================= -->
+  <div id="modeSelectionModal" class="fixed inset-0 z-50 glass-modal hidden flex items-center justify-center p-4">
+    <div class="bg-white rounded-3xl max-w-sm w-full p-6 shadow-2xl text-center space-y-4 border border-slate-100 animate-in fade-in zoom-in-95 duration-200">
+      <div class="w-14 h-14 rounded-2xl bg-gradient-to-tr from-blue-600 to-cyan-500 text-white mx-auto flex items-center justify-center shadow-lg shadow-blue-500/25">
+        <i data-lucide="compass" class="w-7 h-7"></i>
+      </div>
+      <div>
+        <h3 class="text-base font-black text-slate-900 tracking-tight">How would you like to travel?</h3>
+        <p class="text-xs text-slate-500 mt-1">Select your mode for now. You can switch between Commuter and Driver anytime!</p>
+      </div>
+
+      <div class="space-y-3 text-left">
+        <!-- Option 1: Commuter -->
+        <button type="button" onclick="selectModeFromModal('rider')" class="w-full p-3.5 rounded-2xl border-2 border-blue-500/30 hover:border-blue-600 bg-blue-50/50 hover:bg-blue-50 flex items-center gap-3 transition group cursor-pointer shadow-sm text-left">
+          <div class="w-11 h-11 rounded-2xl bg-blue-600 text-white flex items-center justify-center flex-shrink-0 shadow-md">
+            <i data-lucide="car" class="w-6 h-6"></i>
+          </div>
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center justify-between">
+              <span class="font-black text-sm text-slate-900">🚗 Commuter (Rider)</span>
+              <span class="text-[10px] font-bold text-blue-700 bg-blue-100 px-1.5 py-0.5 rounded-full">Book</span>
+            </div>
+            <p class="text-[11px] text-slate-500 mt-0.5 leading-tight">Find nearby corridor rides, split fuel costs & travel safe.</p>
+          </div>
+        </button>
+
+        <!-- Option 2: Driver -->
+        <button type="button" onclick="selectModeFromModal('driver')" class="w-full p-3.5 rounded-2xl border-2 border-emerald-500/30 hover:border-emerald-600 bg-emerald-50/50 hover:bg-emerald-50 flex items-center gap-3 transition group cursor-pointer shadow-sm text-left">
+          <div class="w-11 h-11 rounded-2xl bg-emerald-600 text-white flex items-center justify-center flex-shrink-0 shadow-md">
+            <i data-lucide="bike" class="w-6 h-6"></i>
+          </div>
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center justify-between">
+              <span class="font-black text-sm text-slate-900">🛵 Driver (Offer Ride)</span>
+              <span class="text-[10px] font-bold text-emerald-700 bg-emerald-100 px-1.5 py-0.5 rounded-full">Drive</span>
+            </div>
+            <p class="text-[11px] text-slate-500 mt-0.5 leading-tight">Broadcast your corridor route, pick up commuters & share fuel cost.</p>
+          </div>
+        </button>
+      </div>
+
+      <div class="pt-1">
+        <p class="text-[10px] font-semibold text-slate-400">
+          ⚡ One single account supports both booking and driving whenever you need.
+        </p>
+      </div>
+    </div>
+  </div>
 
   <!-- ========================================================================= -->
   <!-- MODAL: DRIVER PIN VERIFICATION -->
@@ -560,7 +647,7 @@
   </audio>
 
   <!-- Core Scripts -->
-  <script src="supabaseClient.js?v=20261026_realtime_broadcast_v39"></script>
-  <script src="app.js?v=20261026_realtime_broadcast_v39"></script>
+  <script src="supabaseClient.js?v=20261026_dual_mode_selection_v40"></script>
+  <script src="app.js?v=20261026_dual_mode_selection_v40"></script>
 </body>
 </html>
