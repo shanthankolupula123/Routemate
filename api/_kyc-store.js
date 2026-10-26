@@ -1,7 +1,8 @@
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 
-const STORE_PATH = path.join('/tmp', 'routemate_kyc_store.json');
+const STORE_PATH = path.join(os.tmpdir() || '/tmp', 'routemate_kyc_store.json');
 
 function getStore() {
   try {

@@ -56,6 +56,21 @@
       drop: []
     },
     activities: [],
+    wallet: {
+      balance: 100.0,
+      transactions: [],
+      welcomeBonusCredited: true
+    },
+    driverUpi: {
+      upiId: '',
+      upiQr: ''
+    },
+    ratingState: {
+      activeRide: null,
+      selectedStars: 5,
+      selectedTags: new Set(['Smooth & Safe Ride', 'Polite Driver']),
+      chosenPaymentMethod: 'upi'
+    },
     kyc: {
       status: 'not_submitted', // 'not_submitted' | 'pending' | 'approved' | 'rejected'
       submission: null,
@@ -71,7 +86,10 @@
     },
     admin: {
       submissions: [],
+      feedbacks: [],
       activeFilter: 'pending', // 'pending' | 'approved' | 'rejected' | 'all'
+      activeSafetyFilter: 'alerts', // 'alerts' | 'low' | 'all'
+      activeSection: 'kyc', // 'kyc' | 'safety'
       isLoading: false
     }
   };
@@ -564,6 +582,16 @@
     // Populate user's registered vehicles in profile
     if (typeof renderProfileVehicles === 'function') {
       renderProfileVehicles();
+    }
+
+    // Populate Driver UPI ID display in profile
+    const profileUpiEl = document.getElementById('profileDriverUpiDisplay');
+    if (profileUpiEl) {
+      profileUpiEl.textContent = state.driverUpi?.upiId || (state.kyc?.submission?.upi_id || 'Not Set (Tap "Set UPI ID")');
+    }
+
+    if (typeof updateWalletDisplays === 'function') {
+      updateWalletDisplays();
     }
   }
 
@@ -1825,8 +1853,8 @@
           localStorage.setItem('routemate_user_rides', JSON.stringify(filtered.slice(0, 30)));
         } catch (e) {}
 
-        window.db.matching.startRiderPolling(result.request.id, (acceptedData) => {
-          handleDriverAcceptedRiderRequest(acceptedData);
+        window.db.matching.startRiderPolling(result.request.id, (statusData) => {
+          handleRiderStatusUpdate(statusData);
         });
       } else {
         showToast('Failed to broadcast ride. Please check connection.', 'danger');
@@ -1930,13 +1958,31 @@
     if (window.lucide) lucide.createIcons();
   }
 
-  function handleDriverAcceptedRiderRequest(acceptedData) {
+  function handleRiderStatusUpdate(statusData) {
     if (!state.activeRiderRequest) return;
-    state.activeRiderRequest.status = 'driver_accepted';
-    state.activeRiderRequest.driver = acceptedData.driver;
-    renderRiderActiveHUD(state.activeRiderRequest);
-    playNotificationSound();
-    showToast(`🎉 Driver ${acceptedData.driver?.name || ''} accepted your ride!`, 'success');
+
+    if (statusData.status === 'driver_accepted' || statusData.status === 'accepted') {
+      state.activeRiderRequest.status = 'driver_accepted';
+      state.activeRiderRequest.driver = statusData.driver;
+      renderRiderActiveHUD(state.activeRiderRequest);
+      playNotificationSound();
+      showToast(`🎉 Driver ${statusData.driver?.name || ''} accepted your ride!`, 'success');
+    } else if (statusData.status === 'ride_started') {
+      state.activeRiderRequest.status = 'ride_started';
+      if (statusData.driver) state.activeRiderRequest.driver = statusData.driver;
+      renderRiderActiveHUD(state.activeRiderRequest);
+      showToast('Trip is now in progress! Enjoy your highway commute.', 'info');
+    } else if (statusData.status === 'ride_completed' || statusData.status === 'completed') {
+      const completedRide = { ...state.activeRiderRequest, ...statusData };
+      state.activeRiderRequest = null;
+      const card = document.getElementById('riderActiveCard');
+      if (card) {
+        card.classList.add('hidden');
+        card.innerHTML = '';
+      }
+      playNotificationSound();
+      showRidePaymentAndRatingModal(completedRide);
+    }
   }
 
   window.cancelRiderActiveRequest = async function () {
@@ -2260,21 +2306,74 @@
 
   window.completeDriverTripAction = async function () {
     if (!state.activeDriverTrip) return;
-    const fare = state.activeDriverTrip.fare;
+    const trip = state.activeDriverTrip;
+    const fare = trip.fare;
+    const vehicleType = (trip.vehicle || trip.vehicle_type || 'bike').toLowerCase();
 
-    await window.db.matching.completeRide(state.activeDriverTrip.id);
-    if (state.maps.driver) {
-      if (state.mapMarkers.driverRouteLine) { state.maps.driver.removeLayer(state.mapMarkers.driverRouteLine); state.mapMarkers.driverRouteLine = null; }
-      if (state.mapMarkers.driverPickup) { state.maps.driver.removeLayer(state.mapMarkers.driverPickup); state.mapMarkers.driverPickup = null; }
-      if (state.mapMarkers.driverDrop) { state.maps.driver.removeLayer(state.mapMarkers.driverDrop); state.mapMarkers.driverDrop = null; }
+    let commissionFee = 5;
+    if (vehicleType.includes('car')) commissionFee = 18;
+    else if (vehicleType.includes('auto')) commissionFee = 10;
+
+    try {
+      showToast('Completing ride and recording fuel share...', 'info');
+
+      // Deduct dynamic vehicle-wise platform commission from driver in-app wallet
+      if (window.db?.kyc?.deductDriverCommission && state.currentUser) {
+        try {
+          const deductRes = await window.db.kyc.deductDriverCommission({
+            userId: state.currentUser.id,
+            vehicleType,
+            rideId: trip.id,
+            fare,
+            paymentMethod: 'cash'
+          });
+          if (deductRes && deductRes.wallet_balance !== undefined) {
+            state.wallet.balance = Number(deductRes.wallet_balance);
+            state.wallet.transactions = deductRes.wallet_transactions || state.wallet.transactions;
+            if (typeof updateWalletDisplays === 'function') updateWalletDisplays();
+          }
+        } catch (comErr) {
+          console.warn('Commission deduction warning:', comErr);
+        }
+      }
+
+      await window.db.matching.completeRide(trip.id, {
+        upiId: state.driverUpi?.upiId || state.kyc?.submission?.upi_id || '',
+        driverName: state.currentUser?.name || 'Verified Driver',
+        fare,
+        vehicleType,
+        vehicleNumber: state.kyc?.submission?.vehicle_number || ''
+      });
+
+      if (state.maps.driver) {
+        if (state.mapMarkers.driverRouteLine) { state.maps.driver.removeLayer(state.mapMarkers.driverRouteLine); state.mapMarkers.driverRouteLine = null; }
+        if (state.mapMarkers.driverPickup) { state.maps.driver.removeLayer(state.mapMarkers.driverPickup); state.mapMarkers.driverPickup = null; }
+        if (state.mapMarkers.driverDrop) { state.maps.driver.removeLayer(state.mapMarkers.driverDrop); state.mapMarkers.driverDrop = null; }
+      }
+      state.activeDriverTrip = null;
+      renderDriverActiveTripCard();
+      startDriverRadar();
+
+      if (state.wallet.balance < 0) {
+        showToast(`🎉 Ride Completed! ₹${fare} collected. Wallet balance is -₹${Math.abs(state.wallet.balance).toFixed(2)}. Please recharge soon.`, 'warning');
+      } else {
+        showToast(`🎉 Ride Completed! ₹${fare} collected via Direct UPI. (₹${commissionFee} platform fee deducted)`, 'success');
+      }
+    } catch (err) {
+      console.error('Complete ride error:', err);
+      showToast('Failed to complete ride: ' + err.message, 'danger');
     }
-    state.activeDriverTrip = null;
-    renderDriverActiveTripCard();
-    startDriverRadar();
-    showToast(`🎉 Ride Completed! ₹${fare} fuel share collected via Direct UPI.`, 'success');
   };
 
   window.toggleDriverOnline = function () {
+    if (!state.driverOnline && (state.wallet?.balance || 0) < 0) {
+      showToast('⚠️ Negative wallet balance! Recharge your wallet to resume receiving rides.', 'warning');
+      if (typeof openDriverWalletRechargeModal === 'function') {
+        openDriverWalletRechargeModal(Math.max(50, Math.ceil(Math.abs(state.wallet.balance))));
+      }
+      return;
+    }
+
     state.driverOnline = !state.driverOnline;
     const btn = document.getElementById('btnToggleDriverOnline');
     const title = document.getElementById('driverStatusTitle');
@@ -2736,6 +2835,22 @@
       state.kyc.status = status;
       state.kyc.submission = submission;
 
+      // Extract driver wallet balance, welcome bonus, and personal UPI ID
+      if (kycRes) {
+        const sub = kycRes.submission || kycRes;
+        if (sub.wallet_balance !== undefined) {
+          state.wallet.balance = Number(sub.wallet_balance);
+        } else if (kycRes.wallet_balance !== undefined) {
+          state.wallet.balance = Number(kycRes.wallet_balance);
+        }
+        if (Array.isArray(sub.wallet_transactions)) {
+          state.wallet.transactions = sub.wallet_transactions;
+        }
+        if (sub.upi_id) state.driverUpi.upiId = sub.upi_id;
+        if (sub.upi_qr) state.driverUpi.upiQr = sub.upi_qr;
+        if (typeof updateWalletDisplays === 'function') updateWalletDisplays();
+      }
+
       if (!gateContainer) return;
 
       // -----------------------------------------------------------------------
@@ -2935,12 +3050,16 @@
     // Prefill user details if available
     const nameInput = document.getElementById('kycInputDriverName');
     const phoneInput = document.getElementById('kycInputDriverPhone');
+    const upiInput = document.getElementById('kycInputUpiId');
     if (nameInput && state.currentUser?.name) {
       nameInput.value = state.currentUser.name;
     }
     if (phoneInput && state.currentUser?.phone) {
       const cleanPhone = String(state.currentUser.phone).replace(/\D/g, '').slice(-10);
       phoneInput.value = cleanPhone;
+    }
+    if (upiInput && (state.driverUpi?.upiId || state.kyc?.submission?.upi_id)) {
+      upiInput.value = state.driverUpi?.upiId || state.kyc?.submission?.upi_id;
     }
 
     const errBox = document.getElementById('kycFormErrorMsg');
@@ -3176,6 +3295,7 @@
       const driverPhone = '+91' + document.getElementById('kycInputDriverPhone')?.value.replace(/\D/g, '');
       const dlNumber = document.getElementById('kycInputDlNumber')?.value.trim().toUpperCase();
       const aadhaarNumber = document.getElementById('kycInputAadhaarNumber')?.value.replace(/\D/g, '');
+      const upiId = document.getElementById('kycInputUpiId')?.value.trim() || state.driverUpi?.upiId || '';
 
       const payload = {
         userId: user.id,
@@ -3186,6 +3306,8 @@
         driver_phone: driverPhone,
         driverEmail: user.email,
         driver_email: user.email,
+        upiId,
+        upi_id: upiId,
         driverPhoto: state.kyc.formData.driver_photo,
         driver_photo: state.kyc.formData.driver_photo,
         dlNumber,
@@ -3731,6 +3853,18 @@
                 <span class="font-bold text-slate-900 text-xs">${formattedAadhaar}</span>
               </div>
             </div>
+            <div class="col-span-2 pt-1 border-t border-slate-200/60 flex items-center justify-between">
+              <div>
+                <span class="text-[10px] text-slate-400 uppercase font-sans font-bold block">Direct P2P UPI ID</span>
+                <span class="font-bold text-slate-900 text-xs font-mono">${sub.upi_id || sub.upiId || 'Not Configured'}</span>
+              </div>
+              <div class="text-right">
+                <span class="text-[10px] text-slate-400 uppercase font-sans font-bold block">Driver Wallet</span>
+                <span class="font-bold text-xs ${Number(sub.wallet_balance !== undefined ? sub.wallet_balance : 100) < 0 ? 'text-rose-600' : 'text-emerald-700'}">
+                  ₹${Number(sub.wallet_balance !== undefined ? sub.wallet_balance : 100).toFixed(2)}
+                </span>
+              </div>
+            </div>
           </div>
 
           <!-- Document Photos Gallery (Clickable Lightbox) -->
@@ -3935,6 +4069,667 @@
       console.error('Admin vehicle decision error:', err);
       showToast('Failed to update vehicle status: ' + err.message, 'danger');
     }
+  };
+
+  // =========================================================================
+  // DRIVER IN-APP WALLET, DYNAMIC COMMISSION & DIRECT P2P UPI MANAGEMENT
+  // =========================================================================
+
+  function updateWalletDisplays() {
+    const balEl = document.getElementById('driverWalletBalanceDisplay');
+    const negAlert = document.getElementById('driverWalletNegativeAlert');
+    const rechargeBal = document.getElementById('rechargeModalCurrentBalance');
+    const profileUpi = document.getElementById('profileDriverUpiDisplay');
+    const bonusBadge = document.getElementById('driverWalletBonusBadge');
+
+    const bal = Number(state.wallet?.balance !== undefined ? state.wallet.balance : 100);
+
+    if (balEl) {
+      balEl.textContent = (bal < 0 ? `-₹${Math.abs(bal).toFixed(2)}` : `₹${bal.toFixed(2)}`);
+      balEl.className = bal < 0 ? 'text-lg font-black text-rose-400' : 'text-lg font-black text-white';
+    }
+
+    if (rechargeBal) {
+      rechargeBal.textContent = (bal < 0 ? `-₹${Math.abs(bal).toFixed(2)}` : `₹${bal.toFixed(2)}`);
+      rechargeBal.className = bal < 0 ? 'text-xl font-black text-rose-600' : 'text-xl font-black text-slate-900';
+    }
+
+    if (negAlert) {
+      if (bal < 0) negAlert.classList.remove('hidden');
+      else negAlert.classList.add('hidden');
+    }
+
+    if (profileUpi) {
+      profileUpi.textContent = state.driverUpi?.upiId || (state.kyc?.submission?.upi_id || 'Not Set (Tap "Set UPI ID")');
+    }
+
+    if (bonusBadge) {
+      if (bal >= 100) {
+        bonusBadge.classList.remove('hidden');
+      } else {
+        bonusBadge.classList.add('hidden');
+      }
+    }
+
+    renderDriverWalletTransactions();
+  }
+  window.updateWalletDisplays = updateWalletDisplays;
+
+  function renderDriverWalletTransactions() {
+    const drawer = document.getElementById('driverWalletHistoryDrawer');
+    if (!drawer) return;
+    const txs = state.wallet?.transactions || [];
+    if (txs.length === 0) {
+      drawer.innerHTML = `<div class="text-[10px] text-slate-400 text-center py-1">No transaction history yet.</div>`;
+      return;
+    }
+    drawer.innerHTML = txs.slice(-8).reverse().map(tx => {
+      const isCredit = tx.type === 'credit';
+      const sign = isCredit ? '+' : '-';
+      const color = isCredit ? 'text-emerald-400' : 'text-rose-400';
+      const timeStr = tx.timestamp ? new Date(tx.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Recent';
+      return `
+        <div class="flex items-center justify-between text-[10px] py-1 border-b border-white/5">
+          <div class="truncate max-w-[190px]">
+            <span class="font-bold text-slate-200 block truncate">${tx.description || tx.reason || 'Transaction'}</span>
+            <span class="text-slate-400 text-[9px]">${timeStr}</span>
+          </div>
+          <span class="font-mono font-bold ${color}">${sign}₹${Math.abs(Number(tx.amount || 0)).toFixed(2)}</span>
+        </div>
+      `;
+    }).join('');
+  }
+  window.renderDriverWalletTransactions = renderDriverWalletTransactions;
+
+  window.toggleDriverWalletHistory = function () {
+    const drawer = document.getElementById('driverWalletHistoryDrawer');
+    if (drawer) {
+      drawer.classList.toggle('hidden');
+    }
+  };
+
+  let selectedRechargeAmount = 100;
+
+  window.openDriverWalletRechargeModal = function (recommendedAmt) {
+    const modal = document.getElementById('driverWalletRechargeModal');
+    if (!modal) return;
+    const amt = recommendedAmt && recommendedAmt > 0 ? recommendedAmt : 100;
+    selectRechargeAmount(amt);
+    updateWalletDisplays();
+    modal.classList.remove('hidden');
+    if (window.lucide) lucide.createIcons();
+  };
+
+  window.closeDriverWalletRechargeModal = function () {
+    const modal = document.getElementById('driverWalletRechargeModal');
+    if (modal) modal.classList.add('hidden');
+  };
+
+  window.selectRechargeAmount = function (amt) {
+    selectedRechargeAmount = Number(amt) || 100;
+    const amounts = [50, 100, 200, 500];
+    amounts.forEach(a => {
+      const btn = document.getElementById(`rechargeAmt-${a}`);
+      if (!btn) return;
+      if (a === selectedRechargeAmount) {
+        btn.className = 'py-2 rounded-xl border-2 border-blue-600 bg-blue-50 text-blue-700 text-xs font-black transition cursor-pointer';
+      } else {
+        btn.className = 'py-2 rounded-xl border border-slate-200 text-xs font-bold hover:border-blue-500 transition cursor-pointer';
+      }
+    });
+
+    const customInput = document.getElementById('inputCustomRechargeAmount');
+    if (customInput) customInput.value = '';
+
+    const btnText = document.getElementById('btnExecuteWalletRechargeText');
+    if (btnText) btnText.textContent = `Pay & Recharge ₹${selectedRechargeAmount}`;
+  };
+
+  window.handleExecuteWalletRecharge = async function () {
+    const user = state.currentUser;
+    if (!user) {
+      showToast('Please sign in to recharge wallet.', 'warning');
+      return;
+    }
+
+    const customInput = document.getElementById('inputCustomRechargeAmount');
+    const customAmt = customInput && customInput.value ? parseFloat(customInput.value) : null;
+    const finalAmount = (customAmt && customAmt >= 10) ? customAmt : selectedRechargeAmount;
+
+    if (!finalAmount || finalAmount < 10) {
+      showToast('Minimum recharge amount is ₹10.', 'warning');
+      return;
+    }
+
+    const btn = document.getElementById('btnExecuteWalletRecharge');
+    const btnText = document.getElementById('btnExecuteWalletRechargeText');
+    if (btn) btn.disabled = true;
+    if (btnText) btnText.textContent = `Processing ₹${finalAmount}...`;
+
+    try {
+      showToast(`Initiating instant wallet recharge of ₹${finalAmount}...`, 'info');
+
+      if (window.db?.kyc?.rechargeDriverWallet) {
+        const res = await window.db.kyc.rechargeDriverWallet({
+          userId: user.id,
+          amount: finalAmount
+        });
+
+        if (res && res.wallet_balance !== undefined) {
+          state.wallet.balance = Number(res.wallet_balance);
+          state.wallet.transactions = res.wallet_transactions || state.wallet.transactions;
+        } else {
+          state.wallet.balance = (state.wallet.balance || 0) + finalAmount;
+        }
+
+        updateWalletDisplays();
+        closeDriverWalletRechargeModal();
+        showToast(`🎉 ₹${finalAmount} added to wallet successfully! Balance: ₹${state.wallet.balance.toFixed(2)}`, 'success');
+      }
+    } catch (err) {
+      console.error('Wallet recharge error:', err);
+      showToast('Failed to recharge wallet: ' + err.message, 'danger');
+    } finally {
+      if (btn) btn.disabled = false;
+      if (btnText) btnText.textContent = `Pay & Recharge ₹${selectedRechargeAmount}`;
+    }
+  };
+
+  window.openUpdateUpiModal = function () {
+    const modal = document.getElementById('updateUpiModal');
+    const input = document.getElementById('inputUpdateUpiId');
+    if (input) input.value = state.driverUpi.upiId || (state.kyc?.submission?.upi_id || '');
+    if (modal) modal.classList.remove('hidden');
+    if (window.lucide) lucide.createIcons();
+  };
+
+  window.closeUpdateUpiModal = function () {
+    const modal = document.getElementById('updateUpiModal');
+    if (modal) modal.classList.add('hidden');
+  };
+
+  window.handleUpdateUpiSubmit = async function (e) {
+    if (e && e.preventDefault) e.preventDefault();
+    const user = state.currentUser;
+    if (!user) {
+      showToast('Please sign in to update UPI ID.', 'warning');
+      return;
+    }
+
+    const input = document.getElementById('inputUpdateUpiId');
+    const upiId = (input?.value || '').trim();
+
+    if (!upiId || !upiId.includes('@')) {
+      showToast('Please enter a valid UPI ID (must contain @, e.g. mobile@upi).', 'warning');
+      return;
+    }
+
+    const btn = document.getElementById('btnSaveUpiSubmit');
+    if (btn) btn.disabled = true;
+
+    try {
+      showToast('Updating personal UPI ID...', 'info');
+
+      if (window.db?.kyc?.updateDriverUpi) {
+        await window.db.kyc.updateDriverUpi(user.id, upiId);
+      }
+
+      state.driverUpi.upiId = upiId;
+      state.driverUpi.upiQr = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(`upi://pay?pa=${upiId}&pn=${encodeURIComponent(user.name || 'Driver')}&cu=INR`)}`;
+      if (state.kyc?.submission) {
+        state.kyc.submission.upi_id = upiId;
+        state.kyc.submission.upi_qr = state.driverUpi.upiQr;
+      }
+
+      updateWalletDisplays();
+      closeUpdateUpiModal();
+      showToast(`✅ UPI ID updated to ${upiId}! 100% of rider payments will go directly to your account.`, 'success');
+    } catch (err) {
+      console.error('Update UPI ID error:', err);
+      showToast('Failed to update UPI ID: ' + err.message, 'danger');
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  };
+
+  // =========================================================================
+  // RIDER POST-RIDE DIRECT P2P PAYMENT & SAFETY RATING ENGINE
+  // =========================================================================
+
+  window.showRidePaymentAndRatingModal = function (ride) {
+    if (!ride) return;
+    state.ratingState.activeRide = ride;
+    state.ratingState.selectedStars = 5;
+    state.ratingState.selectedTags = new Set(['Smooth & Safe Ride', 'Polite Driver']);
+    state.ratingState.chosenPaymentMethod = 'upi';
+
+    const modal = document.getElementById('riderPaymentAndRatingModal');
+    if (!modal) return;
+
+    const fare = ride.fare || 110;
+    const driverName = ride.driver?.name || ride.driverName || 'Verified Driver';
+    const driverVehicle = `${ride.driver?.vehicleNumber || 'TG 08 AB 1234'} • ${ride.driver?.vehicleName || ride.vehicleType || 'Corridor Commute'}`;
+    const upiId = ride.driver?.upiId || ride.driver?.upi_id || 'shanthankolupula123@okhdfcbank';
+
+    // Populate displays
+    const fareEl = document.getElementById('paymentModalFareDisplay');
+    const cashAmtEl = document.getElementById('paymentModalCashAmount');
+    const drvNameEl = document.getElementById('paymentModalDriverName');
+    const drvVehEl = document.getElementById('paymentModalDriverVehicle');
+    const drvAvatarEl = document.getElementById('paymentModalDriverAvatar');
+    const upiTextEl = document.getElementById('paymentModalUpiIdText');
+    const upiDeepLinkEl = document.getElementById('btnPayUpiDeepLink');
+    const qrImgEl = document.getElementById('paymentModalQrImg');
+    const ratingDrvNameEl = document.getElementById('ratingModalDriverName');
+
+    if (fareEl) fareEl.textContent = `₹${fare}`;
+    if (cashAmtEl) cashAmtEl.textContent = `₹${fare}`;
+    if (drvNameEl) drvNameEl.textContent = driverName;
+    if (ratingDrvNameEl) ratingDrvNameEl.textContent = driverName;
+    if (drvVehEl) drvVehEl.textContent = driverVehicle;
+    if (drvAvatarEl) {
+      drvAvatarEl.innerHTML = `<img src="${getInitialsAvatarSvg(driverName, 64, '#10B981')}" alt="${driverName}" class="w-full h-full object-cover" />`;
+    }
+    if (upiTextEl) upiTextEl.textContent = upiId;
+
+    // Direct UPI Deep Link URL:
+    const upiUrl = `upi://pay?pa=${encodeURIComponent(upiId)}&pn=${encodeURIComponent(driverName)}&am=${fare}&cu=INR&tn=${encodeURIComponent('Routemate Fuel Share')}`;
+    if (upiDeepLinkEl) upiDeepLinkEl.href = upiUrl;
+
+    // Dynamic QR code
+    if (qrImgEl) {
+      qrImgEl.src = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(upiUrl)}`;
+    }
+
+    // Default to Payment Step View
+    const stepPay = document.getElementById('paymentModalStepPayment');
+    const stepRate = document.getElementById('paymentModalStepRating');
+    if (stepPay) stepPay.classList.remove('hidden');
+    if (stepRate) stepRate.classList.add('hidden');
+
+    switchPaymentOption('upi');
+    selectStarRating(5);
+
+    modal.classList.remove('hidden');
+    if (window.lucide) lucide.createIcons();
+  };
+
+  window.closeRidePaymentAndRatingModal = function () {
+    const modal = document.getElementById('riderPaymentAndRatingModal');
+    if (modal) modal.classList.add('hidden');
+  };
+
+  window.switchPaymentOption = function (opt) {
+    state.ratingState.chosenPaymentMethod = opt;
+    const btnUpi = document.getElementById('paymentOptBtn-upi');
+    const btnCash = document.getElementById('paymentOptBtn-cash');
+    const upiContent = document.getElementById('paymentOptionUpiContent');
+    const cashContent = document.getElementById('paymentOptionCashContent');
+
+    if (opt === 'upi') {
+      if (btnUpi) btnUpi.className = 'flex-1 py-2 rounded-xl bg-white text-slate-900 shadow-sm transition cursor-pointer text-center flex items-center justify-center gap-1.5';
+      if (btnCash) btnCash.className = 'flex-1 py-2 rounded-xl text-slate-500 hover:text-slate-900 transition cursor-pointer text-center flex items-center justify-center gap-1.5';
+      if (upiContent) upiContent.classList.remove('hidden');
+      if (cashContent) cashContent.classList.add('hidden');
+    } else {
+      if (btnCash) btnCash.className = 'flex-1 py-2 rounded-xl bg-white text-slate-900 shadow-sm transition cursor-pointer text-center flex items-center justify-center gap-1.5';
+      if (btnUpi) btnUpi.className = 'flex-1 py-2 rounded-xl text-slate-500 hover:text-slate-900 transition cursor-pointer text-center flex items-center justify-center gap-1.5';
+      if (cashContent) cashContent.classList.remove('hidden');
+      if (upiContent) upiContent.classList.add('hidden');
+    }
+    if (window.lucide) lucide.createIcons();
+  };
+
+  window.copyDriverUpiId = function () {
+    const upiText = document.getElementById('paymentModalUpiIdText')?.textContent || '';
+    if (!upiText) return;
+    navigator.clipboard?.writeText(upiText).then(() => {
+      const btn = document.getElementById('btnCopyDriverUpi');
+      if (btn) {
+        btn.textContent = 'Copied! ✓';
+        setTimeout(() => { btn.textContent = 'Copy UPI'; }, 2000);
+      }
+      showToast('UPI ID copied to clipboard.', 'success');
+    }).catch(() => {
+      showToast('Failed to copy UPI ID.', 'danger');
+    });
+  };
+
+  window.proceedToRatingStep = function (method) {
+    state.ratingState.chosenPaymentMethod = method || 'upi';
+    const stepPay = document.getElementById('paymentModalStepPayment');
+    const stepRate = document.getElementById('paymentModalStepRating');
+    if (stepPay) stepPay.classList.add('hidden');
+    if (stepRate) stepRate.classList.remove('hidden');
+    if (window.lucide) lucide.createIcons();
+  };
+
+  window.selectStarRating = function (stars) {
+    state.ratingState.selectedStars = stars;
+    for (let i = 1; i <= 5; i++) {
+      const btn = document.getElementById(`starBtn-${i}`);
+      if (!btn) continue;
+      if (i <= stars) {
+        btn.className = 'text-2xl text-amber-400 hover:scale-110 transition cursor-pointer';
+      } else {
+        btn.className = 'text-2xl text-slate-200 hover:scale-110 transition cursor-pointer';
+      }
+    }
+
+    const label = document.getElementById('starRatingLabel');
+    const header = document.getElementById('feedbackTagsHeader');
+
+    const labels = {
+      5: '5.0 - Excellent & Safe Ride!',
+      4: '4.0 - Good Experience',
+      3: '3.0 - Average Ride (Needs Improvement)',
+      2: '2.0 - Poor / Safety Concern Raised',
+      1: '1.0 - Severe Safety Violation!'
+    };
+    if (label) {
+      label.textContent = labels[stars] || `${stars}.0 Rating`;
+      label.className = stars >= 4 ? 'text-center text-xs font-black text-emerald-600' : 'text-center text-xs font-black text-rose-600';
+    }
+
+    if (header) {
+      header.textContent = stars >= 4 ? 'What went well?' : 'Safety & Ride Concerns (Select all that apply):';
+    }
+
+    renderFeedbackTags(stars);
+  };
+
+  function renderFeedbackTags(stars) {
+    const container = document.getElementById('feedbackTagsContainer');
+    if (!container) return;
+
+    const positiveTags = ['Smooth & Safe Ride', 'Polite Driver', 'Clean Vehicle', 'On Time', 'Safe Driving'];
+    const safetyTags = ['Rash Driving', 'Over-speeding', 'Rude Behavior', 'Asked for Extra Cash', 'Vehicle in Poor Condition', 'Delayed Pickup'];
+
+    const tagsToShow = stars >= 4 ? positiveTags : safetyTags;
+    if (stars >= 4 && state.ratingState.selectedTags.size === 0) {
+      state.ratingState.selectedTags = new Set(['Smooth & Safe Ride', 'Polite Driver']);
+    } else if (stars <= 3 && state.ratingState.selectedTags.has('Smooth & Safe Ride')) {
+      state.ratingState.selectedTags = new Set(['Rash Driving']);
+    }
+
+    container.innerHTML = tagsToShow.map(tag => {
+      const isSelected = state.ratingState.selectedTags.has(tag);
+      const isSafetyIssue = safetyTags.includes(tag);
+      const activeClass = isSafetyIssue
+        ? 'bg-rose-100 text-rose-800 border-rose-300 font-black'
+        : 'bg-emerald-100 text-emerald-800 border-emerald-300 font-black';
+      const inactiveClass = 'bg-slate-100 text-slate-600 border-slate-200 hover:bg-slate-200';
+
+      return `
+        <button type="button" onclick="toggleFeedbackTag('${tag.replace(/'/g, "\\'")}')" class="px-2.5 py-1 rounded-full text-[11px] border transition cursor-pointer active:scale-95 ${isSelected ? activeClass : inactiveClass}">
+          ${isSelected ? '✓ ' : ''}${tag}
+        </button>
+      `;
+    }).join('');
+  }
+
+  window.toggleFeedbackTag = function (tag) {
+    if (state.ratingState.selectedTags.has(tag)) {
+      state.ratingState.selectedTags.delete(tag);
+    } else {
+      state.ratingState.selectedTags.add(tag);
+    }
+    renderFeedbackTags(state.ratingState.selectedStars);
+  };
+
+  window.handleSubmitRideFeedback = async function () {
+    const user = state.currentUser;
+    const activeRide = state.ratingState.activeRide;
+    const stars = state.ratingState.selectedStars;
+    const tags = Array.from(state.ratingState.selectedTags);
+    const comment = document.getElementById('feedbackCommentInput')?.value.trim() || '';
+
+    const btn = document.getElementById('btnSubmitRideFeedback');
+    if (btn) btn.disabled = true;
+
+    try {
+      showToast('Submitting rating and feedback...', 'info');
+
+      if (window.db?.feedbacks?.submitFeedback) {
+        await window.db.feedbacks.submitFeedback({
+          rideId: activeRide?.id || ('RIDE-' + Date.now()),
+          passengerName: user?.name || 'Verified Commuter',
+          passengerPhone: user?.phone || '',
+          driverId: activeRide?.driver?.id || activeRide?.driver_id || 'drv_unknown',
+          driverName: activeRide?.driver?.name || activeRide?.driverName || 'Verified Driver',
+          rating: stars,
+          safetyRating: stars >= 4 ? 5 : 2,
+          cleanlinessRating: stars >= 4 ? 5 : 3,
+          punctualityRating: stars >= 4 ? 5 : 3,
+          feedbackText: comment,
+          safetyTags: stars <= 3 ? tags : [],
+          compliments: stars >= 4 ? tags : [],
+          paymentMethod: state.ratingState.chosenPaymentMethod,
+          fare: activeRide?.fare || 110
+        });
+      }
+
+      closeRidePaymentAndRatingModal();
+      showToast('🎉 Thank you! Your rating & review have been submitted.', 'success');
+    } catch (err) {
+      console.error('Feedback submit error:', err);
+      showToast('Failed to submit feedback: ' + err.message, 'danger');
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  };
+
+  // =========================================================================
+  // SUPER ADMIN SAFETY DASHBOARD & DRIVER RATINGS ENGINE
+  // =========================================================================
+
+  window.switchAdminSection = function (sec) {
+    state.admin.activeSection = sec;
+    const btnKyc = document.getElementById('adminSecBtn-kyc');
+    const btnSafety = document.getElementById('adminSecBtn-safety');
+    const secKyc = document.getElementById('adminSectionKyc');
+    const secSafety = document.getElementById('adminSectionSafety');
+
+    if (sec === 'kyc') {
+      if (btnKyc) btnKyc.className = 'flex-1 py-2 rounded-xl bg-white text-slate-900 shadow-sm transition cursor-pointer text-center flex items-center justify-center gap-1.5';
+      if (btnSafety) btnSafety.className = 'flex-1 py-2 rounded-xl text-slate-600 hover:text-slate-900 transition cursor-pointer text-center flex items-center justify-center gap-1.5';
+      if (secKyc) secKyc.classList.remove('hidden');
+      if (secSafety) secSafety.classList.add('hidden');
+    } else {
+      if (btnSafety) btnSafety.className = 'flex-1 py-2 rounded-xl bg-white text-slate-900 shadow-sm transition cursor-pointer text-center flex items-center justify-center gap-1.5';
+      if (btnKyc) btnKyc.className = 'flex-1 py-2 rounded-xl text-slate-600 hover:text-slate-900 transition cursor-pointer text-center flex items-center justify-center gap-1.5';
+      if (secSafety) secSafety.classList.remove('hidden');
+      if (secKyc) secKyc.classList.add('hidden');
+      loadAdminSafetyData();
+    }
+    if (window.lucide) lucide.createIcons();
+  };
+
+  window.setAdminSafetyFilter = function (filter) {
+    state.admin.activeSafetyFilter = filter;
+    const filters = ['alerts', 'low', 'all'];
+    filters.forEach(f => {
+      const btn = document.getElementById(`adminSafetyFilterBtn-${f}`);
+      if (!btn) return;
+      if (f === filter) {
+        btn.className = 'flex-1 py-1.5 rounded-xl bg-white text-slate-900 shadow-sm transition cursor-pointer text-center text-[11px] font-black flex items-center justify-center gap-1';
+      } else {
+        btn.className = 'flex-1 py-1.5 rounded-xl text-slate-500 hover:text-slate-800 transition cursor-pointer text-center text-[11px] font-bold';
+      }
+    });
+    renderAdminFeedbacks();
+  };
+
+  async function loadAdminSafetyData(showToastMsg = false) {
+    const user = state.currentUser;
+    if (!user || user.email?.toLowerCase().trim() !== 'shanthankolupula123@gmail.com') return;
+
+    if (showToastMsg) showToast('Refreshing passenger safety ratings...', 'info');
+
+    try {
+      let feedbacks = [];
+      if (window.db?.feedbacks?.getAllFeedbacks) {
+        feedbacks = await window.db.feedbacks.getAllFeedbacks();
+      }
+
+      state.admin.feedbacks = feedbacks || [];
+
+      // Calculate unresolved safety alerts count
+      const alertCount = (state.admin.feedbacks || []).filter(f => f.is_safety_flag && f.admin_action !== 'resolved').length;
+      const alertBadge = document.getElementById('adminSafetyAlertBadge');
+      if (alertBadge) {
+        alertBadge.textContent = alertCount;
+        alertBadge.classList.toggle('hidden', alertCount === 0);
+      }
+
+      renderAdminFeedbacks();
+      if (showToastMsg) showToast(`Loaded ${state.admin.feedbacks.length} safety reviews.`, 'success');
+    } catch (err) {
+      console.error('Failed to load admin feedbacks:', err);
+      if (showToastMsg) showToast('Error loading reviews: ' + err.message, 'danger');
+    }
+  }
+  window.loadAdminSafetyData = loadAdminSafetyData;
+
+  function renderAdminFeedbacks() {
+    const container = document.getElementById('adminFeedbackListContainer');
+    if (!container) return;
+
+    const filter = state.admin.activeSafetyFilter || 'alerts';
+    const all = state.admin.feedbacks || [];
+
+    const filtered = all.filter(f => {
+      if (filter === 'all') return true;
+      if (filter === 'alerts') return Boolean(f.is_safety_flag && f.admin_action !== 'resolved');
+      if (filter === 'low') return Number(f.rating) <= 3;
+      return true;
+    });
+
+    if (filtered.length === 0) {
+      container.innerHTML = `
+        <div class="routemate-card p-8 text-center bg-white border border-slate-200">
+          <div class="w-12 h-12 rounded-2xl bg-slate-100 text-slate-400 mx-auto flex items-center justify-center mb-2">
+            <i data-lucide="shield-check" class="w-6 h-6 text-emerald-500"></i>
+          </div>
+          <h4 class="text-xs font-bold text-slate-700">No reviews found</h4>
+          <p class="text-[11px] text-slate-400 mt-0.5">There are no feedback records under the '${filter}' filter.</p>
+        </div>
+      `;
+      if (window.lucide) lucide.createIcons();
+      return;
+    }
+
+    container.innerHTML = filtered.map(fb => {
+      const rating = Number(fb.rating || 5);
+      const isSafetyAlert = Boolean(fb.is_safety_flag && fb.admin_action !== 'resolved');
+      const timeStr = fb.submittedAt ? formatRideTimestamp(fb.submittedAt) : 'Recent';
+      const starsDisplay = '★'.repeat(Math.round(rating)) + '☆'.repeat(5 - Math.round(rating));
+
+      const tagsHtml = (fb.safetyTags || []).map(t => `
+        <span class="px-2 py-0.5 rounded-full bg-rose-100 text-rose-800 border border-rose-200 text-[10px] font-black">
+          ⚠ ${t}
+        </span>
+      `).concat((fb.compliments || []).map(c => `
+        <span class="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200 text-[10px] font-bold">
+          ✓ ${c}
+        </span>
+      `)).join(' ');
+
+      const actionBadge = fb.admin_action ? `
+        <span class="px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 border border-blue-200 text-[9px] font-black uppercase">
+          Action Taken: ${fb.admin_action}
+        </span>
+      ` : '';
+
+      return `
+        <div class="routemate-card p-4 space-y-3 bg-white border ${isSafetyAlert ? 'border-rose-300 ring-2 ring-rose-100' : 'border-slate-200'} shadow-sm">
+          <div class="flex items-start justify-between gap-2">
+            <div>
+              <div class="flex items-center gap-2 flex-wrap">
+                <span class="text-xs font-black text-slate-900">${fb.driverName || 'Driver'}</span>
+                <span class="text-amber-500 font-mono text-xs font-black">${starsDisplay} (${rating.toFixed(1)})</span>
+                ${isSafetyAlert ? '<span class="px-2 py-0.5 rounded-full bg-rose-600 text-white text-[9px] font-black animate-pulse">SAFETY ALERT</span>' : ''}
+                ${actionBadge}
+              </div>
+              <p class="text-[10px] text-slate-400 mt-0.5">Rider: <strong class="text-slate-600">${fb.passengerName || 'Verified Commuter'}</strong> • ${timeStr}</p>
+            </div>
+            <span class="text-[10px] font-mono text-slate-400 font-semibold">${fb.id || ''}</span>
+          </div>
+
+          ${tagsHtml ? `<div class="flex flex-wrap gap-1">${tagsHtml}</div>` : ''}
+
+          ${fb.feedbackText ? `
+            <div class="p-2.5 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-700 italic">
+              "${fb.feedbackText}"
+            </div>
+          ` : ''}
+
+          <!-- Admin Safety Decision Actions -->
+          <div class="pt-2 border-t border-slate-100 flex items-center justify-between gap-2 flex-wrap">
+            <span class="text-[10px] text-slate-400 font-bold uppercase">Super Admin Actions:</span>
+            <div class="flex items-center gap-1.5">
+              <button type="button" onclick="handleAdminSafetyAction('${fb.id}', '${fb.driverId}', 'warning')" class="px-2.5 py-1 rounded-lg bg-amber-50 text-amber-800 border border-amber-200 hover:bg-amber-100 text-[10px] font-black transition cursor-pointer">
+                Issue Warning
+              </button>
+              <button type="button" onclick="handleAdminSafetyAction('${fb.id}', '${fb.driverId}', 'block')" class="px-2.5 py-1 rounded-lg bg-rose-600 text-white hover:bg-rose-700 text-[10px] font-black transition cursor-pointer">
+                Suspend Driver
+              </button>
+              ${isSafetyAlert ? `
+                <button type="button" onclick="handleAdminSafetyAction('${fb.id}', '${fb.driverId}', 'resolve')" class="px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-800 border border-emerald-200 hover:bg-emerald-100 text-[10px] font-black transition cursor-pointer">
+                  Mark Resolved
+                </button>
+              ` : ''}
+            </div>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    if (window.lucide) lucide.createIcons();
+  }
+
+  window.handleAdminSafetyAction = async function (feedbackId, driverId, actionType) {
+    const user = state.currentUser;
+    if (!user || user.email?.toLowerCase().trim() !== 'shanthankolupula123@gmail.com') {
+      showToast('Unauthorized: Super Admin access required.', 'danger');
+      return;
+    }
+
+    let notes = '';
+    if (actionType === 'warning') {
+      notes = prompt('Enter warning message / reason for the driver:', 'Violation of Routemate safety guidelines: Rash driving report.');
+      if (notes === null) return;
+    } else if (actionType === 'block') {
+      const confirmBlock = confirm('Are you sure you want to suspend this driver from accepting rides on Routemate?');
+      if (!confirmBlock) return;
+      notes = 'Driver account suspended due to passenger safety violation.';
+    }
+
+    try {
+      showToast(`Executing safety action: ${actionType.toUpperCase()}...`, 'info');
+
+      if (window.db?.feedbacks?.executeSafetyAction) {
+        await window.db.feedbacks.executeSafetyAction({
+          adminEmail: user.email,
+          feedbackId,
+          driverId,
+          actionType,
+          notes
+        });
+      }
+
+      showToast(`Safety action '${actionType}' executed successfully.`, 'success');
+      await loadAdminSafetyData();
+      await loadAdminKycSubmissions();
+    } catch (err) {
+      console.error('Safety action error:', err);
+      showToast('Failed to record safety action: ' + err.message, 'danger');
+    }
+  };
+
+  window.handleRefreshAdminData = async function (showToastMsg = false) {
+    await loadAdminKycSubmissions(showToastMsg);
+    await loadAdminSafetyData(false);
   };
 
   // -------------------------------------------------------------------------

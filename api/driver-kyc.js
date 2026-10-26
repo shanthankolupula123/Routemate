@@ -141,6 +141,26 @@ module.exports = async (req, res) => {
       sub.driver_photo = sub.driver_photo || sub.driverPhoto || sub.avatar_url || notesData.driver_photo || '';
       sub.vehicle_name = sub.vehicle_name || sub.vehicleName || notesData.vehicle_name || (sub.vehicles && sub.vehicles[0]?.vehicle_name) || (sub.vehicle_type === 'car' ? 'Car Seat' : (sub.vehicle_type === 'auto' ? 'Auto' : 'Two-Wheeler / Bike'));
       sub.vehicle_color = sub.vehicle_color || sub.vehicleColor || notesData.vehicle_color || (sub.vehicles && sub.vehicles[0]?.vehicle_color) || 'Standard';
+      sub.upi_id = sub.upi_id || sub.upiId || notesData.upi_id || '';
+      sub.upi_qr = sub.upi_qr || sub.upiQr || notesData.upi_qr || '';
+
+      const isApproved = sub.status === 'approved';
+      if (typeof sub.wallet_balance !== 'number') {
+        sub.wallet_balance = isApproved ? 100.00 : 0.00;
+        sub.welcome_bonus_credited = isApproved;
+      }
+      if (!sub.wallet_transactions || !Array.isArray(sub.wallet_transactions)) {
+        sub.wallet_transactions = isApproved ? [
+          {
+            id: 'tx_welcome_' + (sub.id || sub.user_id),
+            type: 'credit',
+            amount: 100.00,
+            description: '🎁 Routemate ₹100 Welcome Bonus Credited',
+            timestamp: sub.reviewed_at || sub.submitted_at || new Date().toISOString()
+          }
+        ] : [];
+      }
+      sub.warning_count = Number(sub.warning_count || 0);
 
       if (!sub.vehicles || !Array.isArray(sub.vehicles) || sub.vehicles.length === 0) {
         if (notesData.vehicles && Array.isArray(notesData.vehicles) && notesData.vehicles.length > 0) {
@@ -177,6 +197,15 @@ module.exports = async (req, res) => {
         success: true,
         submission: userSub || null,
         vehicles: userSub ? (userSub.vehicles || []) : [],
+        wallet: {
+          balance: userSub ? userSub.wallet_balance : 0,
+          welcomeBonusCredited: userSub ? Boolean(userSub.welcome_bonus_credited) : false,
+          transactions: userSub ? (userSub.wallet_transactions || []) : []
+        },
+        upi: {
+          id: userSub ? (userSub.upi_id || '') : '',
+          qr: userSub ? (userSub.upi_qr || '') : ''
+        },
         status: userSub ? userSub.status : 'not_submitted'
       });
     }
@@ -271,14 +300,261 @@ module.exports = async (req, res) => {
             if (v.status === 'pending') v.status = 'approved';
           });
         }
+        // Automatic ₹100 Welcome Bonus Credit
+        if (isApproved && !list[idx].welcome_bonus_credited) {
+          list[idx].wallet_balance = 100.00;
+          list[idx].welcome_bonus_credited = true;
+          if (!list[idx].wallet_transactions) list[idx].wallet_transactions = [];
+          list[idx].wallet_transactions.unshift({
+            id: 'tx_welcome_' + Date.now().toString(36),
+            type: 'credit',
+            amount: 100.00,
+            description: '🎁 Routemate ₹100 Welcome Bonus Credited',
+            timestamp: new Date().toISOString()
+          });
+        }
         saveStore(list);
+      }
+
+      if (isApproved) {
+        try {
+          await fetch(`${SUPABASE_URL}/rest/v1/driver_kyc?or=(id.eq.${encodeURIComponent(targetId)},user_id.eq.${encodeURIComponent(targetId)})`, {
+            method: 'PATCH',
+            headers: {
+              'apikey': SUPABASE_KEY,
+              'Authorization': `Bearer ${SUPABASE_KEY}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              wallet_balance: 100.00,
+              welcome_bonus_credited: true
+            })
+          });
+        } catch (e) {}
       }
 
       return res.status(200).json({
         success: true,
-        message: isApproved ? 'Driver successfully approved!' : 'Driver KYC rejected.',
+        message: isApproved ? 'Driver successfully approved! ₹100 Welcome Bonus credited to wallet.' : 'Driver KYC rejected.',
         status,
         targetId
+      });
+    }
+
+    // -----------------------------------------------------------------------
+    // ACTION: Driver Updates Personal UPI ID & QR Code
+    // -----------------------------------------------------------------------
+    if (action === 'update_upi') {
+      const { userId, upiId, upiQr } = body;
+      const cleanUserId = userId || body.user_id;
+      const cleanUpi = String(upiId || body.upi_id || '').trim();
+
+      if (!cleanUserId || !cleanUpi) {
+        return res.status(400).json({ success: false, error: 'User ID and UPI ID are required.' });
+      }
+
+      const list = getStore();
+      const idx = list.findIndex(s => s.id === cleanUserId || s.user_id === cleanUserId);
+      if (idx !== -1) {
+        list[idx].upi_id = cleanUpi;
+        if (upiQr || body.upi_qr) list[idx].upi_qr = upiQr || body.upi_qr;
+        saveStore(list);
+      }
+
+      // Update Supabase `driver_kyc` & `profiles`
+      try {
+        await fetch(`${SUPABASE_URL}/rest/v1/driver_kyc?or=(id.eq.${encodeURIComponent(cleanUserId)},user_id.eq.${encodeURIComponent(cleanUserId)})`, {
+          method: 'PATCH',
+          headers: {
+            'apikey': SUPABASE_KEY,
+            'Authorization': `Bearer ${SUPABASE_KEY}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            upi_id: cleanUpi,
+            ...((upiQr || body.upi_qr) ? { upi_qr: upiQr || body.upi_qr } : {})
+          })
+        });
+      } catch (e) {}
+
+      try {
+        await fetch(`${SUPABASE_URL}/rest/v1/profiles?id=eq.${encodeURIComponent(cleanUserId)}`, {
+          method: 'PATCH',
+          headers: {
+            'apikey': SUPABASE_KEY,
+            'Authorization': `Bearer ${SUPABASE_KEY}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            upi_id: cleanUpi,
+            ...((upiQr || body.upi_qr) ? { upi_qr: upiQr || body.upi_qr } : {})
+          })
+        });
+      } catch (e) {}
+
+      return res.status(200).json({
+        success: true,
+        message: 'Direct P2P UPI ID saved successfully!',
+        upiId: cleanUpi
+      });
+    }
+
+    // -----------------------------------------------------------------------
+    // ACTION: Vehicle-Wise Dynamic Commission Deduction for Cash Rides
+    // Bike: Flat ₹5, Auto: Flat ₹10, Car: Flat ₹18
+    // -----------------------------------------------------------------------
+    if (action === 'deduct_commission') {
+      const { userId, driverId, vehicleType, fare, rideId } = body;
+      const targetId = userId || driverId || body.user_id;
+
+      if (!targetId) {
+        return res.status(400).json({ success: false, error: 'Driver User ID is required.' });
+      }
+
+      const vType = String(vehicleType || 'bike').toLowerCase();
+      let commission = 5; // Minimal flat ₹5 for Bike
+      if (vType.includes('car')) commission = 18; // Balanced ₹18 for Car Seat
+      else if (vType.includes('auto')) commission = 10; // Moderate ₹10 for Auto
+
+      const list = getStore();
+      const idx = list.findIndex(s => s.id === targetId || s.user_id === targetId);
+      let newBalance = 100 - commission;
+
+      if (idx !== -1) {
+        const curBal = typeof list[idx].wallet_balance === 'number' ? list[idx].wallet_balance : (list[idx].status === 'approved' ? 100 : 0);
+        newBalance = Math.round((curBal - commission) * 100) / 100;
+        list[idx].wallet_balance = newBalance;
+        if (!list[idx].wallet_transactions) list[idx].wallet_transactions = [];
+        list[idx].wallet_transactions.unshift({
+          id: 'tx_comm_' + Date.now().toString(36),
+          type: 'debit',
+          amount: commission,
+          vehicleType: vType,
+          description: `Platform fee for Cash Ride #${rideId || 'TRIP'} (${vType.toUpperCase()})`,
+          timestamp: new Date().toISOString()
+        });
+        saveStore(list);
+      }
+
+      // Update Supabase
+      try {
+        await fetch(`${SUPABASE_URL}/rest/v1/driver_kyc?or=(id.eq.${encodeURIComponent(targetId)},user_id.eq.${encodeURIComponent(targetId)})`, {
+          method: 'PATCH',
+          headers: {
+            'apikey': SUPABASE_KEY,
+            'Authorization': `Bearer ${SUPABASE_KEY}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ wallet_balance: newBalance })
+        });
+      } catch (e) {}
+
+      return res.status(200).json({
+        success: true,
+        commissionDeducted: commission,
+        newBalance,
+        isNegative: newBalance < 0
+      });
+    }
+
+    // -----------------------------------------------------------------------
+    // ACTION: Driver In-App Wallet Recharge
+    // -----------------------------------------------------------------------
+    if (action === 'recharge_wallet') {
+      const { userId, amount, paymentId } = body;
+      const cleanUserId = userId || body.user_id;
+      const rechargeAmount = parseFloat(amount);
+
+      if (!cleanUserId || isNaN(rechargeAmount) || rechargeAmount <= 0) {
+        return res.status(400).json({ success: false, error: 'Valid user ID and recharge amount are required.' });
+      }
+
+      const list = getStore();
+      const idx = list.findIndex(s => s.id === cleanUserId || s.user_id === cleanUserId);
+      let newBalance = rechargeAmount;
+
+      if (idx !== -1) {
+        const curBal = typeof list[idx].wallet_balance === 'number' ? list[idx].wallet_balance : 0;
+        newBalance = Math.round((curBal + rechargeAmount) * 100) / 100;
+        list[idx].wallet_balance = newBalance;
+        if (!list[idx].wallet_transactions) list[idx].wallet_transactions = [];
+        list[idx].wallet_transactions.unshift({
+          id: 'tx_rech_' + Date.now().toString(36),
+          type: 'credit',
+          amount: rechargeAmount,
+          paymentId: paymentId || ('RZP-' + Date.now().toString(36).toUpperCase()),
+          description: `⚡ Wallet Online Top-Up (+₹${rechargeAmount})`,
+          timestamp: new Date().toISOString()
+        });
+        saveStore(list);
+      }
+
+      // Update Supabase
+      try {
+        await fetch(`${SUPABASE_URL}/rest/v1/driver_kyc?or=(id.eq.${encodeURIComponent(cleanUserId)},user_id.eq.${encodeURIComponent(cleanUserId)})`, {
+          method: 'PATCH',
+          headers: {
+            'apikey': SUPABASE_KEY,
+            'Authorization': `Bearer ${SUPABASE_KEY}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ wallet_balance: newBalance })
+        });
+      } catch (e) {}
+
+      return res.status(200).json({
+        success: true,
+        message: `Wallet successfully recharged with ₹${rechargeAmount}!`,
+        newBalance
+      });
+    }
+
+    // -----------------------------------------------------------------------
+    // ACTION: Super Admin Driver Safety Action (Warning, Block, Unblock)
+    // -----------------------------------------------------------------------
+    if (action === 'safety_action') {
+      const { targetId, actionType, adminEmail, notes } = body;
+      const cleanAdmin = String(adminEmail || '').trim().toLowerCase();
+
+      if (cleanAdmin !== SUPER_ADMIN_EMAIL) {
+        return res.status(403).json({ success: false, error: 'Unauthorized: Only Super Admin can take safety actions.' });
+      }
+
+      const list = getStore();
+      const idx = list.findIndex(s => s.id === targetId || s.user_id === targetId);
+
+      if (idx !== -1) {
+        if (actionType === 'block') {
+          list[idx].status = 'rejected';
+          list[idx].rejection_reason = `Driver account blocked by Super Admin due to safety violations: ${notes || 'Rash driving / passenger complaints'}`;
+        } else if (actionType === 'warning') {
+          list[idx].warning_count = (list[idx].warning_count || 0) + 1;
+        } else if (actionType === 'unblock') {
+          list[idx].status = 'approved';
+          list[idx].rejection_reason = null;
+        }
+        saveStore(list);
+      }
+
+      // Update Supabase
+      try {
+        await fetch(`${SUPABASE_URL}/rest/v1/driver_kyc?or=(id.eq.${encodeURIComponent(targetId)},user_id.eq.${encodeURIComponent(targetId)})`, {
+          method: 'PATCH',
+          headers: {
+            'apikey': SUPABASE_KEY,
+            'Authorization': `Bearer ${SUPABASE_KEY}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            status: actionType === 'block' ? 'rejected' : (actionType === 'unblock' ? 'approved' : undefined),
+            rejection_reason: actionType === 'block' ? `Driver account blocked by Super Admin: ${notes || 'Safety violations'}` : (actionType === 'unblock' ? null : undefined)
+          })
+        });
+      } catch (e) {}
+
+      return res.status(200).json({
+        success: true,
+        message: `Safety action '${actionType}' completed successfully.`
       });
     }
 
@@ -473,6 +749,8 @@ module.exports = async (req, res) => {
     const cleanVehicleName = body.vehicle_name || body.vehicleName || (cleanVehicleType === 'car' ? 'Car Seat' : (cleanVehicleType === 'auto' ? 'Auto' : 'Two-Wheeler / Bike'));
     const cleanVehicleColor = body.vehicle_color || body.vehicleColor || body.vehicle_colour || body.vehicleColour || 'Standard';
     const cleanRcPhoto = body.rc_photo || body.rcPhoto;
+    const cleanUpiId = String(body.upi_id || body.upiId || body.driver_upi_id || body.driverUpiId || '').trim();
+    const cleanUpiQr = body.upi_qr || body.upiQr || body.driver_upi_qr || body.driverUpiQr || null;
 
     if (!cleanUserId || !cleanDriverName || !cleanDlNumber || !cleanAadhaarNumber || !cleanVehicleNumber) {
       return res.status(400).json({
@@ -522,6 +800,11 @@ module.exports = async (req, res) => {
       vehicle_name: cleanVehicleName,
       vehicle_color: cleanVehicleColor,
       rc_photo: cleanRcPhoto,
+      upi_id: cleanUpiId,
+      upi_qr: cleanUpiQr,
+      wallet_balance: 0,
+      welcome_bonus_credited: false,
+      wallet_transactions: [],
       status: 'pending', // Strictly Pending Approval
       rejection_reason: null,
       submitted_at: new Date().toISOString(),
@@ -567,6 +850,11 @@ module.exports = async (req, res) => {
         aadhaar_back_photo: submissionRecord.aadhaar_back_photo,
         vehicle_number: submissionRecord.vehicle_number,
         rc_photo: submissionRecord.rc_photo,
+        upi_id: cleanUpiId,
+        upi_qr: cleanUpiQr,
+        vehicle_name: cleanVehicleName,
+        vehicle_color: cleanVehicleColor,
+        vehicle_type: cleanVehicleType,
         status: 'pending',
         submitted_at: submissionRecord.submitted_at
       };

@@ -392,6 +392,56 @@
 
       <!-- Operational Driver Controls (Locked/hidden if KYC is not approved) -->
       <div id="driverOperationalContainer" class="space-y-4">
+
+        <!-- DRIVER IN-APP WALLET & COMMISSION CARD -->
+        <div id="driverWalletCard" class="routemate-card p-4 bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 text-white border-0 shadow-xl space-y-3">
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-3">
+              <div class="w-10 h-10 rounded-2xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center justify-center font-black">
+                <i data-lucide="wallet" class="w-5 h-5"></i>
+              </div>
+              <div>
+                <span class="text-[10px] font-black uppercase text-slate-400 tracking-wider block">In-App Driver Wallet</span>
+                <div class="flex items-center gap-2 mt-0.5">
+                  <h3 id="driverWalletBalanceDisplay" class="text-lg font-black text-white">₹100.00</h3>
+                  <span id="driverWalletBonusBadge" class="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 text-[10px] font-bold border border-emerald-500/30">
+                    🎁 ₹100 Welcome Bonus
+                  </span>
+                </div>
+              </div>
+            </div>
+            <button type="button" onclick="openDriverWalletRechargeModal()" class="px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-black transition shadow cursor-pointer active:scale-95 flex items-center gap-1.5">
+              <i data-lucide="plus" class="w-3.5 h-3.5"></i>
+              <span>Recharge</span>
+            </button>
+          </div>
+
+          <!-- Negative Balance Warning Alert (dynamically toggled) -->
+          <div id="driverWalletNegativeAlert" class="hidden p-3 rounded-xl bg-rose-500/20 border border-rose-500/40 text-rose-200 text-xs font-bold flex items-center justify-between gap-2">
+            <div class="flex items-center gap-2">
+              <i data-lucide="alert-circle" class="w-4 h-4 text-rose-400 flex-shrink-0"></i>
+              <span>Negative balance! Recharge wallet to resume live rider radar.</span>
+            </div>
+            <button type="button" onclick="openDriverWalletRechargeModal(100)" class="px-2.5 py-1 bg-white text-rose-700 rounded-lg text-[10px] font-black hover:bg-rose-50 transition cursor-pointer">
+              Top Up
+            </button>
+          </div>
+
+          <!-- Dynamic Commission Breakdown & History Accordion -->
+          <div class="pt-2 border-t border-white/10 flex items-center justify-between text-[11px]">
+            <span class="text-slate-400">Cash Platform Fee:</span>
+            <span class="font-mono font-bold text-emerald-300">Bike ₹5 • Auto ₹10 • Car ₹18</span>
+            <button type="button" onclick="toggleDriverWalletHistory()" class="text-cyan-400 hover:text-cyan-300 font-bold text-[10px] cursor-pointer underline">
+              Transactions
+            </button>
+          </div>
+
+          <!-- Wallet Transaction History Drawer (Toggleable) -->
+          <div id="driverWalletHistoryDrawer" class="hidden pt-2 border-t border-white/10 space-y-1.5 max-h-40 overflow-y-auto">
+            <!-- Dynamically populated via renderDriverWalletTransactions() -->
+          </div>
+        </div>
+
         <!-- Driver Online Status Switcher -->
         <div class="routemate-card p-4 flex items-center justify-between">
           <div class="flex items-center gap-3">
@@ -580,6 +630,34 @@
           </div>
         </div>
 
+        <!-- DRIVER P2P PAYMENT SETTINGS (PERSONAL UPI ID) -->
+        <div id="profilePaymentSettingsSection" class="mt-4 p-4 rounded-2xl bg-slate-50 border border-slate-200/80 space-y-3">
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-2">
+              <div class="w-7 h-7 rounded-lg bg-emerald-100 text-emerald-700 flex items-center justify-center font-black text-xs">
+                <i data-lucide="smartphone" class="w-4 h-4"></i>
+              </div>
+              <div>
+                <h4 class="text-xs font-black text-slate-900">Direct P2P UPI Settings</h4>
+                <p class="text-[10px] text-slate-400">Riders pay directly to your personal GPay/PhonePe</p>
+              </div>
+            </div>
+            <button type="button" onclick="openUpdateUpiModal()" class="px-3 py-1.5 rounded-full bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 text-[11px] font-black transition cursor-pointer flex items-center gap-1 active:scale-95">
+              <i data-lucide="edit-3" class="w-3.5 h-3.5"></i>
+              <span>Set UPI ID</span>
+            </button>
+          </div>
+          <div class="p-3 bg-white rounded-xl border border-slate-200 flex items-center justify-between">
+            <div>
+              <span class="text-[10px] text-slate-400 font-bold uppercase block">Your Registered UPI ID</span>
+              <span id="profileDriverUpiDisplay" class="text-xs font-mono font-bold text-slate-800">Checking...</span>
+            </div>
+            <span class="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 text-[10px] font-black border border-emerald-200">
+              100% Direct P2P
+            </span>
+          </div>
+        </div>
+
         <div class="mt-5 pt-4 border-t border-slate-100 space-y-2">
           <button type="button" onclick="triggerEmergencySOS()" class="w-full py-3 btn-pill-danger text-xs flex items-center justify-center gap-2 cursor-pointer">
             <i data-lucide="alert-triangle" class="w-4 h-4 text-rose-600"></i>
@@ -611,7 +689,7 @@
               <p class="text-[11px] text-slate-400 font-mono">shanthankolupula123@gmail.com</p>
             </div>
           </div>
-          <button type="button" onclick="loadAdminKycSubmissions(true)" title="Refresh Submissions" class="p-2 rounded-xl bg-white/10 hover:bg-white/20 text-slate-200 transition cursor-pointer active:scale-95">
+          <button type="button" onclick="handleRefreshAdminData(true)" title="Refresh Admin Data" class="p-2 rounded-xl bg-white/10 hover:bg-white/20 text-slate-200 transition cursor-pointer active:scale-95">
             <i data-lucide="refresh-cw" class="w-4 h-4"></i>
           </button>
         </div>
@@ -619,41 +697,79 @@
         <!-- Metric Counter Grid -->
         <div class="grid grid-cols-3 gap-2 mt-4 pt-3 border-t border-white/10 text-center">
           <div class="p-2.5 rounded-xl bg-white/5 border border-white/5">
-            <span class="text-[10px] font-bold text-slate-400 block uppercase">Pending</span>
+            <span class="text-[10px] font-bold text-slate-400 block uppercase">Pending KYC</span>
             <span id="adminMetricPending" class="text-lg font-black text-amber-400">0</span>
           </div>
           <div class="p-2.5 rounded-xl bg-white/5 border border-white/5">
-            <span class="text-[10px] font-bold text-slate-400 block uppercase">Approved</span>
+            <span class="text-[10px] font-bold text-slate-400 block uppercase">Approved Drivers</span>
             <span id="adminMetricApproved" class="text-lg font-black text-emerald-400">0</span>
           </div>
           <div class="p-2.5 rounded-xl bg-white/5 border border-white/5">
-            <span class="text-[10px] font-bold text-slate-400 block uppercase">Rejected</span>
-            <span id="adminMetricRejected" class="text-lg font-black text-rose-400">0</span>
+            <span class="text-[10px] font-bold text-slate-400 block uppercase">Safety Alerts</span>
+            <span id="adminMetricSafetyAlerts" class="text-lg font-black text-rose-400">0</span>
           </div>
         </div>
       </div>
 
-      <!-- Filter Tabs -->
-      <div class="flex items-center justify-between px-1">
-        <div class="flex bg-slate-100 p-1 rounded-2xl text-xs font-bold gap-1 w-full justify-between">
-          <button type="button" onclick="setAdminKycFilter('pending')" id="adminFilterBtn-pending" class="flex-1 py-1.5 rounded-xl bg-white text-slate-900 shadow-sm transition cursor-pointer text-center">
-            Pending (<span id="adminBadgeFilterPending">0</span>)
-          </button>
-          <button type="button" onclick="setAdminKycFilter('approved')" id="adminFilterBtn-approved" class="flex-1 py-1.5 rounded-xl text-slate-500 hover:text-slate-800 transition cursor-pointer text-center">
-            Approved
-          </button>
-          <button type="button" onclick="setAdminKycFilter('rejected')" id="adminFilterBtn-rejected" class="flex-1 py-1.5 rounded-xl text-slate-500 hover:text-slate-800 transition cursor-pointer text-center">
-            Rejected
-          </button>
-          <button type="button" onclick="setAdminKycFilter('all')" id="adminFilterBtn-all" class="flex-1 py-1.5 rounded-xl text-slate-500 hover:text-slate-800 transition cursor-pointer text-center">
-            All
-          </button>
+      <!-- Top Level Admin View Switcher (KYC vs Safety Ratings) -->
+      <div class="flex bg-slate-200/80 p-1 rounded-2xl text-xs font-black gap-1">
+        <button type="button" onclick="switchAdminSection('kyc')" id="adminSecBtn-kyc" class="flex-1 py-2 rounded-xl bg-white text-slate-900 shadow-sm transition cursor-pointer text-center flex items-center justify-center gap-1.5">
+          <i data-lucide="shield-check" class="w-3.5 h-3.5 text-blue-600"></i>
+          <span>Driver KYC Review</span>
+        </button>
+        <button type="button" onclick="switchAdminSection('safety')" id="adminSecBtn-safety" class="flex-1 py-2 rounded-xl text-slate-600 hover:text-slate-900 transition cursor-pointer text-center flex items-center justify-center gap-1.5">
+          <i data-lucide="shield-alert" class="w-3.5 h-3.5 text-rose-600"></i>
+          <span>Safety & Driver Ratings</span>
+          <span id="adminSafetyAlertBadge" class="hidden px-1.5 py-0.2 rounded-full bg-rose-600 text-white text-[9px] font-bold">0</span>
+        </button>
+      </div>
+
+      <!-- SECTION 1: DRIVER KYC APPROVALS -->
+      <div id="adminSectionKyc" class="space-y-3">
+        <!-- Filter Tabs -->
+        <div class="flex items-center justify-between px-1">
+          <div class="flex bg-slate-100 p-1 rounded-2xl text-xs font-bold gap-1 w-full justify-between">
+            <button type="button" onclick="setAdminKycFilter('pending')" id="adminFilterBtn-pending" class="flex-1 py-1.5 rounded-xl bg-white text-slate-900 shadow-sm transition cursor-pointer text-center">
+              Pending (<span id="adminBadgeFilterPending">0</span>)
+            </button>
+            <button type="button" onclick="setAdminKycFilter('approved')" id="adminFilterBtn-approved" class="flex-1 py-1.5 rounded-xl text-slate-500 hover:text-slate-800 transition cursor-pointer text-center">
+              Approved
+            </button>
+            <button type="button" onclick="setAdminKycFilter('rejected')" id="adminFilterBtn-rejected" class="flex-1 py-1.5 rounded-xl text-slate-500 hover:text-slate-800 transition cursor-pointer text-center">
+              Rejected
+            </button>
+            <button type="button" onclick="setAdminKycFilter('all')" id="adminFilterBtn-all" class="flex-1 py-1.5 rounded-xl text-slate-500 hover:text-slate-800 transition cursor-pointer text-center">
+              All
+            </button>
+          </div>
+        </div>
+
+        <!-- Submissions List Container -->
+        <div id="adminKycListContainer" class="space-y-3">
+          <!-- Rendered via renderAdminKycSubmissions() -->
         </div>
       </div>
 
-      <!-- Submissions List Container -->
-      <div id="adminKycListContainer" class="space-y-3">
-        <!-- Rendered via renderAdminKycSubmissions() -->
+      <!-- SECTION 2: PASSENGER SAFETY REVIEWS & DRIVER RATINGS -->
+      <div id="adminSectionSafety" class="hidden space-y-3">
+        <!-- Safety Filters -->
+        <div class="flex bg-slate-100 p-1 rounded-2xl text-xs font-bold gap-1 w-full justify-between">
+          <button type="button" onclick="setAdminSafetyFilter('alerts')" id="adminSafetyFilterBtn-alerts" class="flex-1 py-1.5 rounded-xl bg-white text-slate-900 shadow-sm transition cursor-pointer text-center text-[11px] font-black flex items-center justify-center gap-1">
+            <span class="w-2 h-2 rounded-full bg-rose-500 animate-ping"></span>
+            <span>Safety Alerts Only</span>
+          </button>
+          <button type="button" onclick="setAdminSafetyFilter('low')" id="adminSafetyFilterBtn-low" class="flex-1 py-1.5 rounded-xl text-slate-500 hover:text-slate-800 transition cursor-pointer text-center text-[11px] font-bold">
+            Low (1-3★)
+          </button>
+          <button type="button" onclick="setAdminSafetyFilter('all')" id="adminSafetyFilterBtn-all" class="flex-1 py-1.5 rounded-xl text-slate-500 hover:text-slate-800 transition cursor-pointer text-center text-[11px] font-bold">
+            All Reviews
+          </button>
+        </div>
+
+        <!-- Feedbacks / Safety Reviews Stream Container -->
+        <div id="adminFeedbackListContainer" class="space-y-3">
+          <!-- Rendered via renderAdminFeedbacks() -->
+        </div>
       </div>
     </div>
 
@@ -1083,6 +1199,13 @@
               </div>
             </div>
           </div>
+
+          <!-- Driver Personal UPI ID (Direct P2P Payment) -->
+          <div class="pt-2 border-t border-slate-100">
+            <label class="block text-[11px] font-bold text-slate-700 mb-1">Personal UPI ID (GPay / PhonePe / Paytm) <span class="text-rose-500">*</span></label>
+            <input type="text" id="kycInputUpiId" required placeholder="e.g. yourname@oksbi or 9848012345@paytm" class="w-full px-3.5 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-semibold focus:outline-none focus:border-blue-600 focus:bg-white transition" />
+            <p class="text-[10px] text-emerald-600 font-bold mt-1">✓ 100% of rider payments go directly to this UPI ID via Direct P2P (Zero platform fee deducted from your fare).</p>
+          </div>
         </div>
 
         <!-- STEP 2: DRIVING LICENSE (DL) -->
@@ -1246,6 +1369,249 @@
   </div>
 
   <!-- ========================================================================= -->
+  <!-- MODAL: RIDER POST-RIDE DIRECT P2P PAYMENT & SAFETY RATING -->
+  <!-- ========================================================================= -->
+  <div id="riderPaymentAndRatingModal" class="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm hidden flex items-center justify-center p-4">
+    <div class="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-4 max-h-[92vh] overflow-y-auto animate-in fade-in zoom-in-95 duration-200">
+      
+      <!-- Modal Header -->
+      <div class="flex items-center justify-between pb-2 border-b border-slate-100">
+        <div class="flex items-center gap-2.5">
+          <div class="w-10 h-10 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center font-black">
+            <i data-lucide="check-circle" class="w-5 h-5"></i>
+          </div>
+          <div>
+            <h3 class="text-sm font-black text-slate-900">Trip Completed! 🎉</h3>
+            <p id="paymentModalSubTitle" class="text-[11px] text-slate-400">Direct P2P Fuel Share Payment</p>
+          </div>
+        </div>
+        <button type="button" onclick="closeRidePaymentAndRatingModal()" class="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-500 font-bold transition cursor-pointer">
+          ✕
+        </button>
+      </div>
+
+      <!-- VIEW 1: PAYMENT METHOD SELECTION (UPI DEEP LINK / QR / CASH) -->
+      <div id="paymentModalStepPayment" class="space-y-4">
+        <!-- Fare & Driver Summary Card -->
+        <div class="p-4 rounded-2xl bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 text-white space-y-3 shadow-lg">
+          <div class="flex items-center justify-between">
+            <span class="text-xs text-slate-300 font-bold">Total Fuel Share to Pay</span>
+            <span class="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 text-[10px] font-bold border border-emerald-500/30">
+              0% Platform Fee
+            </span>
+          </div>
+          <div class="flex items-baseline gap-2">
+            <h2 id="paymentModalFareDisplay" class="text-3xl font-black text-emerald-400">₹110</h2>
+            <span class="text-xs text-slate-400">exact fare</span>
+          </div>
+          <div class="pt-2.5 border-t border-white/10 flex items-center gap-3">
+            <div id="paymentModalDriverAvatar" class="w-10 h-10 rounded-xl bg-white/10 flex items-center justify-center overflow-hidden flex-shrink-0 text-sm font-bold">
+              D
+            </div>
+            <div class="text-xs flex-1 min-w-0">
+              <h4 id="paymentModalDriverName" class="font-bold text-white truncate">Driver Name</h4>
+              <p id="paymentModalDriverVehicle" class="text-[11px] text-slate-300 truncate">Vehicle Details</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Payment Option Switcher Tabs -->
+        <div class="flex bg-slate-100 p-1 rounded-2xl text-xs font-black gap-1">
+          <button type="button" onclick="switchPaymentOption('upi')" id="paymentOptBtn-upi" class="flex-1 py-2 rounded-xl bg-white text-slate-900 shadow-sm transition cursor-pointer text-center flex items-center justify-center gap-1.5">
+            <i data-lucide="smartphone" class="w-3.5 h-3.5 text-blue-600"></i>
+            <span>Pay via UPI</span>
+          </button>
+          <button type="button" onclick="switchPaymentOption('cash')" id="paymentOptBtn-cash" class="flex-1 py-2 rounded-xl text-slate-500 hover:text-slate-900 transition cursor-pointer text-center flex items-center justify-center gap-1.5">
+            <i data-lucide="banknote" class="w-3.5 h-3.5 text-emerald-600"></i>
+            <span>Pay Cash</span>
+          </button>
+        </div>
+
+        <!-- OPTION A: DIRECT P2P UPI (Deep Link & Dynamic QR) -->
+        <div id="paymentOptionUpiContent" class="space-y-3">
+          <!-- UPI ID Display & Copy -->
+          <div class="p-3 bg-slate-50 rounded-2xl border border-slate-200/80 flex items-center justify-between gap-2">
+            <div class="min-w-0">
+              <span class="text-[10px] text-slate-400 font-bold uppercase block">Driver's Personal UPI ID</span>
+              <span id="paymentModalUpiIdText" class="text-xs font-mono font-black text-slate-900 truncate block">driver@oksbi</span>
+            </div>
+            <button type="button" onclick="copyDriverUpiId()" id="btnCopyDriverUpi" class="px-3 py-1.5 rounded-xl bg-blue-50 text-blue-700 hover:bg-blue-100 text-xs font-black transition cursor-pointer flex-shrink-0">
+              Copy UPI
+            </button>
+          </div>
+
+          <!-- Direct Deep Link Action Button -->
+          <a id="btnPayUpiDeepLink" href="#" class="w-full py-3.5 btn-pill-primary text-xs flex items-center justify-center gap-2 shadow-lg cursor-pointer">
+            <i data-lucide="external-link" class="w-4 h-4"></i>
+            <span>Open UPI App (GPay / PhonePe / Paytm)</span>
+          </a>
+
+          <!-- Dynamic QR Code Card -->
+          <div class="p-3.5 rounded-2xl border border-slate-200 bg-white text-center space-y-2">
+            <p class="text-[11px] font-bold text-slate-600">Or Scan QR with any Banking / UPI App:</p>
+            <div class="w-40 h-40 mx-auto rounded-xl border border-slate-200 p-1.5 bg-white flex items-center justify-center shadow-inner">
+              <img id="paymentModalQrImg" src="" alt="UPI QR Code" class="w-full h-full object-contain rounded-lg" />
+            </div>
+            <p class="text-[10px] text-slate-400">100% of this fare goes directly to the driver's bank account.</p>
+          </div>
+
+          <!-- Confirm UPI Payment Done -->
+          <button type="button" onclick="proceedToRatingStep('upi')" class="w-full py-3.5 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black transition shadow-md flex items-center justify-center gap-2 cursor-pointer active:scale-95">
+            <i data-lucide="check" class="w-4 h-4"></i>
+            <span>I Have Paid via UPI ✓</span>
+          </button>
+        </div>
+
+        <!-- OPTION B: CASH PAYMENT TO DRIVER -->
+        <div id="paymentOptionCashContent" class="hidden space-y-3">
+          <div class="p-5 rounded-2xl bg-amber-50 border border-amber-200 text-center space-y-2">
+            <div class="w-12 h-12 rounded-full bg-amber-100 text-amber-700 mx-auto flex items-center justify-center text-xl">
+              💵
+            </div>
+            <h4 class="text-sm font-black text-slate-800">Hand Over Exact Cash</h4>
+            <p class="text-xs text-slate-600 max-w-xs mx-auto">
+              Please pay <span id="paymentModalCashAmount" class="font-black text-amber-800">₹110</span> in cash directly to your driver upon drop.
+            </p>
+          </div>
+
+          <!-- Confirm Cash Payment Done -->
+          <button type="button" onclick="proceedToRatingStep('cash')" class="w-full py-3.5 btn-pill-primary text-xs flex items-center justify-center gap-2 shadow-md cursor-pointer active:scale-95">
+            <i data-lucide="check" class="w-4 h-4"></i>
+            <span>Paid Cash to Driver ✓</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- VIEW 2: POST-RIDE RATING & SAFETY FEEDBACK -->
+      <div id="paymentModalStepRating" class="hidden space-y-4">
+        <div class="text-center space-y-1">
+          <h4 class="text-sm font-black text-slate-900">How was your ride with <span id="ratingModalDriverName">Driver</span>?</h4>
+          <p class="text-[11px] text-slate-400">Your feedback helps keep Routemate highway rides safe & polite.</p>
+        </div>
+
+        <!-- Interactive 5-Star Rating Control -->
+        <div class="flex items-center justify-center gap-2 py-2">
+          <button type="button" onclick="selectStarRating(1)" id="starBtn-1" class="text-2xl text-amber-400 hover:scale-110 transition cursor-pointer">★</button>
+          <button type="button" onclick="selectStarRating(2)" id="starBtn-2" class="text-2xl text-amber-400 hover:scale-110 transition cursor-pointer">★</button>
+          <button type="button" onclick="selectStarRating(3)" id="starBtn-3" class="text-2xl text-amber-400 hover:scale-110 transition cursor-pointer">★</button>
+          <button type="button" onclick="selectStarRating(4)" id="starBtn-4" class="text-2xl text-amber-400 hover:scale-110 transition cursor-pointer">★</button>
+          <button type="button" onclick="selectStarRating(5)" id="starBtn-5" class="text-2xl text-amber-400 hover:scale-110 transition cursor-pointer">★</button>
+        </div>
+        <p id="starRatingLabel" class="text-center text-xs font-black text-emerald-600">5.0 - Excellent & Safe Ride!</p>
+
+        <!-- Dynamic Feedback Tags Selector -->
+        <div class="space-y-1.5">
+          <span class="text-[10px] font-black uppercase text-slate-400 block" id="feedbackTagsHeader">What went well?</span>
+          <div id="feedbackTagsContainer" class="flex flex-wrap gap-1.5">
+            <!-- Dynamically populated tags based on star rating -->
+          </div>
+        </div>
+
+        <!-- Comment Input -->
+        <div>
+          <label class="block text-[11px] font-bold text-slate-700 mb-1">Additional Comments (Optional)</label>
+          <textarea id="feedbackCommentInput" rows="2" placeholder="Tell us more about the driving, vehicle hygiene, or driver behavior..." class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold focus:outline-none focus:border-blue-600 focus:bg-white transition resize-none"></textarea>
+        </div>
+
+        <!-- Submit Feedback Button -->
+        <button type="button" onclick="handleSubmitRideFeedback()" id="btnSubmitRideFeedback" class="w-full py-3.5 btn-pill-primary text-xs flex items-center justify-center gap-2 shadow-md cursor-pointer active:scale-95">
+          <i data-lucide="send" class="w-4 h-4"></i>
+          <span>Submit Rating & Review</span>
+        </button>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ========================================================================= -->
+  <!-- MODAL: DRIVER IN-APP WALLET RECHARGE -->
+  <!-- ========================================================================= -->
+  <div id="driverWalletRechargeModal" class="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm hidden flex items-center justify-center p-4">
+    <div class="bg-white rounded-3xl max-w-sm w-full p-6 shadow-2xl space-y-4 animate-in fade-in zoom-in-95 duration-200">
+      <div class="flex items-center justify-between pb-2 border-b border-slate-100">
+        <div class="flex items-center gap-2">
+          <div class="w-8 h-8 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center font-black">
+            <i data-lucide="wallet" class="w-4 h-4"></i>
+          </div>
+          <div>
+            <h3 class="text-xs font-black text-slate-900">Recharge Driver Wallet</h3>
+            <p class="text-[10px] text-slate-400">Top-up to clear negative balance or buffer platform fees</p>
+          </div>
+        </div>
+        <button type="button" onclick="closeDriverWalletRechargeModal()" class="w-7 h-7 rounded-full bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-500 font-bold transition cursor-pointer">
+          ✕
+        </button>
+      </div>
+
+      <div class="p-3 bg-slate-50 rounded-2xl border border-slate-200 text-center">
+        <span class="text-[10px] text-slate-400 uppercase font-bold block">Current Balance</span>
+        <h2 id="rechargeModalCurrentBalance" class="text-xl font-black text-slate-900">₹100.00</h2>
+      </div>
+
+      <!-- Quick Amount Selectors -->
+      <div class="space-y-1.5">
+        <label class="block text-[11px] font-bold text-slate-700">Select Top-Up Amount</label>
+        <div class="grid grid-cols-4 gap-1.5">
+          <button type="button" onclick="selectRechargeAmount(50)" id="rechargeAmt-50" class="py-2 rounded-xl border border-slate-200 text-xs font-bold hover:border-blue-500 transition cursor-pointer">₹50</button>
+          <button type="button" onclick="selectRechargeAmount(100)" id="rechargeAmt-100" class="py-2 rounded-xl border-2 border-blue-600 bg-blue-50 text-blue-700 text-xs font-black transition cursor-pointer">₹100</button>
+          <button type="button" onclick="selectRechargeAmount(200)" id="rechargeAmt-200" class="py-2 rounded-xl border border-slate-200 text-xs font-bold hover:border-blue-500 transition cursor-pointer">₹200</button>
+          <button type="button" onclick="selectRechargeAmount(500)" id="rechargeAmt-500" class="py-2 rounded-xl border border-slate-200 text-xs font-bold hover:border-blue-500 transition cursor-pointer">₹500</button>
+        </div>
+      </div>
+
+      <!-- Custom Amount Input -->
+      <div>
+        <label class="block text-[11px] font-bold text-slate-700 mb-1">Or Enter Custom Amount (₹)</label>
+        <div class="relative flex items-center">
+          <span class="absolute left-3.5 text-xs font-bold text-slate-500">₹</span>
+          <input type="number" id="inputCustomRechargeAmount" min="10" max="5000" placeholder="100" class="w-full pl-8 pr-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:border-blue-600 focus:bg-white transition" />
+        </div>
+      </div>
+
+      <!-- Pay & Top-Up Button -->
+      <button type="button" onclick="handleExecuteWalletRecharge()" id="btnExecuteWalletRecharge" class="w-full py-3.5 btn-pill-primary text-xs flex items-center justify-center gap-2 shadow-md cursor-pointer active:scale-95">
+        <i data-lucide="zap" class="w-4 h-4 text-cyan-200"></i>
+        <span id="btnExecuteWalletRechargeText">Pay & Recharge ₹100</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- ========================================================================= -->
+  <!-- MODAL: UPDATE DRIVER PERSONAL UPI ID -->
+  <!-- ========================================================================= -->
+  <div id="updateUpiModal" class="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm hidden flex items-center justify-center p-4">
+    <div class="bg-white rounded-3xl max-w-sm w-full p-6 shadow-2xl space-y-4 animate-in fade-in zoom-in-95 duration-200">
+      <div class="flex items-center justify-between pb-2 border-b border-slate-100">
+        <div class="flex items-center gap-2">
+          <div class="w-8 h-8 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center font-black">
+            <i data-lucide="smartphone" class="w-4 h-4"></i>
+          </div>
+          <div>
+            <h3 class="text-xs font-black text-slate-900">Direct P2P UPI ID</h3>
+            <p class="text-[10px] text-slate-400">Receive 100% rider payments directly to your bank</p>
+          </div>
+        </div>
+        <button type="button" onclick="closeUpdateUpiModal()" class="w-7 h-7 rounded-full bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-500 font-bold transition cursor-pointer">
+          ✕
+        </button>
+      </div>
+
+      <form id="formUpdateUpi" onsubmit="handleUpdateUpiSubmit(event)" class="space-y-3">
+        <div>
+          <label class="block text-[11px] font-bold text-slate-700 mb-1">Your Personal UPI ID (VPA) <span class="text-rose-500">*</span></label>
+          <input type="text" id="inputUpdateUpiId" required placeholder="e.g. shanthankolupula@okhdfcbank" class="w-full px-3.5 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-semibold focus:outline-none focus:border-blue-600 focus:bg-white transition" />
+          <p class="text-[10px] text-slate-400 mt-1">Accepts any Indian UPI ID (GPay, PhonePe, Paytm, BHIM, YBL, etc.)</p>
+        </div>
+
+        <button type="submit" id="btnSaveUpiSubmit" class="w-full py-3 btn-pill-primary text-xs flex items-center justify-center gap-2 shadow-md cursor-pointer active:scale-95">
+          <i data-lucide="check" class="w-4 h-4"></i>
+          <span>Save UPI ID</span>
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <!-- ========================================================================= -->
   <!-- MODAL: IMAGE LIGHTBOX (FULL-RESOLUTION DOCUMENT INSPECTION) -->
   <!-- ========================================================================= -->
   <div id="imageLightboxModal" class="fixed inset-0 z-50 bg-black/90 hidden flex flex-col items-center justify-center p-4">
@@ -1274,7 +1640,8 @@
   </audio>
 
   <!-- Core Scripts -->
-  <script src="supabaseClient.js?v=20261026_kyc_state_v51"></script>
-  <script src="app.js?v=20261026_kyc_state_v51"></script>
+  <script src="payment.js?v=20261026_p2p_wallet_safety_v52"></script>
+  <script src="supabaseClient.js?v=20261026_p2p_wallet_safety_v52"></script>
+  <script src="app.js?v=20261026_p2p_wallet_safety_v52"></script>
 </body>
 </html>

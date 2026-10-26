@@ -635,6 +635,127 @@
         throw new Error(data.error || 'Failed to review vehicle.');
       }
       return data;
+    },
+
+    /**
+     * Driver UPI ID & QR Code configuration
+     */
+    async updateDriverUpi(userId, upiId, upiQr = null) {
+      const apiBase = (typeof window !== 'undefined' && window.location.origin && window.location.origin.startsWith('http') && !window.location.origin.includes('localhost') && !window.location.origin.includes('127.0.0.1'))
+        ? window.location.origin
+        : 'https://www.routemate.pro';
+
+      const resp = await fetch(`${apiBase}/api/driver-kyc`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'update_upi',
+          userId,
+          upiId,
+          upiQr
+        })
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || !data.success) {
+        throw new Error(data.error || 'Failed to save UPI ID.');
+      }
+      return data;
+    },
+
+    /**
+     * Deducts vehicle-wise dynamic platform fee from driver wallet for cash rides
+     * (Bike: ₹5, Auto: ₹10, Car: ₹18)
+     */
+    async deductDriverCommission(payload) {
+      const apiBase = (typeof window !== 'undefined' && window.location.origin && window.location.origin.startsWith('http') && !window.location.origin.includes('localhost') && !window.location.origin.includes('127.0.0.1'))
+        ? window.location.origin
+        : 'https://www.routemate.pro';
+
+      const resp = await fetch(`${apiBase}/api/driver-kyc`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'deduct_commission',
+          ...payload
+        })
+      });
+      const data = await resp.json().catch(() => ({}));
+      return data;
+    },
+
+    /**
+     * Recharges driver in-app wallet balance
+     */
+    async rechargeDriverWallet(payload) {
+      const apiBase = (typeof window !== 'undefined' && window.location.origin && window.location.origin.startsWith('http') && !window.location.origin.includes('localhost') && !window.location.origin.includes('127.0.0.1'))
+        ? window.location.origin
+        : 'https://www.routemate.pro';
+
+      const resp = await fetch(`${apiBase}/api/driver-kyc`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'recharge_wallet',
+          ...payload
+        })
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || !data.success) {
+        throw new Error(data.error || 'Failed to recharge wallet.');
+      }
+      return data;
+    }
+  };
+
+  /**
+   * Post-Ride Rating & Safety Feedback Helper
+   */
+  const feedbacks = {
+    async submitFeedback(payload) {
+      const apiBase = (typeof window !== 'undefined' && window.location.origin && window.location.origin.startsWith('http') && !window.location.origin.includes('localhost') && !window.location.origin.includes('127.0.0.1'))
+        ? window.location.origin
+        : 'https://www.routemate.pro';
+
+      const resp = await fetch(`${apiBase}/api/feedbacks`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || !data.success) {
+        throw new Error(data.error || 'Failed to submit rating.');
+      }
+      return data;
+    },
+
+    async getAllFeedbacks() {
+      const apiBase = (typeof window !== 'undefined' && window.location.origin && window.location.origin.startsWith('http') && !window.location.origin.includes('localhost') && !window.location.origin.includes('127.0.0.1'))
+        ? window.location.origin
+        : 'https://www.routemate.pro';
+
+      const resp = await fetch(`${apiBase}/api/feedbacks`);
+      const data = await resp.json().catch(() => ({}));
+      return data.feedbacks || [];
+    },
+
+    async executeSafetyAction(payload) {
+      const apiBase = (typeof window !== 'undefined' && window.location.origin && window.location.origin.startsWith('http') && !window.location.origin.includes('localhost') && !window.location.origin.includes('127.0.0.1'))
+        ? window.location.origin
+        : 'https://www.routemate.pro';
+
+      const resp = await fetch(`${apiBase}/api/feedbacks`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'safety_action',
+          ...payload
+        })
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || !data.success) {
+        throw new Error(data.error || 'Failed to record safety action.');
+      }
+      return data;
     }
   };
 
@@ -849,17 +970,32 @@
     },
 
     /**
-     * RIDER: Start Realtime + Polling listener for driver acceptance
+     * RIDER: Start Realtime + Polling listener for driver acceptance, start, and completion
      */
     startRiderPolling(requestId, onStatusChange) {
       this.stopRiderPolling();
-      console.log('📡 [ROUTEMATE RIDER] Subscribing to ride acceptance:', requestId);
+      console.log('📡 [ROUTEMATE RIDER] Subscribing to ride lifecycle updates:', requestId);
 
-      let isAccepted = false;
-      const handleAcceptedPayload = (statusData) => {
-        if (isAccepted) return;
-        isAccepted = true;
-        this.stopRiderPolling();
+      let lastReportedStatus = null;
+      let lastDriverData = null;
+
+      const handleStatusPayload = (statusData) => {
+        if (!statusData || !statusData.status) return;
+
+        if (statusData.driver) lastDriverData = statusData.driver;
+        if (!statusData.driver && lastDriverData) statusData.driver = lastDriverData;
+
+        const isFinished = statusData.status === 'ride_completed' || statusData.status === 'completed';
+
+        if (isFinished) {
+          this.stopRiderPolling();
+        } else if (statusData.status === lastReportedStatus) {
+          return;
+        }
+
+        lastReportedStatus = statusData.status;
+        console.log(`⚡ [ROUTEMATE RIDER] Status transition -> ${statusData.status}`);
+
         if (typeof onStatusChange === 'function') {
           onStatusChange(statusData);
         }
@@ -879,20 +1015,19 @@
                 filter: `vehicle_number=eq.${requestId}`
               },
               (payload) => {
-                console.log('⚡ [REALTIME RIDER UPDATE RECEIVED]:', payload);
                 if (payload.new) {
                   let notes = {};
                   try { notes = JSON.parse(payload.new.notes || '{}'); } catch(e){}
-                  if (notes.status === 'driver_accepted' || notes.status === 'ride_started' || payload.new.status === 'completed') {
-                    handleAcceptedPayload({
-                      status: notes.status || 'driver_accepted',
-                      driver: notes.driver,
-                      pin: notes.pin,
-                      fare: payload.new.per_seat_price || notes.fare,
-                      pickup: payload.new.pickup,
-                      drop: payload.new.drop_location
-                    });
-                  }
+                  const currentStatus = notes.status || (payload.new.status === 'completed' ? 'ride_completed' : 'driver_accepted');
+                  handleStatusPayload({
+                    status: currentStatus,
+                    driver: notes.driver,
+                    pin: notes.pin,
+                    fare: payload.new.per_seat_price || notes.fare,
+                    pickup: payload.new.pickup,
+                    drop: payload.new.drop_location,
+                    vehicleType: payload.new.vehicle_type || notes.vehicleType || 'bike'
+                  });
                 }
               }
             )
@@ -900,10 +1035,21 @@
               'broadcast',
               { event: 'driver_accepted' },
               (msg) => {
-                console.log('⚡ [INSTANT BROADCAST DRIVER ACCEPTED RECEIVED]:', msg.payload);
-                if (msg.payload) {
-                  handleAcceptedPayload(msg.payload);
-                }
+                if (msg.payload) handleStatusPayload(msg.payload);
+              }
+            )
+            .on(
+              'broadcast',
+              { event: 'ride_started' },
+              (msg) => {
+                if (msg.payload) handleStatusPayload(msg.payload);
+              }
+            )
+            .on(
+              'broadcast',
+              { event: 'ride_completed' },
+              (msg) => {
+                if (msg.payload) handleStatusPayload(msg.payload);
               }
             )
             .subscribe();
@@ -920,22 +1066,23 @@
             let notes = {};
             try { notes = JSON.parse(row.notes || '{}'); } catch (e) {}
 
-            if (notes.status === 'driver_accepted' || notes.status === 'ride_started' || row.status === 'completed') {
-              console.log('🎉 [ROUTEMATE RIDER] Driver accepted ride via poll:', notes.driver);
-              handleAcceptedPayload({
-                status: notes.status || 'driver_accepted',
+            const status = notes.status || (row.status === 'completed' ? 'ride_completed' : 'searching');
+            if (status === 'driver_accepted' || status === 'ride_started' || status === 'ride_completed' || row.status === 'completed') {
+              handleStatusPayload({
+                status: status === 'completed' ? 'ride_completed' : status,
                 driver: notes.driver,
                 pin: notes.pin,
                 fare: row.per_seat_price || notes.fare,
                 pickup: row.pickup,
-                drop: row.drop_location
+                drop: row.drop_location,
+                vehicleType: row.vehicle_type || notes.vehicleType || 'bike'
               });
             }
           }
         } catch (e) {
           console.warn('Rider poll notice:', e);
         }
-      }, 1000);
+      }, 1200);
     },
 
     stopRiderPolling() {
@@ -1128,19 +1275,23 @@
      */
     async acceptRequest(requestId, driverUser) {
       console.log('⚡ [ROUTEMATE DRIVER] Accepting ride:', requestId);
+      const driverPayload = {
+        id: driverUser.id,
+        name: driverUser.name,
+        phone: driverUser.phone,
+        avatar: (driverUser.avatar_url && !driverUser.avatar_url.includes('unsplash')) ? driverUser.avatar_url : (driverUser.avatar && !driverUser.avatar.includes('unsplash') ? driverUser.avatar : getSvgInitialsAvatar(driverUser.name || 'Driver', '#10B981')),
+        vehicleName: driverUser.vehicleName || driverUser.vehicle_name || 'Verified Commuter Vehicle',
+        vehicleNumber: driverUser.vehicleNumber || driverUser.vehicle_number || 'TG 08 AB 1234',
+        vehicleType: driverUser.vehicleType || driverUser.vehicle_type || 'bike',
+        upiId: driverUser.upi_id || driverUser.upiId || 'routemate.driver@oksbi',
+        upiQr: driverUser.upi_qr || driverUser.upiQr || '',
+        rating: driverUser.rating || 4.95
+      };
+
       const updateNotes = JSON.stringify({
         isRequest: true,
         status: 'driver_accepted',
-        driver: {
-          id: driverUser.id,
-          name: driverUser.name,
-          phone: driverUser.phone,
-          avatar: (driverUser.avatar_url && !driverUser.avatar_url.includes('unsplash')) ? driverUser.avatar_url : (driverUser.avatar && !driverUser.avatar.includes('unsplash') ? driverUser.avatar : getSvgInitialsAvatar(driverUser.name || 'Driver', '#10B981')),
-          vehicleName: driverUser.vehicleName || 'Verified Commuter Vehicle',
-          vehicleNumber: driverUser.vehicleNumber || 'TG 08 AB 1234',
-          vehicleType: driverUser.vehicleType || 'bike',
-          rating: 4.95
-        },
+        driver: driverPayload,
         acceptedAt: new Date().toISOString()
       });
 
@@ -1154,16 +1305,7 @@
             event: 'driver_accepted',
             payload: {
               status: 'driver_accepted',
-              driver: {
-                id: driverUser.id,
-                name: driverUser.name,
-                phone: driverUser.phone,
-                avatar: driverUser.avatar_url || driverUser.avatar,
-                vehicleName: driverUser.vehicleName || 'Verified Commuter Vehicle',
-                vehicleNumber: driverUser.vehicleNumber || 'TG 08 AB 1234',
-                vehicleType: driverUser.vehicleType || 'bike',
-                rating: 4.95
-              }
+              driver: driverPayload
             }
           });
 
@@ -1219,28 +1361,52 @@
         status: 'ride_started',
         startedAt: new Date().toISOString()
       });
+
+      const client = getSupabase();
+      if (client) {
+        try {
+          const riderDirect = client.channel(`rider-ride-${requestId}`);
+          riderDirect.send({
+            type: 'broadcast',
+            event: 'ride_started',
+            payload: { status: 'ride_started', requestId }
+          });
+        } catch (e) {}
+      }
+
       return await supabaseRest(`rides?vehicle_number=eq.${encodeURIComponent(requestId)}`, {
         method: 'PATCH',
         body: { notes: updateNotes }
       });
     },
 
-    async completeRide(requestId) {
+    async completeRide(requestId, completedData = {}) {
       const updateNotes = JSON.stringify({
+        isRequest: true,
         status: 'ride_completed',
-        completedAt: new Date().toISOString()
+        completedAt: new Date().toISOString(),
+        ...completedData
       });
+
+      const client = getSupabase();
+      if (client) {
+        try {
+          const riderDirect = client.channel(`rider-ride-${requestId}`);
+          riderDirect.send({
+            type: 'broadcast',
+            event: 'ride_completed',
+            payload: {
+              status: 'ride_completed',
+              requestId,
+              ...completedData
+            }
+          });
+        } catch (e) {}
+      }
+
       return await supabaseRest(`rides?vehicle_number=eq.${encodeURIComponent(requestId)}`, {
         method: 'PATCH',
         body: { status: 'completed', notes: updateNotes }
-      });
-    },
-
-    async cancelRequest(requestId) {
-      this.stopRiderPolling();
-      return await supabaseRest(`rides?vehicle_number=eq.${encodeURIComponent(requestId)}`, {
-        method: 'PATCH',
-        body: { status: 'cancelled' }
       });
     }
   };
@@ -1250,6 +1416,7 @@
     getSupabase,
     auth,
     kyc,
+    feedbacks,
     supabaseRest,
     matching,
     isSelfBookedRide,
