@@ -552,9 +552,15 @@
             <h2 class="text-sm font-black text-slate-900">Your Ride Activity</h2>
             <p class="text-[11px] text-slate-400">Live requests and past trips</p>
           </div>
-          <button type="button" onclick="renderActivityList(true)" title="Refresh Activity" class="p-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 transition cursor-pointer active:scale-95">
-            <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i>
-          </button>
+          <div class="flex items-center gap-1.5">
+            <button type="button" onclick="clearUserActivityHistory()" title="Clear Activity Feed" class="px-2.5 py-1.5 rounded-xl bg-slate-100 hover:bg-rose-50 hover:text-rose-600 text-slate-500 text-[11px] font-bold transition cursor-pointer flex items-center gap-1 active:scale-95">
+              <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+              <span>Clear</span>
+            </button>
+            <button type="button" onclick="renderActivityList(true)" title="Refresh Activity" class="p-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 transition cursor-pointer active:scale-95">
+              <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i>
+            </button>
+          </div>
         </div>
         <div id="activityList" class="space-y-3">
           <!-- Dynamically populated from Supabase rides table -->
@@ -605,6 +611,8 @@
               <span>Use Driver</span>
             </button>
           </div>
+        </div>
+
         <!-- DRIVER VEHICLE MANAGEMENT ("MY VEHICLES" / "ADD ANOTHER VEHICLE") -->
         <!-- Unlocked for verified drivers or drivers with submitted KYC -->
         <div id="profileVehicleManagementSection" class="mt-4 p-4 rounded-2xl bg-slate-50 border border-slate-200/80 space-y-3">
@@ -656,6 +664,8 @@
               100% Direct P2P
             </span>
           </div>
+        </div>
+
         <!-- SUPER ADMIN PANEL DIRECT ACCESS CARD -->
         <div id="profileAdminAccessCard" class="mt-4 p-4 rounded-2xl bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 text-white shadow-md flex items-center justify-between border border-slate-800">
           <div class="flex items-center gap-3">
@@ -1770,8 +1780,8 @@
   </audio>
 
   <!-- Core Scripts -->
-  <script src="payment.js?v=20261026_admin_panel_fix_v54"></script>
-  <script src="supabaseClient.js?v=20261026_admin_panel_fix_v54"></script>
-  <script src="app.js?v=20261026_admin_panel_fix_v54"></script>
+  <script src="payment.js?v=20261026_admin_fix_v55"></script>
+  <script src="supabaseClient.js?v=20261026_admin_fix_v55"></script>
+  <script src="app.js?v=20261026_admin_fix_v55"></script>
 </body>
 </html>

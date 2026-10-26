@@ -1773,6 +1773,16 @@
     state.activeTab = 'admin';
     setActiveNavPill('admin');
 
+    // Ensure main app container is unhidden
+    const header = document.getElementById('appHeader');
+    const main = document.getElementById('appMain');
+    const nav = document.getElementById('appBottomNav');
+    const auth = document.getElementById('authScreen');
+    if (auth) auth.classList.add('hidden');
+    if (header) header.classList.remove('hidden');
+    if (main) main.classList.remove('hidden');
+    if (nav) nav.classList.remove('hidden');
+
     const screens = {
       book: document.getElementById('riderScreen'),
       drive: document.getElementById('driverScreen'),
@@ -1782,7 +1792,10 @@
     };
 
     Object.values(screens).forEach(el => el && el.classList.add('hidden'));
-    if (screens.admin) screens.admin.classList.remove('hidden');
+    if (screens.admin) {
+      screens.admin.classList.remove('hidden');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
 
     loadAdminKycSubmissions();
     loadAdminSafetyData();
@@ -2621,13 +2634,21 @@
         seenIds.add(state.activeDriverTrip.id);
       }
 
-      // 3. Check locally cached user rides for instant offline & real-time sync
+      // 3. Check locally cached user rides for instant offline & real-time sync (strictly verified to this user)
       try {
         const localList = JSON.parse(localStorage.getItem('routemate_user_rides') || '[]');
         if (Array.isArray(localList)) {
           for (const lr of localList) {
             const lrId = String(lr.id || '').trim();
-            if (lrId && !seenIds.has(lrId)) {
+            const lrUserId = String(lr.userId || lr.riderId || '').trim();
+            const lrUserEmail = String(lr.userEmail || lr.riderEmail || '').toLowerCase().trim();
+            const lrUserPhone = String(lr.userPhone || lr.riderPhone || '').replace(/\D/g, '').slice(-10);
+
+            const isOwn = (userId && lrUserId === userId) ||
+                          (userEmail && lrUserEmail === userEmail) ||
+                          (userPhoneDigits && userPhoneDigits.length >= 10 && lrUserPhone === userPhoneDigits);
+
+            if (isOwn && lrId && !seenIds.has(lrId)) {
               seenIds.add(lrId);
               userRides.push({
                 id: lrId,
@@ -2644,7 +2665,7 @@
         }
       } catch (e) {}
 
-      // 4. Process Supabase database rows
+      // 4. Process Supabase database rows (Strict matching: User ID, Email, or 10-digit Phone only)
       for (const row of rides) {
         let notes = {};
         if (typeof row.notes === 'string') {
@@ -2656,12 +2677,12 @@
         const rideId = String(row.vehicle_number || notes.id || row.id || '').trim();
         if (seenIds.has(rideId)) continue;
 
-        const riderId = String(notes.riderId || notes.rider_id || '').trim();
+        const riderId = String(notes.riderId || notes.rider_id || row.rider_id || '').trim();
         const riderEmail = String(notes.riderEmail || notes.rider_email || '').toLowerCase().trim();
         const riderPhone = String(notes.riderPhone || notes.rider_phone || '').replace(/\D/g, '').slice(-10);
 
         const driverObj = notes.driver || {};
-        const driverId = String(driverObj.id || '').trim();
+        const driverId = String(driverObj.id || row.driver_id || '').trim();
         const driverEmail = String(driverObj.email || '').toLowerCase().trim();
         const driverPhone = String(driverObj.phone || '').replace(/\D/g, '').slice(-10);
 
@@ -2669,15 +2690,13 @@
         if (
           (userId && riderId && riderId === userId) ||
           (userEmail && riderEmail && riderEmail === userEmail) ||
-          (userPhoneDigits && riderPhone && riderPhone === userPhoneDigits) ||
-          (user.name && notes.riderName && notes.riderName.toLowerCase().trim() === user.name.toLowerCase().trim())
+          (userPhoneDigits && userPhoneDigits.length >= 10 && riderPhone && riderPhone === userPhoneDigits)
         ) {
           userRole = 'commuter';
         } else if (
           (userId && driverId && driverId === userId) ||
           (userEmail && driverEmail && driverEmail === userEmail) ||
-          (userPhoneDigits && driverPhone && driverPhone === userPhoneDigits) ||
-          (userId && row.driver_id && row.driver_id === userId)
+          (userPhoneDigits && userPhoneDigits.length >= 10 && driverPhone && driverPhone === userPhoneDigits)
         ) {
           userRole = 'driver';
         }
@@ -2844,6 +2863,17 @@
     }
   }
   window.renderActivityList = renderActivityList;
+
+  window.clearUserActivityHistory = function () {
+    try {
+      localStorage.removeItem('routemate_user_rides');
+    } catch (e) {}
+    state.activeRiderRequest = null;
+    state.activeDriverTrip = null;
+    state.activities = [];
+    showToast('Activity cleared. Refreshing real ride history...', 'info');
+    renderActivityList(true);
+  };
 
   // =========================================================================
   // PASSENGER SAFETY: EMERGENCY SOS & WHATSAPP RIDE SHARING
