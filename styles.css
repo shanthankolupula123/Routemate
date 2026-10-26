@@ -1,350 +1,240 @@
-@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap');
 
 :root {
-  --primary-blue: #2563eb;
-  --primary-hover: #1d4ed8;
-  --primary-gradient: linear-gradient(135deg, #1d4ed8 0%, #2563eb 50%, #0284c7 100%);
-  --accent-cyan: #06b6d4;
-  --bg-slate: #f8fafc;
-  --surface-card: #ffffff;
-  --text-main: #0f172a;
-  --text-muted: #64748b;
-  --border-light: #e2e8f0;
-  --success-emerald: #10b981;
-  --upi-purple: #7c3aed;
+  /* Brand-Aligned Palette inspired by the Official Routemate Logo */
+  --brand-primary: #0052CC;
+  --brand-deep: #003B99;
+  --brand-electric: #0A84FF;
+  --brand-cyan: #00C7BE;
+  --brand-gradient: linear-gradient(135deg, #0052CC 0%, #0A84FF 100%);
+  --brand-gradient-hover: linear-gradient(135deg, #0045AD 0%, #0070E0 100%);
+  --surface-bg: #F8FAFC;
+  --surface-card: #FFFFFF;
+  --surface-elevated: #FFFFFF;
+  --text-main: #0F172A;
+  --text-body: #334155;
+  --text-muted: #64748B;
+  --border-subtle: #E2E8F0;
+  --success-emerald: #10B981;
+  --warning-amber: #F59E0B;
+  --danger-rose: #EF4444;
+}
+
+* {
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
 }
 
 body {
   font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  background: #f1f5f9;
+  background-color: var(--surface-bg);
   color: var(--text-main);
+  margin: 0;
+  padding: 0;
+  overflow-x: hidden;
   -webkit-font-smoothing: antialiased;
 }
 
-/* Custom scrollbars */
+/* Custom Scrollbar */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 5px;
+  height: 5px;
 }
 ::-webkit-scrollbar-track {
-  background: #f1f5f9;
+  background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: #cbd5e1;
+  background: #CBD5E1;
   border-radius: 9999px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #94a3b8;
+  background: #94A3B8;
 }
 
-/* Glassmorphism helpers */
-.glass-header {
-  background: rgba(255, 255, 255, 0.94);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+/* Glassmorphism Classes */
+.glass-panel {
+  background: rgba(255, 255, 255, 0.88);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.6);
 }
 
-.glass-card {
-  background: rgba(255, 255, 255, 0.98);
+.glass-bottom-nav {
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(226, 232, 240, 0.8);
+  box-shadow: 0 16px 36px -4px rgba(0, 82, 204, 0.12), 0 4px 12px rgba(0, 0, 0, 0.04);
+}
+
+.glass-modal {
+  background: rgba(15, 23, 42, 0.65);
   backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
 }
 
-.gradient-brand {
-  background: var(--primary-gradient);
+/* Brand Card Styling */
+.routemate-card {
+  background: var(--surface-card);
+  border-radius: 24px;
+  border: 1px solid #E2E8F0;
+  box-shadow: 0 10px 25px -5px rgba(0, 82, 204, 0.06), 0 4px 6px -4px rgba(0, 0, 0, 0.02);
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-.gradient-text {
-  background: linear-gradient(135deg, #1d4ed8, #0284c7);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
+.routemate-card-interactive {
+  cursor: pointer;
+}
+.routemate-card-interactive:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 16px 32px -6px rgba(0, 82, 204, 0.12), 0 6px 12px -4px rgba(0, 0, 0, 0.04);
+  border-color: #BFDBFE;
 }
 
-/* Mode toggle slider */
-.mode-toggle-bg {
-  position: relative;
-  background: #e2e8f0;
+/* Pill Buttons */
+.btn-pill-primary {
+  background: var(--brand-gradient);
+  color: #FFFFFF;
+  border-radius: 9999px;
+  font-weight: 700;
+  border: none;
+  box-shadow: 0 8px 20px -4px rgba(0, 82, 204, 0.35);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.btn-pill-primary:hover {
+  background: var(--brand-gradient-hover);
+  box-shadow: 0 12px 24px -4px rgba(0, 82, 204, 0.45);
+  transform: translateY(-1px);
+}
+.btn-pill-primary:active {
+  transform: scale(0.98);
+}
+
+.btn-pill-secondary {
+  background: #F1F5F9;
+  color: #334155;
+  border-radius: 9999px;
+  font-weight: 600;
+  border: 1px solid #E2E8F0;
+  transition: all 0.2s ease;
+}
+.btn-pill-secondary:hover {
+  background: #E2E8F0;
+  color: #0F172A;
+}
+.btn-pill-secondary:active {
+  transform: scale(0.98);
+}
+
+.btn-pill-danger {
+  background: #FEE2E2;
+  color: #DC2626;
+  border-radius: 9999px;
+  font-weight: 600;
+  border: 1px solid #FECACA;
+  transition: all 0.2s ease;
+}
+.btn-pill-danger:hover {
+  background: #FCA5A5;
+  color: #B91C1C;
+}
+
+/* Radar & Pulse Animations */
+@keyframes radar-pulse {
+  0% {
+    transform: scale(0.9);
+    opacity: 0.8;
+  }
+  50% {
+    transform: scale(1.4);
+    opacity: 0.3;
+  }
+  100% {
+    transform: scale(1.9);
+    opacity: 0;
+  }
+}
+
+.radar-ring {
+  animation: radar-pulse 2s cubic-bezier(0.2, 0.8, 0.2, 1) infinite;
+}
+
+.radar-ring-delayed {
+  animation: radar-pulse 2s cubic-bezier(0.2, 0.8, 0.2, 1) 0.8s infinite;
+}
+
+@keyframes live-glow {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.4;
+    transform: scale(0.9);
+  }
+}
+
+.live-dot {
+  animation: live-glow 1.8s ease-in-out infinite;
+}
+
+/* Mode Switcher Pill */
+.mode-toggle-container {
+  background: #E2E8F0;
   border-radius: 9999px;
   padding: 4px;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  display: flex;
+  position: relative;
 }
 
-.mode-pill-active {
+.mode-pill-indicator {
   position: absolute;
   top: 4px;
   bottom: 4px;
   width: calc(50% - 4px);
-  background: white;
+  background: #FFFFFF;
   border-radius: 9999px;
-  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.15), 0 1px 3px rgba(0, 0, 0, 0.08);
-  transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+  box-shadow: 0 4px 10px rgba(0, 82, 204, 0.15);
+  transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
-/* Vehicle card selected state */
-.vehicle-card {
-  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-  border: 2px solid #e2e8f0;
+/* Vehicle Selector Pills */
+.vehicle-pill {
+  border: 2px solid #E2E8F0;
+  border-radius: 18px;
+  background: #FFFFFF;
+  transition: all 0.2s ease;
+  cursor: pointer;
+}
+.vehicle-pill.active {
+  border-color: #0052CC;
+  background: #EFF6FF;
+  box-shadow: 0 6px 16px -2px rgba(0, 82, 204, 0.15);
 }
 
-.vehicle-card.selected {
-  border-color: #2563eb;
-  background: #eff6ff;
-  transform: translateY(-2px);
-  box-shadow: 0 10px 25px -5px rgba(37, 99, 235, 0.15);
-}
-
-/* Pulse animation for live indicators */
-@keyframes pulse-dot {
-  0% { transform: scale(0.95); opacity: 0.8; box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
-  70% { transform: scale(1.1); opacity: 1; box-shadow: 0 0 0 8px rgba(16, 185, 129, 0); }
-  100% { transform: scale(0.95); opacity: 0.8; box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
-}
-
-.live-pulse {
-  animation: pulse-dot 2s infinite cubic-bezier(0.4, 0, 0.6, 1);
-}
-
-/* Route node connector line */
-.route-connector {
-  position: absolute;
-  left: 21px;
-  top: 36px;
-  bottom: 36px;
-  width: 2px;
-  background: repeating-linear-gradient(to bottom, #94a3b8 0, #94a3b8 4px, transparent 4px, transparent 8px);
-}
-
-/* Card hover elevation */
-.interactive-card {
-  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
-}
-
-.interactive-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 12px 28px -6px rgba(15, 23, 42, 0.08), 0 4px 10px -2px rgba(15, 23, 42, 0.04);
-}
-
-/* Bottom nav active item highlight */
-.nav-item.active {
-  color: #2563eb;
+/* Toast Notifications */
+.routemate-toast {
+  position: fixed;
+  top: 20px;
+  left: 50%;
+  transform: translateX(-50%) translateY(-30px);
+  background: #0F172A;
+  color: #FFFFFF;
+  padding: 12px 20px;
+  border-radius: 9999px;
+  font-size: 13px;
   font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  box-shadow: 0 16px 32px rgba(0, 0, 0, 0.25);
+  opacity: 0;
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  z-index: 99999;
+  pointer-events: none;
+  max-width: 90vw;
 }
-
-.nav-item.active svg {
-  stroke: #2563eb;
-  stroke-width: 2.25;
+.routemate-toast.visible {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
 }
-
-/* Modal backdrop fade */
-.modal-backdrop {
-  background-color: rgba(15, 23, 42, 0.6);
-  backdrop-filter: blur(4px);
-}
-
-/* Responsive container wrapper */
-.app-container {
-  width: 100%;
-  overflow-x: hidden;
-  position: relative;
-}
-
-@media (min-width: 768px) {
-  .app-container {
-    max-width: 480px;
-    margin: 0 auto;
-    min-height: 100vh;
-    box-shadow: 0 25px 50px -12px rgba(15, 23, 42, 0.15);
-    background: #ffffff;
-    position: relative;
-    overflow-x: hidden;
-  }
-}
-
-/* Radar ripple effect for active driver online state */
-@keyframes radar-ripple {
-  0% { transform: scale(0.9); opacity: 0.8; }
-  60% { transform: scale(1.6); opacity: 0.2; }
-  100% { transform: scale(2.2); opacity: 0; }
-}
-
-.radar-ring {
-  animation: radar-ripple 2.4s infinite cubic-bezier(0.1, 0.8, 0.3, 1);
-}
-
-/* Driver Switcher Pill Animation */
-.driver-toggle-thumb {
-  transition: transform 0.28s cubic-bezier(0.34, 1.56, 0.64, 1), background-color 0.2s ease;
-}
-
-/* Incoming request timer bar */
-@keyframes shrink-timer {
-  from { width: 100%; }
-  to { width: 0%; }
-}
-
-.request-timer-bar {
-  animation: shrink-timer 45s linear forwards;
-}
-
-/* Suppress Google Maps API error popups, dialogs & orphaned containers */
-.pac-container,
-.pac-container:empty,
-.pac-container:not(:has(.pac-item)),
-.gm-err-container,
-.gm-err-content,
-.gm-err-message,
-.gm-err-autocomplete,
-.gm-style-cc {
-  display: none !important;
-  visibility: hidden !important;
-  opacity: 0 !important;
-  pointer-events: none !important;
-  border: none !important;
-  box-shadow: none !important;
-  height: 0 !important;
-  width: 0 !important;
-  min-height: 0 !important;
-  padding: 0 !important;
-  margin: 0 !important;
-}
-
-/* Ensure Leaflet container fills 100% and has proper z-index */
-.leaflet-container {
-  width: 100% !important;
-  height: 100% !important;
-  z-index: 1 !important;
-  font-family: inherit !important;
-}
-
-.leaflet-control-attribution {
-  font-size: 9px !important;
-  background: rgba(255, 255, 255, 0.75) !important;
-  backdrop-filter: blur(4px) !important;
-  border-radius: 6px 0 0 0 !important;
-  padding: 1px 6px !important;
-  color: #64748b !important;
-}
-
-.leaflet-control-attribution a {
-  color: #3b82f6 !important;
-  text-decoration: none !important;
-}
-
-/* 6-Digit OTP Box Styling */
-.otp-box {
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-  caret-color: #2563eb;
-}
-
-.otp-box:focus {
-  border-color: #2563eb !important;
-  background-color: #ffffff !important;
-  box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.15) !important;
-  transform: translateY(-1px);
-}
-
-/* Modal Stacking & Z-Index Guarantees */
-.z-50 { z-index: 50 !important; }
-.z-55 { z-index: 55 !important; }
-.z-60 { z-index: 60 !important; }
-.z-70 { z-index: 70 !important; }
-.z-100 { z-index: 100 !important; }
-
-#driverIncomingRideModal {
-  z-index: 9999 !important;
-}
-
-#driverVerifyPinModal {
-  z-index: 99999 !important;
-}
-
-#ratingFeedbackModal {
-  z-index: 9999 !important;
-}
-
-#inAppChatModal {
-  z-index: 99999 !important;
-}
-
-/* Strict Profile Avatar Dimension & Overflow Containment */
-#headerUserAvatar, #headerUserAvatarPlaceholder {
-  width: 36px !important;
-  height: 36px !important;
-  min-width: 36px !important;
-  max-width: 36px !important;
-  min-height: 36px !important;
-  max-height: 36px !important;
-  object-fit: cover !important;
-  border-radius: 9999px !important;
-}
-
-#profileDisplayAvatar, #profileDisplayAvatarPlaceholder {
-  width: 80px !important;
-  height: 80px !important;
-  min-width: 80px !important;
-  max-width: 80px !important;
-  min-height: 80px !important;
-  max-height: 80px !important;
-  object-fit: cover !important;
-  border-radius: 9999px !important;
-}
-
-#kycAvatarPreview, #kycAvatarPlaceholder {
-  width: 96px !important;
-  height: 96px !important;
-  min-width: 96px !important;
-  max-width: 96px !important;
-  min-height: 96px !important;
-  max-height: 96px !important;
-  object-fit: cover !important;
-  border-radius: 9999px !important;
-}
-
-/* ========================================================
-   Admin KYC Verification Card & Responsive Document Grid
-   ======================================================== */
-.admin-kyc-card {
-  width: 100% !important;
-  box-sizing: border-box !important;
-  overflow: hidden !important;
-}
-
-.admin-doc-grid {
-  display: grid !important;
-  grid-template-columns: 1fr !important;
-  gap: 12px !important;
-  width: 100% !important;
-  box-sizing: border-box !important;
-}
-
-@media (min-width: 768px) {
-  .admin-doc-grid {
-    grid-template-columns: repeat(3, 1fr) !important;
-  }
-}
-
-.admin-doc-box {
-  background-color: #f8fafc !important;
-  border: 1px solid #e2e8f0 !important;
-  border-radius: 14px !important;
-  padding: 12px !important;
-  box-sizing: border-box !important;
-  min-width: 0 !important;
-  width: 100% !important;
-  word-break: break-all !important;
-  overflow-wrap: anywhere !important;
-}
-
-.admin-doc-box span,
-.admin-doc-box p {
-  word-break: break-all !important;
-  overflow-wrap: anywhere !important;
-}
-
-.admin-driver-name {
-  word-break: break-word !important;
-  overflow-wrap: anywhere !important;
-  hyphens: auto !important;
-}
-
-
-
