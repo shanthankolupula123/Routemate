@@ -341,25 +341,31 @@
     const riderId = String(rideRow.rider_id || notes.riderId || notes.rider_id || '').trim();
     const riderEmail = String(rideRow.rider_email || notes.riderEmail || notes.rider_email || '').toLowerCase().trim();
     const riderPhone = String(rideRow.rider_phone || notes.riderPhone || notes.rider_phone || '').replace(/\D/g, '');
+    const vehicleNumber = String(rideRow.vehicle_number || notes.id || '').trim();
 
     const driverId = String(currentUser.id || '').trim();
     const driverEmail = String(currentUser.email || '').toLowerCase().trim();
     const driverPhone = String(currentUser.phone || '').replace(/\D/g, '');
 
-    // 1. Exclude if rider ID matches driver user ID
+    // 1. Exclude if currently active booked ride on this device
+    if (typeof window !== 'undefined' && window.state && window.state.activeRiderRequest) {
+      const activeReq = window.state.activeRiderRequest;
+      if (activeReq.id === vehicleNumber || activeReq.id === notes.id || (activeReq.dbId && activeReq.dbId === rideRow.id)) {
+        return true;
+      }
+    }
+
+    // 2. Exclude if rider ID matches driver user ID
     if (driverId && riderId && driverId === riderId) {
       return true;
     }
 
-    // 2. Exclude if rider email matches driver email
-    if (driverEmail && riderEmail) {
-      if (driverEmail === riderEmail) {
-        return true;
-      }
-      return false; // Distinct emails are guaranteed separate users
+    // 3. Exclude if rider email matches driver email
+    if (driverEmail && riderEmail && driverEmail === riderEmail) {
+      return true;
     }
 
-    // 3. Exclude if real mobile phone matches
+    // 4. Exclude if 10-digit mobile phone matches
     const GENERIC_PLACEHOLDERS = ['9848023145', '0000000000', '1234567890'];
     if (driverPhone.length >= 10 && riderPhone.length >= 10) {
       const d10 = driverPhone.slice(-10);
@@ -502,6 +508,25 @@
         dbId: resp.data?.[0]?.id || requestId
       };
 
+      // Broadcast immediately across Supabase Realtime WebSockets to all active drivers
+      const client = getSupabase();
+      if (client) {
+        try {
+          const radarChannel = client.channel('routemate-radar-feed');
+          radarChannel.send({
+            type: 'broadcast',
+            event: 'new_ride_broadcast',
+            payload: {
+              row: dbRow,
+              ride: activeRide
+            }
+          });
+          console.log('⚡ [REALTIME BROADCAST SENT]:', requestId);
+        } catch (bcErr) {
+          console.warn('Realtime broadcast dispatch notice:', bcErr.message);
+        }
+      }
+
       return {
         success: resp.ok,
         request: activeRide
@@ -514,6 +539,16 @@
     startRiderPolling(requestId, onStatusChange) {
       this.stopRiderPolling();
       console.log('📡 [ROUTEMATE RIDER] Subscribing to ride acceptance:', requestId);
+
+      let isAccepted = false;
+      const handleAcceptedPayload = (statusData) => {
+        if (isAccepted) return;
+        isAccepted = true;
+        this.stopRiderPolling();
+        if (typeof onStatusChange === 'function') {
+          onStatusChange(statusData);
+        }
+      };
 
       const client = getSupabase();
       if (client) {
@@ -534,18 +569,25 @@
                   let notes = {};
                   try { notes = JSON.parse(payload.new.notes || '{}'); } catch(e){}
                   if (notes.status === 'driver_accepted' || notes.status === 'ride_started' || payload.new.status === 'completed') {
-                    this.stopRiderPolling();
-                    if (typeof onStatusChange === 'function') {
-                      onStatusChange({
-                        status: notes.status || 'driver_accepted',
-                        driver: notes.driver,
-                        pin: notes.pin,
-                        fare: payload.new.per_seat_price || notes.fare,
-                        pickup: payload.new.pickup,
-                        drop: payload.new.drop_location
-                      });
-                    }
+                    handleAcceptedPayload({
+                      status: notes.status || 'driver_accepted',
+                      driver: notes.driver,
+                      pin: notes.pin,
+                      fare: payload.new.per_seat_price || notes.fare,
+                      pickup: payload.new.pickup,
+                      drop: payload.new.drop_location
+                    });
                   }
+                }
+              }
+            )
+            .on(
+              'broadcast',
+              { event: 'driver_accepted' },
+              (msg) => {
+                console.log('⚡ [INSTANT BROADCAST DRIVER ACCEPTED RECEIVED]:', msg.payload);
+                if (msg.payload) {
+                  handleAcceptedPayload(msg.payload);
                 }
               }
             )
@@ -565,17 +607,14 @@
 
             if (notes.status === 'driver_accepted' || notes.status === 'ride_started' || row.status === 'completed') {
               console.log('🎉 [ROUTEMATE RIDER] Driver accepted ride via poll:', notes.driver);
-              this.stopRiderPolling();
-              if (typeof onStatusChange === 'function') {
-                onStatusChange({
-                  status: notes.status || 'driver_accepted',
-                  driver: notes.driver,
-                  pin: notes.pin,
-                  fare: row.per_seat_price || notes.fare,
-                  pickup: row.pickup,
-                  drop: row.drop_location
-                });
-              }
+              handleAcceptedPayload({
+                status: notes.status || 'driver_accepted',
+                driver: notes.driver,
+                pin: notes.pin,
+                fare: row.per_seat_price || notes.fare,
+                pickup: row.pickup,
+                drop: row.drop_location
+              });
             }
           }
         } catch (e) {
@@ -603,6 +642,66 @@
       this.stopDriverPolling();
       console.log('📡 [ROUTEMATE DRIVER] Starting Realtime + Radar Polling for user:', currentUser?.name);
 
+      let activeSearchingRides = [];
+
+      const triggerUpdate = () => {
+        if (typeof onRidesUpdated === 'function') {
+          onRidesUpdated([...activeSearchingRides]);
+        }
+      };
+
+      const notifyDriverArrival = (rideId) => {
+        if (this._lastAlertRideId !== rideId) {
+          this._lastAlertRideId = rideId;
+          if (typeof window.playNotificationSound === 'function') {
+            window.playNotificationSound();
+          }
+          if (typeof navigator !== 'undefined' && navigator.vibrate) {
+            try { navigator.vibrate([200, 100, 200]); } catch (e) {}
+          }
+        }
+      };
+
+      const processIncomingRow = (row) => {
+        if (!row) return;
+        if (isSelfBookedRide(row, currentUser)) return;
+
+        let notes = {};
+        try { notes = typeof row.notes === 'string' ? JSON.parse(row.notes || '{}') : (row.notes || {}); } catch (e) {}
+
+        const isCompleted = row.status === 'completed' || row.status === 'cancelled' ||
+                            notes.status === 'driver_accepted' || notes.status === 'ride_started' ||
+                            notes.status === 'ride_completed' || notes.status === 'cancelled';
+        if (isCompleted) {
+          removeRideById(row.vehicle_number || notes.id || row.id);
+          return;
+        }
+
+        const normalized = normalizeRideData(row);
+        if (!normalized) return;
+
+        const existsIdx = activeSearchingRides.findIndex(r => r.id === normalized.id || (r.dbId && r.dbId === normalized.dbId));
+        if (existsIdx === -1) {
+          activeSearchingRides.unshift(normalized);
+          triggerUpdate();
+          notifyDriverArrival(normalized.id);
+          console.log('⚡ [INSTANT CARD ADDED TO DRIVER FEED]:', normalized.id);
+        } else {
+          activeSearchingRides[existsIdx] = normalized;
+          triggerUpdate();
+        }
+      };
+
+      const removeRideById = (rideId) => {
+        if (!rideId) return;
+        const initialLen = activeSearchingRides.length;
+        activeSearchingRides = activeSearchingRides.filter(r => r.id !== rideId && r.dbId !== rideId);
+        if (activeSearchingRides.length !== initialLen) {
+          triggerUpdate();
+          console.log('⚡ [RIDE REMOVED FROM DRIVER FEED]:', rideId);
+        }
+      };
+
       const fetchRides = async () => {
         try {
           const recentCutoff = new Date(Date.now() - 3600000).toISOString();
@@ -610,7 +709,7 @@
 
           if (!resp.ok || !Array.isArray(resp.data)) return;
 
-          const activeSearchingRides = [];
+          const freshRides = [];
           for (const row of resp.data) {
             if (!row) continue;
             let notes = {};
@@ -628,47 +727,65 @@
 
             const normalized = normalizeRideData(row);
             if (normalized) {
-              activeSearchingRides.push(normalized);
+              freshRides.push(normalized);
             }
           }
 
-          if (typeof onRidesUpdated === 'function') {
-            onRidesUpdated(activeSearchingRides);
-          }
+          activeSearchingRides = freshRides;
+          triggerUpdate();
 
-          // Audio chime on first detection of a new ride
           if (activeSearchingRides.length > 0) {
-            const topId = activeSearchingRides[0].id;
-            if (this._lastAlertRideId !== topId) {
-              this._lastAlertRideId = topId;
-              if (typeof window.playNotificationSound === 'function') {
-                window.playNotificationSound();
-              }
-              if (typeof navigator !== 'undefined' && navigator.vibrate) {
-                try { navigator.vibrate([200, 100, 200]); } catch (e) {}
-              }
-            }
+            notifyDriverArrival(activeSearchingRides[0].id);
           }
         } catch (err) {
           console.warn('Driver poll error:', err);
         }
       };
 
+      // Set up Instant Supabase Realtime Channel (Postgres Changes + WebSockets Broadcast)
       const client = getSupabase();
       if (client) {
         try {
           this._realtimeChannel = client
-            .channel('driver-rides-feed')
+            .channel('routemate-radar-feed')
             .on(
               'postgres_changes',
-              { event: '*', schema: 'public', table: 'rides' },
+              { event: 'INSERT', schema: 'public', table: 'rides' },
               (payload) => {
-                console.log('⚡ [REALTIME POSTGRES CHANGE DETECTED]:', payload.eventType);
-                fetchRides();
+                console.log('⚡ [REALTIME POSTGRES INSERT DETECTED]:', payload.new?.vehicle_number || payload.new?.id);
+                processIncomingRow(payload.new);
+              }
+            )
+            .on(
+              'postgres_changes',
+              { event: 'UPDATE', schema: 'public', table: 'rides' },
+              (payload) => {
+                console.log('⚡ [REALTIME POSTGRES UPDATE DETECTED]:', payload.new?.vehicle_number || payload.new?.id);
+                processIncomingRow(payload.new);
+              }
+            )
+            .on(
+              'broadcast',
+              { event: 'new_ride_broadcast' },
+              (msg) => {
+                console.log('⚡ [INSTANT WEBSOCKET BROADCAST DETECTED]:', msg.payload?.ride?.id);
+                if (msg.payload?.row) {
+                  processIncomingRow(msg.payload.row);
+                }
+              }
+            )
+            .on(
+              'broadcast',
+              { event: 'cancel_ride_broadcast' },
+              (msg) => {
+                console.log('⚡ [INSTANT WEBSOCKET CANCEL DETECTED]:', msg.payload?.id);
+                if (msg.payload?.id) {
+                  removeRideById(msg.payload.id);
+                }
               }
             )
             .subscribe((status) => {
-              console.log('📡 [REALTIME CHANNEL STATUS]:', status);
+              console.log('📡 [DRIVER REALTIME RADAR CHANNEL STATUS]:', status);
             });
         } catch (e) {
           console.warn('Realtime channel error:', e);
@@ -676,7 +793,7 @@
       }
 
       fetchRides();
-      this._driverTimer = setInterval(fetchRides, 1000);
+      this._driverTimer = setInterval(fetchRides, 1200);
     },
 
     stopDriverPolling() {
@@ -712,6 +829,40 @@
         acceptedAt: new Date().toISOString()
       });
 
+      // 1. Broadcast immediate acceptance to Rider via WebSocket
+      const client = getSupabase();
+      if (client) {
+        try {
+          const riderDirect = client.channel(`rider-ride-${requestId}`);
+          riderDirect.send({
+            type: 'broadcast',
+            event: 'driver_accepted',
+            payload: {
+              status: 'driver_accepted',
+              driver: {
+                id: driverUser.id,
+                name: driverUser.name,
+                phone: driverUser.phone,
+                avatar: driverUser.avatar_url || driverUser.avatar,
+                vehicleName: driverUser.vehicleName || 'Verified Commuter Vehicle',
+                vehicleNumber: driverUser.vehicleNumber || 'TS 08 AB 1234',
+                vehicleType: driverUser.vehicleType || 'bike',
+                rating: 4.95
+              }
+            }
+          });
+
+          // 2. Broadcast to other drivers to remove this accepted ride from their radars
+          const radarChannel = client.channel('routemate-radar-feed');
+          radarChannel.send({
+            type: 'broadcast',
+            event: 'cancel_ride_broadcast',
+            payload: { id: requestId }
+          });
+        } catch (e) {}
+      }
+
+      // 3. Persist update in database
       const resp = await supabaseRest(`rides?vehicle_number=eq.${encodeURIComponent(requestId)}`, {
         method: 'PATCH',
         body: {
@@ -721,6 +872,31 @@
       });
 
       return { success: resp.ok };
+    },
+
+    async cancelRequest(requestId) {
+      console.log('🚫 [ROUTEMATE RIDER] Cancelling request:', requestId);
+      this.stopRiderPolling();
+
+      const client = getSupabase();
+      if (client) {
+        try {
+          const radarChannel = client.channel('routemate-radar-feed');
+          radarChannel.send({
+            type: 'broadcast',
+            event: 'cancel_ride_broadcast',
+            payload: { id: requestId }
+          });
+        } catch (e) {}
+      }
+
+      return await supabaseRest(`rides?vehicle_number=eq.${encodeURIComponent(requestId)}`, {
+        method: 'PATCH',
+        body: {
+          status: 'cancelled',
+          notes: JSON.stringify({ isRequest: true, status: 'cancelled' })
+        }
+      });
     },
 
     async startRide(requestId) {

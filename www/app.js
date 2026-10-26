@@ -1436,6 +1436,27 @@
 
     let cardsHtml = '';
     rides.forEach(ride => {
+      let proximityBadge = '';
+      if (state.userGPS && ride.pickupLat && ride.pickupLng) {
+        const distKm = calculateProximityKm(state.userGPS.lat, state.userGPS.lng, ride.pickupLat, ride.pickupLng);
+        if (distKm !== null) {
+          const etaMins = Math.max(2, Math.round(distKm * 2.2));
+          proximityBadge = `
+            <div class="mt-2.5 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+              <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+              <span>Pickup is ${distKm} km away • ~${etaMins} mins</span>
+            </div>
+          `;
+        }
+      } else {
+        proximityBadge = `
+          <div class="mt-2.5 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-blue-50 text-blue-700 border border-blue-200">
+            <span class="w-2 h-2 rounded-full bg-blue-500"></span>
+            <span>Corridor Pickup • NH163 Hub</span>
+          </div>
+        `;
+      }
+
       cardsHtml += `
         <div class="routemate-card p-5 border-2 border-blue-500/30 shadow-lg hover:shadow-xl transition relative overflow-hidden bg-white">
           <div class="flex items-center justify-between pb-3 border-b border-slate-100">
@@ -1467,6 +1488,8 @@
             </div>
           </div>
 
+          ${proximityBadge}
+
           <div class="mt-4 pt-3 border-t border-slate-100 grid grid-cols-2 gap-2.5">
             <button type="button" onclick="declineDriverRide('${ride.id}')" class="py-3 btn-pill-secondary text-xs flex items-center justify-center gap-1 cursor-pointer">
               <i data-lucide="x" class="w-4 h-4 text-slate-400"></i>
@@ -1485,6 +1508,19 @@
     if (window.lucide) lucide.createIcons();
   }
 
+  function calculateProximityKm(lat1, lon1, lat2, lon2) {
+    if (!lat1 || !lon1 || !lat2 || !lon2) return null;
+    const R = 6371; // Earth radius in km
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLon = (lon2 - lon1) * Math.PI / 180;
+    const a =
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+      Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return Math.round((R * c) * 10) / 10;
+  }
+
   window.acceptDriverRide = async function (rideId) {
     const target = state.incomingRides.find(r => r.id === rideId);
     if (!target) return;
@@ -1498,6 +1534,9 @@
         };
         renderDriverActiveTripCard();
         renderDriverIncomingCards([]);
+        if (state.maps.driver) {
+          updateRouteLine(state.maps.driver, 'driver');
+        }
         playNotificationSound();
         showToast(`🎉 Accepted ride for ${target.riderName}! Heading to pickup.`, 'success');
       } else {
@@ -1613,6 +1652,11 @@
     const fare = state.activeDriverTrip.fare;
 
     await window.db.matching.completeRide(state.activeDriverTrip.id);
+    if (state.maps.driver) {
+      if (state.mapMarkers.driverRouteLine) { state.maps.driver.removeLayer(state.mapMarkers.driverRouteLine); state.mapMarkers.driverRouteLine = null; }
+      if (state.mapMarkers.driverPickup) { state.maps.driver.removeLayer(state.mapMarkers.driverPickup); state.mapMarkers.driverPickup = null; }
+      if (state.mapMarkers.driverDrop) { state.maps.driver.removeLayer(state.mapMarkers.driverDrop); state.mapMarkers.driverDrop = null; }
+    }
     state.activeDriverTrip = null;
     renderDriverActiveTripCard();
     startDriverRadar();
