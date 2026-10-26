@@ -189,20 +189,48 @@
     }
   }
 
+  function getUserInitials(name) {
+    if (!name || typeof name !== 'string') return 'U';
+    const parts = name.trim().split(/\s+/);
+    if (parts.length >= 2) {
+      return (parts[0][0] + parts[1][0]).toUpperCase();
+    }
+    return parts[0].slice(0, 2).toUpperCase() || 'U';
+  }
+
+  function getInitialsAvatarSvg(name, size = 120, bg = '#0052CC') {
+    const initials = getUserInitials(name);
+    const fontSize = Math.round(size * 0.40);
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">
+      <rect width="${size}" height="${size}" rx="${size / 2}" fill="${bg}"/>
+      <text x="50%" y="54%" text-anchor="middle" dominant-baseline="middle" fill="#FFFFFF" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-weight="800" font-size="${fontSize}px" letter-spacing="0.5px">${initials}</text>
+    </svg>`;
+    return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+  }
+  window.getUserInitials = getUserInitials;
+  window.getInitialsAvatarSvg = getInitialsAvatarSvg;
+
   function normalizeAuthUser(user) {
     const meta = user.user_metadata || {};
+    const name = user.name || meta.name || meta.full_name || user.email?.split('@')[0] || 'User';
+    let avatar = user.avatar || meta.avatar || meta.avatar_url || meta.picture || null;
+    if (!avatar || typeof avatar !== 'string' || avatar.includes('unsplash.com')) {
+      avatar = getInitialsAvatarSvg(name, 120);
+    }
     return {
       id: user.id || ('usr_' + Date.now()),
       email: user.email || 'user@routemate.local',
-      name: user.name || meta.name || user.email?.split('@')[0] || 'Verified Commuter',
-      phone: user.phone || meta.phone || '+91 98480 23145',
-      role: user.role || meta.role || state.pendingAuth.role || 'rider',
-      rating: user.rating || 4.95,
-      avatar: user.avatar || meta.avatar || meta.avatar_url || meta.picture || 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=120&h=120&q=80'
+      name: name,
+      phone: user.phone || meta.phone || '',
+      gender: user.gender || meta.gender || '',
+      dob: user.dob || meta.dob || '',
+      role: 'commuter',
+      rating: user.rating || 5.0,
+      avatar: avatar
     };
   }
 
-  function unlockAppWithUser(user, isExplicitLogin = false) {
+  function unlockAppWithUser(user) {
     state.currentUser = user;
     try { localStorage.setItem('routemate_user', JSON.stringify(user)); } catch (e) {}
 
@@ -220,11 +248,10 @@
 
     updateProfileUI();
 
-    // Determine initial active mode preference
-    const preferredMode = state.pendingAuth?.role || user.role || 'rider';
-    switchMode(preferredMode);
+    // Default to commuter mode (user can freely toggle rider/driver anytime via header slider or bottom nav)
+    switchMode('rider');
 
-    // Ensure Leaflet maps compute accurate dimensions once DOM is visible
+    // Ensure Leaflet map computes accurate dimensions once DOM is visible
     setTimeout(() => {
       initMapWidget('riderInteractiveMap', 'rider');
       if (state.maps.rider) {
@@ -232,19 +259,11 @@
         updateRouteLine(state.maps.rider, 'rider');
       }
     }, 250);
-
-    // Prompt user to pick their travel mode whenever they log in or on fresh session
-    if (isExplicitLogin || !sessionStorage.getItem('mode_prompted')) {
-      setTimeout(() => {
-        openModeSelectionModal();
-      }, 400);
-    }
   }
 
   function lockAppToAuthScreen() {
     state.currentUser = null;
     localStorage.removeItem('routemate_user');
-    sessionStorage.removeItem('mode_prompted');
 
     // Show Auth Screen & reset to Step 1
     const authScreen = document.getElementById('authScreen');
@@ -266,18 +285,41 @@
     const avatarEl = document.getElementById('headerUserAvatar');
     const pNameEl = document.getElementById('profileUserName');
     const pEmailEl = document.getElementById('profileUserEmail');
+    const pPhoneEl = document.getElementById('profileUserPhone');
     const pRoleEl = document.getElementById('profileUserRole');
     const pAvatarEl = document.getElementById('profileUserAvatar');
     const modeText = document.getElementById('profileCurrentModeText');
 
     if (state.currentUser) {
-      const shortName = state.currentUser.name.split(' ')[0];
+      const name = state.currentUser.name || 'User';
+      const shortName = name.split(' ')[0] || 'User';
+      const initials = getUserInitials(name);
+
       if (nameEl) nameEl.textContent = shortName;
-      if (avatarEl) avatarEl.src = state.currentUser.avatar;
-      if (pNameEl) pNameEl.textContent = state.currentUser.name;
-      if (pEmailEl) pEmailEl.textContent = state.currentUser.email;
-      if (pRoleEl) pRoleEl.textContent = `Dual Commuter & Driver • 4.95 ★`;
-      if (pAvatarEl) pAvatarEl.src = state.currentUser.avatar;
+      if (pNameEl) pNameEl.textContent = name;
+      if (pEmailEl) pEmailEl.textContent = state.currentUser.email || '';
+      if (pPhoneEl) {
+        pPhoneEl.textContent = state.currentUser.phone ? `Phone: ${state.currentUser.phone}` : '';
+        pPhoneEl.classList.toggle('hidden', !state.currentUser.phone);
+      }
+      if (pRoleEl) pRoleEl.textContent = `Verified Member • 5.0 ★`;
+
+      // Update avatar with clean dynamic initial (No mock images)
+      if (avatarEl) {
+        if (avatarEl.tagName === 'IMG') {
+          avatarEl.src = getInitialsAvatarSvg(name, 64);
+        } else {
+          avatarEl.textContent = initials;
+        }
+      }
+
+      if (pAvatarEl) {
+        if (pAvatarEl.tagName === 'IMG') {
+          pAvatarEl.src = getInitialsAvatarSvg(name, 120);
+        } else {
+          pAvatarEl.textContent = initials;
+        }
+      }
     }
 
     if (modeText) {
@@ -285,81 +327,98 @@
     }
   }
 
-  window.openModeSelectionModal = function () {
-    const modal = document.getElementById('modeSelectionModal');
-    if (modal) {
-      modal.classList.remove('hidden');
-      if (window.lucide) lucide.createIcons();
-    }
-  };
-
-  window.closeModeSelectionModal = function () {
-    const modal = document.getElementById('modeSelectionModal');
-    if (modal) modal.classList.add('hidden');
-  };
-
-  window.selectModeFromModal = function (chosenMode) {
-    closeModeSelectionModal();
-    sessionStorage.setItem('mode_prompted', 'true');
-    switchMode(chosenMode);
-    if (chosenMode === 'driver') {
-      navigateToTab('drive');
-    } else {
-      navigateToTab('book');
-    }
-    showToast(chosenMode === 'driver' ? '🛵 Mode: Driver • Realtime radar active!' : '🚗 Mode: Commuter • Ready to find & book rides!', 'success');
-  };
-
   window.setAuthTab = function (tab) {
     state.authTab = tab;
     const btnIn = document.getElementById('authTabSignIn');
     const btnUp = document.getElementById('authTabSignUp');
-    const nameField = document.getElementById('authNameField');
-    const roleField = document.getElementById('authRoleField');
-    const submitBtn = document.getElementById('btnSendOtp');
+    const signupFields = document.getElementById('authSignupFields');
+    const emailLabel = document.getElementById('authEmailLabel');
+    const emailInput = document.getElementById('authEmailInput');
+    const btnText = document.getElementById('btnSendOtpText');
     const errBox = document.getElementById('authEmailErrorMsg');
 
     if (errBox) errBox.classList.add('hidden');
 
     if (tab === 'signup') {
-      btnUp.className = 'w-1/2 py-2.5 rounded-full bg-white text-blue-700 shadow-sm transition cursor-pointer';
-      btnIn.className = 'w-1/2 py-2.5 rounded-full text-slate-500 hover:text-slate-700 transition cursor-pointer';
-      if (nameField) nameField.classList.remove('hidden');
-      if (roleField) roleField.classList.remove('hidden');
-      if (submitBtn) submitBtn.innerHTML = `<i data-lucide="mail" class="w-4 h-4 text-cyan-200"></i><span>Send 6-Digit OTP</span>`;
+      if (btnUp) btnUp.className = 'w-1/2 py-2.5 rounded-full bg-white text-blue-700 shadow-sm transition cursor-pointer';
+      if (btnIn) btnIn.className = 'w-1/2 py-2.5 rounded-full text-slate-500 hover:text-slate-700 transition cursor-pointer';
+      if (signupFields) signupFields.classList.remove('hidden');
+      if (emailLabel) emailLabel.classList.remove('hidden');
+      if (emailInput) emailInput.placeholder = 'Enter Email Address';
+      if (btnText) btnText.textContent = 'Create Account & Send OTP';
     } else {
-      btnIn.className = 'w-1/2 py-2.5 rounded-full bg-white text-blue-700 shadow-sm transition cursor-pointer';
-      btnUp.className = 'w-1/2 py-2.5 rounded-full text-slate-500 hover:text-slate-700 transition cursor-pointer';
-      if (nameField) nameField.classList.add('hidden');
-      if (roleField) roleField.classList.remove('hidden'); // ALWAYS visible on both sign in and sign up
-      if (submitBtn) submitBtn.innerHTML = `<i data-lucide="mail" class="w-4 h-4 text-cyan-200"></i><span>Send 6-Digit OTP</span>`;
+      if (btnIn) btnIn.className = 'w-1/2 py-2.5 rounded-full bg-white text-blue-700 shadow-sm transition cursor-pointer';
+      if (btnUp) btnUp.className = 'w-1/2 py-2.5 rounded-full text-slate-500 hover:text-slate-700 transition cursor-pointer';
+      if (signupFields) signupFields.classList.add('hidden');
+      if (emailLabel) emailLabel.classList.add('hidden');
+      if (emailInput) emailInput.placeholder = 'Enter Email Address';
+      if (btnText) btnText.textContent = 'Send 6-Digit OTP';
     }
     if (window.lucide) lucide.createIcons();
   };
 
-  // STEP 1: SEND OTP
+  // STEP 1: SEND OTP (CLEAN SIGN IN OR CREATE ACCOUNT)
   window.handleSendOtpSubmit = async function (e) {
     e.preventDefault();
     const email = document.getElementById('authEmailInput')?.value.trim();
-    const name = document.getElementById('authNameInput')?.value.trim();
-    const role = document.querySelector('input[name="authRole"]:checked')?.value || 'rider';
     const submitBtn = document.getElementById('btnSendOtp');
+    const btnText = document.getElementById('btnSendOtpText');
     const errBox = document.getElementById('authEmailErrorMsg');
 
-    if (!email) return;
+    if (!email) {
+      showToast('Please enter your email address.', 'warning');
+      return;
+    }
+
+    let name = '';
+    let phone = '';
+    let gender = '';
+    let dob = '';
+
+    if (state.authTab === 'signup') {
+      name = document.getElementById('authNameInput')?.value.trim() || '';
+      phone = document.getElementById('authPhoneInput')?.value.trim() || '';
+      gender = document.getElementById('authGenderInput')?.value.trim() || '';
+      dob = document.getElementById('authDobInput')?.value.trim() || '';
+
+      if (!name) {
+        if (errBox) { errBox.textContent = 'Full Name is required to create an account.'; errBox.classList.remove('hidden'); }
+        showToast('Full Name is required.', 'warning');
+        document.getElementById('authNameInput')?.focus();
+        return;
+      }
+
+      const digitsOnly = phone.replace(/\D/g, '');
+      if (!phone || digitsOnly.length < 10) {
+        if (errBox) { errBox.textContent = 'A valid 10-digit mobile phone number is required.'; errBox.classList.remove('hidden'); }
+        showToast('Valid 10-digit mobile number is required.', 'warning');
+        document.getElementById('authPhoneInput')?.focus();
+        return;
+      }
+      phone = digitsOnly.length === 10 ? `+91 ${digitsOnly}` : `+${digitsOnly}`;
+    }
+
     if (errBox) errBox.classList.add('hidden');
 
     state.pendingAuth = {
       email,
       name: name || email.split('@')[0],
-      role
+      phone,
+      gender,
+      dob,
+      isSignUp: state.authTab === 'signup'
     };
 
     submitBtn.disabled = true;
-    submitBtn.innerHTML = `<span class="animate-spin inline-block mr-1">⚙️</span> Sending OTP...`;
+    if (btnText) btnText.textContent = 'Sending OTP...';
 
     try {
-      await window.db.auth.sendOtp(email, { name: state.pendingAuth.name, role: state.pendingAuth.role });
+      await window.db.auth.sendOtp(email, {
+        name: state.pendingAuth.name,
+        phone: state.pendingAuth.phone,
+        gender: state.pendingAuth.gender,
+        dob: state.pendingAuth.dob
+      });
       
       // Transition to Step 2: OTP Entry
       document.getElementById('authStepEmail').classList.add('hidden');
@@ -388,7 +447,7 @@
       showToast(msg, 'danger');
     } finally {
       submitBtn.disabled = false;
-      submitBtn.innerHTML = `<i data-lucide="mail" class="w-4 h-4 text-cyan-200"></i><span>Send 6-Digit OTP</span>`;
+      if (btnText) btnText.textContent = state.authTab === 'signup' ? 'Create Account & Send OTP' : 'Send 6-Digit OTP';
       if (window.lucide) lucide.createIcons();
     }
   };
@@ -413,29 +472,34 @@
     try {
       const data = await window.db.auth.verifyOtp(state.pendingAuth.email, otp, {
         name: state.pendingAuth.name,
-        role: state.pendingAuth.role
+        phone: state.pendingAuth.phone,
+        gender: state.pendingAuth.gender,
+        dob: state.pendingAuth.dob
       });
 
+      let finalUser;
       if (data?.user) {
-        const userObj = normalizeAuthUser(data.user);
-        userObj.name = state.pendingAuth.name || userObj.name;
-        userObj.role = state.pendingAuth.role || userObj.role;
-        unlockAppWithUser(userObj, true);
-        showToast('🎉 Successfully verified! Welcome to Routemate.', 'success');
+        finalUser = normalizeAuthUser(data.user);
+        finalUser.name = state.pendingAuth.name || finalUser.name;
+        if (state.pendingAuth.phone) finalUser.phone = state.pendingAuth.phone;
+        if (state.pendingAuth.gender) finalUser.gender = state.pendingAuth.gender;
+        if (state.pendingAuth.dob) finalUser.dob = state.pendingAuth.dob;
       } else {
-        // Fallback user session construction
-        const localUser = {
+        finalUser = {
           id: 'usr_' + Date.now(),
           email: state.pendingAuth.email,
           name: state.pendingAuth.name,
-          role: state.pendingAuth.role,
-          phone: '+91 98480 23145',
-          rating: 4.95,
-          avatar: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=120&h=120&q=80'
+          phone: state.pendingAuth.phone || '',
+          gender: state.pendingAuth.gender || '',
+          dob: state.pendingAuth.dob || '',
+          role: 'commuter',
+          rating: 5.0,
+          avatar: getInitialsAvatarSvg(state.pendingAuth.name, 120)
         };
-        unlockAppWithUser(localUser, true);
-        showToast('🎉 Verified! Welcome to Routemate.', 'success');
       }
+
+      unlockAppWithUser(finalUser);
+      showToast('🎉 Successfully verified! Welcome to Routemate.', 'success');
     } catch (err) {
       console.error('Verify OTP error:', err);
       let msg = err.message || 'Invalid or expired OTP code. Please try again.';
@@ -471,7 +535,9 @@
     try {
       await window.db.auth.sendOtp(state.pendingAuth.email, {
         name: state.pendingAuth.name,
-        role: state.pendingAuth.role
+        phone: state.pendingAuth.phone,
+        gender: state.pendingAuth.gender,
+        dob: state.pendingAuth.dob
       });
       startResendCountdown();
       showToast('New 6-digit OTP code sent!', 'info');
@@ -505,9 +571,17 @@
 
   window.handleGoogleSignIn = async function () {
     try {
+      showToast('Connecting to Google...', 'info');
       await window.db.auth.signInWithGoogle();
     } catch (err) {
-      showToast(err.message || 'Google OAuth failed', 'danger');
+      console.warn('Google sign-in notice:', err);
+      let errMsg = err.message || '';
+      if (errMsg.includes('provider') || errMsg.includes('not supported') || errMsg.includes('disabled') || errMsg.includes('Unsupported')) {
+        showToast('Google OAuth is not configured on this Supabase project. Please use the instant 6-Digit Email OTP below.', 'warning');
+      } else {
+        showToast('Google Sign In: ' + errMsg, 'danger');
+      }
+      document.getElementById('authEmailInput')?.focus();
     }
   };
 
@@ -1394,7 +1468,7 @@
           </div>
 
           <div class="mt-3.5 flex items-center gap-3">
-            <img src="${driver.avatar || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=120&h=120&q=80'}" alt="Driver" class="w-12 h-12 rounded-full object-cover border-2 border-emerald-400 shadow-md" />
+            <img src="${driver.avatar && !driver.avatar.includes('unsplash') ? driver.avatar : getInitialsAvatarSvg(driver.name || 'Driver', 120, '#10B981')}" alt="Driver" class="w-12 h-12 rounded-full object-cover border-2 border-emerald-400 shadow-md" />
             <div class="text-xs flex-1">
               <h4 class="font-black text-white text-sm">${driver.name || 'Verified Driver'}</h4>
               <p class="text-slate-300 font-mono text-[11px]">${driver.vehicleNumber || 'TS 08 AB 1234'} • ${driver.vehicleName || 'Hero Splendor'}</p>

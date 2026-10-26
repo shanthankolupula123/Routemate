@@ -86,7 +86,7 @@ const routematePayment = {
         order_id: orderData.order_id,
         name: RAZORPAY_CONFIG.brandName,
         description: `Fuel Share • ${(ride && ride.pickup) || 'Pickup'} ➔ ${(ride && (ride.drop || ride.drop_location)) || 'Destination'}`,
-        image: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=128&h=128&q=80',
+        image: 'app-logo.png',
         prefill: {
           name: (window.state && window.state.currentUser && window.state.currentUser.name) || 'Verified Commuter',
           email: 'commuter@routemate.in',

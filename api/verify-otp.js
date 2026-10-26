@@ -113,7 +113,7 @@ module.exports = async (req, res) => {
                 // Clear stored code to prevent replay attacks and update profile
                 const updatePayload = { avatar_url: null, is_verified: true };
                 if (body.name) updatePayload.name = body.name;
-                if (body.role) updatePayload.role = body.role === 'driver' ? 'driver' : 'rider';
+                if (body.phone) updatePayload.phone = body.phone;
 
                 fetch(`${supabaseUrl}/rest/v1/profiles?id=eq.${rows[0].id}`, {
                   method: 'PATCH',
@@ -157,10 +157,12 @@ module.exports = async (req, res) => {
         id: (matchedProfile && matchedProfile.id) || ('usr_' + Date.now()),
         email: cleanIdentifier,
         name: (body && body.name) || (matchedProfile && matchedProfile.name) || cleanIdentifier.split('@')[0],
-        role: (body && body.role) || (matchedProfile && matchedProfile.role) || 'rider',
-        phone: (matchedProfile && matchedProfile.phone) || cleanIdentifier,
-        rating: (matchedProfile && matchedProfile.rating) || 4.95,
-        avatar: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=120&h=120&q=80'
+        role: 'commuter',
+        phone: (body && body.phone) || (matchedProfile && matchedProfile.phone) || '',
+        gender: (body && body.gender) || '',
+        dob: (body && body.dob) || '',
+        rating: (matchedProfile && matchedProfile.rating) || 5.0,
+        avatar: null
       };
 
       return res.status(200).json({

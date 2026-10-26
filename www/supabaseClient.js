@@ -207,6 +207,13 @@
         });
 
         const data = await resp.json().catch(() => ({}));
+  function getSvgInitialsAvatar(name, bg = '#0052CC') {
+    const parts = String(name || 'User').trim().split(/\s+/);
+    const initials = (parts.length >= 2 ? parts[0][0] + parts[1][0] : parts[0].slice(0, 2)).toUpperCase();
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 120 120"><rect width="120" height="120" rx="60" fill="${bg}"/><text x="50%" y="54%" text-anchor="middle" dominant-baseline="middle" fill="#FFFFFF" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-weight="800" font-size="48px">${initials}</text></svg>`;
+    return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+  }
+
         if (resp.ok && data.success && data.verified) {
           console.log('✅ [ROUTEMATE AUTH] OTP verified successfully!');
           return {
@@ -214,10 +221,10 @@
               id: 'usr_' + Date.now(),
               email: cleanEmail,
               name: name || cleanEmail.split('@')[0],
-              role: role || 'rider',
+              role: 'commuter',
               phone: cleanEmail,
-              rating: 4.95,
-              avatar: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=120&h=120&q=80'
+              rating: 5.0,
+              avatar: getSvgInitialsAvatar(name || cleanEmail)
             }
           };
         } else if (data && data.error && !data.error.includes('Server error')) {
@@ -400,8 +407,8 @@
     const vehicleType = notes.vehicleType || row.vehicle_type || 'bike';
     const status = notes.status || row.status || 'searching';
 
-    const riderName = notes.riderName || (row.driver_name ? String(row.driver_name).replace(/\s*\([^)]*\)/g, '').trim() : 'Verified Commuter');
-    const riderAvatar = notes.riderAvatar || row.avatar || 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=120&h=120&q=80';
+    const riderName = notes.riderName || (row.driver_name ? String(row.driver_name).replace(/\s*\([^)]*\)/g, '').trim() : 'Commuter');
+    const riderAvatar = (notes.riderAvatar && !notes.riderAvatar.includes('unsplash')) ? notes.riderAvatar : getSvgInitialsAvatar(riderName);
     const riderPhone = notes.riderPhone || '+91 98480 23145';
     const riderRating = notes.riderRating || 4.9;
 
@@ -453,6 +460,7 @@
       const fare = Math.round(Number(reqData.fare) || 110);
       const dist = Math.round(Number(reqData.distance) || 84);
       const vehicleType = reqData.vehicleType || 'bike';
+      const rName = reqData.riderName || 'Commuter';
 
       const notesPayload = {
         isRequest: true,
@@ -461,8 +469,8 @@
         riderId: reqData.riderId || ('rider_' + Date.now()),
         riderEmail: String(reqData.riderEmail || '').toLowerCase().trim(),
         riderPhone: reqData.riderPhone || '+91 98480 23145',
-        riderName: reqData.riderName || 'Verified Commuter',
-        riderAvatar: reqData.riderAvatar || 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=120&h=120&q=80',
+        riderName: rName,
+        riderAvatar: (reqData.riderAvatar && !reqData.riderAvatar.includes('unsplash')) ? reqData.riderAvatar : getSvgInitialsAvatar(rName),
         riderRating: 4.95,
         fare: fare,
         distance: dist,
@@ -820,7 +828,7 @@
           id: driverUser.id,
           name: driverUser.name,
           phone: driverUser.phone,
-          avatar: driverUser.avatar_url || driverUser.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=120&h=120&q=80',
+          avatar: (driverUser.avatar_url && !driverUser.avatar_url.includes('unsplash')) ? driverUser.avatar_url : (driverUser.avatar && !driverUser.avatar.includes('unsplash') ? driverUser.avatar : getSvgInitialsAvatar(driverUser.name || 'Driver', '#10B981')),
           vehicleName: driverUser.vehicleName || 'Verified Commuter Vehicle',
           vehicleNumber: driverUser.vehicleNumber || 'TS 08 AB 1234',
           vehicleType: driverUser.vehicleType || 'bike',
