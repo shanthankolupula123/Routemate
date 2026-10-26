@@ -805,8 +805,104 @@
     }
   };
 
+  const GOOGLE_CLIENT_ID = '667321797265-kcrogrinsipuk4n1c96ru71c0pocochm.apps.googleusercontent.com';
+
+  function initGoogleIdentityServices() {
+    if (typeof google === 'undefined' || !google.accounts || !google.accounts.id) {
+      setTimeout(initGoogleIdentityServices, 300);
+      return;
+    }
+
+    try {
+      google.accounts.id.initialize({
+        client_id: GOOGLE_CLIENT_ID,
+        callback: handleGoogleCredentialResponse,
+        auto_select: false,
+        cancel_on_tap_outside: true
+      });
+      console.log('✅ [GIS] Google Identity Services initialized with Client ID:', GOOGLE_CLIENT_ID);
+    } catch (e) {
+      console.warn('⚠️ [GIS] Google Identity init note:', e);
+    }
+  }
+
+  window.handleGoogleCredentialResponse = async function (response) {
+    if (!response || !response.credential) {
+      showToast('Google sign-in did not return credentials.', 'danger');
+      return;
+    }
+
+    showToast('Signing in with Google...', 'info');
+
+    try {
+      const token = response.credential;
+      const base64Url = token.split('.')[1];
+      const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+      const jsonPayload = decodeURIComponent(atob(base64).split('').map(c => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2)).join(''));
+      const payload = JSON.parse(jsonPayload);
+
+      console.log('✅ [GOOGLE AUTH] User signed in via GIS:', payload.email, payload.name);
+
+      let supaUser = null;
+      if (window.db?.getSupabase) {
+        const client = window.db.getSupabase();
+        if (client?.auth && typeof client.auth.signInWithIdToken === 'function') {
+          try {
+            const { data, error } = await client.auth.signInWithIdToken({
+              provider: 'google',
+              token: token
+            });
+            if (!error && data && data.user) {
+              supaUser = data.user;
+            }
+          } catch (supaErr) {
+            console.warn('Supabase signInWithIdToken note:', supaErr.message);
+          }
+        }
+      }
+
+      const finalUser = {
+        id: (supaUser && supaUser.id) || ('usr_g_' + payload.sub),
+        email: payload.email,
+        name: payload.name || payload.email.split('@')[0],
+        phone: (supaUser && supaUser.phone) || '',
+        gender: '',
+        dob: '',
+        role: 'commuter',
+        rating: 5.0,
+        avatar: payload.picture || getInitialsAvatarSvg(payload.name || payload.email, 120)
+      };
+
+      await handleAuthUserFlow(finalUser, true);
+    } catch (err) {
+      console.error('Google credential parse error:', err);
+      showToast('Google Sign In: ' + err.message, 'danger');
+    }
+  };
+
   window.handleGoogleSignIn = async function () {
     const emailVal = document.getElementById('authEmailInput')?.value?.trim();
+
+    // 1. Try Google Identity Services One Tap prompt first (in-page popup, never redirects to localhost)
+    if (typeof google !== 'undefined' && google.accounts && google.accounts.id) {
+      showToast('Opening Google Sign-In...', 'info');
+      try {
+        google.accounts.id.prompt((notification) => {
+          if (notification.isNotDisplayed() || notification.isSkippedMoment()) {
+            console.log('GIS One-Tap prompt bypassed, proceeding with Google OAuth...');
+            fallbackGoogleOAuth(emailVal);
+          }
+        });
+        return;
+      } catch (gisErr) {
+        console.warn('GIS prompt error:', gisErr);
+      }
+    }
+
+    fallbackGoogleOAuth(emailVal);
+  };
+
+  async function fallbackGoogleOAuth(emailVal) {
     try {
       showToast('Connecting to Google...', 'info');
       await window.db.auth.signInWithGoogle();
@@ -818,7 +914,6 @@
         err.message?.includes('not configured');
 
       if (isProviderDisabled) {
-        // If user already typed an email into the input, auto-dispatch OTP to their Google inbox
         if (emailVal && emailVal.includes('@')) {
           showToast('Sending 6-digit verification code to ' + emailVal + '...', 'info');
           try {
@@ -834,15 +929,13 @@
           }
           return;
         }
-
-        // Otherwise open the Google Sign-in Assistant modal
         openGoogleSignInModal(emailVal);
       } else {
         showToast('Google Sign In: ' + err.message, 'danger');
         openGoogleSignInModal(emailVal);
       }
     }
-  };
+  }
 
   window.handleSignOut = async function () {
     if (confirm('Are you sure you want to sign out?')) {
@@ -2180,6 +2273,7 @@
   // BOOTSTRAP ON LOAD
   // =========================================================================
   document.addEventListener('DOMContentLoaded', async () => {
+    initGoogleIdentityServices();
     calculateDistanceAndFare();
     initLiveGPS();
     setupLocationAutocomplete();
