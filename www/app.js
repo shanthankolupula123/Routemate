@@ -560,6 +560,11 @@
     if (modeText) {
       modeText.textContent = state.mode === 'driver' ? '🛵 Driver Mode (Offering Rides)' : '🚗 Commuter Mode (Booking Rides)';
     }
+
+    // Populate user's registered vehicles in profile
+    if (typeof renderProfileVehicles === 'function') {
+      renderProfileVehicles();
+    }
   }
 
   window.setAuthTab = function (tab) {
@@ -1689,6 +1694,8 @@
       if (screens[tabName]) screens[tabName].classList.remove('hidden');
       if (tabName === 'activity') {
         renderActivityList();
+      } else if (tabName === 'profile') {
+        updateProfileUI();
       }
     }
   };
@@ -3138,6 +3145,298 @@
   };
 
   // -------------------------------------------------------------------------
+  // PROFILE VEHICLE MANAGEMENT ("MY VEHICLES" / "ADD ANOTHER VEHICLE")
+  // -------------------------------------------------------------------------
+  let addVehicleRcCompressedBase64 = null;
+
+  window.openAddVehicleModal = function () {
+    const modal = document.getElementById('addVehicleModal');
+    if (!modal) return;
+
+    addVehicleRcCompressedBase64 = null;
+
+    const form = document.getElementById('addVehicleForm');
+    if (form) form.reset();
+
+    const previewContainer = document.getElementById('addVehicleRcPreviewContainer');
+    const promptContainer = document.getElementById('addVehicleRcPrompt');
+    const previewImg = document.getElementById('addVehicleRcPreviewImg');
+    const errBox = document.getElementById('addVehicleErrorMsg');
+
+    if (previewContainer) previewContainer.classList.add('hidden');
+    if (promptContainer) promptContainer.classList.remove('hidden');
+    if (previewImg) previewImg.src = '';
+    if (errBox) {
+      errBox.classList.add('hidden');
+      errBox.textContent = '';
+    }
+
+    modal.classList.remove('hidden');
+    if (window.lucide) lucide.createIcons();
+  };
+
+  window.closeAddVehicleModal = function () {
+    const modal = document.getElementById('addVehicleModal');
+    if (modal) modal.classList.add('hidden');
+  };
+
+  window.handleAddVehicleRcFile = async function (e) {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+
+    const previewContainer = document.getElementById('addVehicleRcPreviewContainer');
+    const promptContainer = document.getElementById('addVehicleRcPrompt');
+    const previewImg = document.getElementById('addVehicleRcPreviewImg');
+    const errBox = document.getElementById('addVehicleErrorMsg');
+
+    try {
+      if (errBox) errBox.classList.add('hidden');
+      showToast('Compressing RC document...', 'info');
+      const compressed = await compressImage(file, 1200, 0.8);
+      addVehicleRcCompressedBase64 = compressed;
+
+      if (previewImg) previewImg.src = compressed;
+      if (previewContainer) previewContainer.classList.remove('hidden');
+      if (promptContainer) promptContainer.classList.add('hidden');
+      showToast('RC document attached', 'success');
+    } catch (err) {
+      console.error('RC compression failed:', err);
+      if (errBox) {
+        errBox.textContent = 'Failed to process image file. Please choose a standard JPG or PNG.';
+        errBox.classList.remove('hidden');
+      }
+    }
+  };
+
+  window.handleAddVehicleSubmit = async function (e) {
+    e.preventDefault();
+    const user = state.currentUser;
+    if (!user) {
+      showToast('Please sign in to register a vehicle.', 'danger');
+      return;
+    }
+
+    const typeInput = document.querySelector('input[name="addVehicleType"]:checked');
+    const vehicleType = typeInput ? typeInput.value : 'bike';
+    const vehicleName = document.getElementById('addVehicleNameInput')?.value.trim();
+    const vehicleNumberRaw = document.getElementById('addVehicleNumberInput')?.value.trim();
+    const cleanNumber = (vehicleNumberRaw || '').toUpperCase().replace(/\s+/g, '');
+
+    const errBox = document.getElementById('addVehicleErrorMsg');
+    const submitBtn = document.getElementById('addVehicleSubmitBtn');
+    const submitText = document.getElementById('addVehicleSubmitBtnText');
+
+    if (!cleanNumber || cleanNumber.length < 5) {
+      if (errBox) {
+        errBox.textContent = 'Please enter a valid Vehicle Registration Number (e.g. TS09EA1234).';
+        errBox.classList.remove('hidden');
+      }
+      return;
+    }
+
+    if (!addVehicleRcCompressedBase64) {
+      if (errBox) {
+        errBox.textContent = 'Please upload a photo of your Vehicle Registration Certificate (RC).';
+        errBox.classList.remove('hidden');
+      }
+      return;
+    }
+
+    if (errBox) errBox.classList.add('hidden');
+    if (submitBtn) submitBtn.disabled = true;
+    if (submitText) submitText.textContent = 'Submitting...';
+
+    try {
+      showToast('Submitting vehicle details for Super Admin review...', 'info');
+      const payload = {
+        userId: user.id,
+        driverName: user.name || 'Driver',
+        driverEmail: user.email || '',
+        driverPhone: user.phone || '',
+        vehicleNumber: cleanNumber,
+        vehicleType,
+        vehicleName: vehicleName || (vehicleType === 'car' ? 'Car Seat' : (vehicleType === 'auto' ? 'Auto' : 'Two-Wheeler / Bike')),
+        rcPhoto: addVehicleRcCompressedBase64
+      };
+
+      if (window.db?.kyc?.addDriverVehicle) {
+        await window.db.kyc.addDriverVehicle(payload);
+      }
+
+      showToast('Vehicle submitted! Super Admin will review your RC document.', 'success');
+      closeAddVehicleModal();
+
+      await checkDriverKycStatus(true);
+      await renderProfileVehicles();
+    } catch (err) {
+      console.error('Vehicle submission error:', err);
+      if (errBox) {
+        errBox.textContent = err.message || 'Failed to submit vehicle. Please try again.';
+        errBox.classList.remove('hidden');
+      }
+      showToast(err.message || 'Vehicle submission failed.', 'danger');
+    } finally {
+      if (submitBtn) submitBtn.disabled = false;
+      if (submitText) submitText.textContent = 'Submit Vehicle';
+    }
+  };
+
+  window.handleSwitchActiveVehicle = async function (vehicleId) {
+    const user = state.currentUser;
+    if (!user || !vehicleId) return;
+
+    try {
+      showToast('Switching active driving vehicle...', 'info');
+      if (window.db?.kyc?.switchDriverVehicle) {
+        const result = await window.db.kyc.switchDriverVehicle(user.id, vehicleId);
+        showToast(result.message || 'Active driving vehicle updated!', 'success');
+      }
+      await checkDriverKycStatus(true);
+      await renderProfileVehicles();
+    } catch (err) {
+      console.error('Error switching active vehicle:', err);
+      showToast(err.message || 'Failed to switch vehicle.', 'danger');
+    }
+  };
+
+  window.renderProfileVehicles = async function () {
+    const container = document.getElementById('profileVehicleListContainer');
+    if (!container) return;
+
+    const user = state.currentUser;
+    if (!user) {
+      container.innerHTML = `
+        <div class="p-3 text-center text-xs text-slate-400">
+          Sign in to view and manage registered vehicles.
+        </div>
+      `;
+      return;
+    }
+
+    let vehicles = state.kyc?.submission?.vehicles || [];
+    if (vehicles.length === 0 && window.db?.kyc?.getDriverKyc) {
+      try {
+        const kycRes = await window.db.kyc.getDriverKyc(user.id, user.email);
+        if (kycRes?.submission?.vehicles) {
+          vehicles = kycRes.submission.vehicles;
+          if (state.kyc) {
+            state.kyc.submission = kycRes.submission;
+            state.kyc.status = kycRes.status;
+          }
+        }
+      } catch (e) {
+        console.warn('Error fetching driver vehicles:', e);
+      }
+    }
+
+    if (vehicles.length === 0) {
+      const isApproved = state.kyc?.status === 'approved' || user.is_verified;
+      container.innerHTML = `
+        <div class="p-4 rounded-xl border border-dashed border-slate-200 bg-white text-center space-y-2">
+          <div class="w-8 h-8 rounded-full bg-blue-50 text-blue-600 mx-auto flex items-center justify-center">
+            <i data-lucide="car" class="w-4 h-4"></i>
+          </div>
+          <div>
+            <p class="text-xs font-bold text-slate-700">No vehicles registered yet</p>
+            <p class="text-[10px] text-slate-400 max-w-xs mx-auto mt-0.5">
+              ${isApproved 
+                ? 'Add your vehicle details and RC to offer rides on Bike, Car, or Auto.' 
+                : 'Complete your Driver KYC to get verified and register your driving vehicles.'}
+            </p>
+          </div>
+          ${isApproved ? `
+            <button type="button" onclick="openAddVehicleModal()" class="inline-flex items-center gap-1 px-3 py-1.5 rounded-full bg-blue-600 text-white font-bold text-[11px] shadow hover:bg-blue-700 transition cursor-pointer active:scale-95">
+              <i data-lucide="plus" class="w-3.5 h-3.5"></i>
+              <span>Add Vehicle</span>
+            </button>
+          ` : `
+            <button type="button" onclick="openDriverKycModal()" class="inline-flex items-center gap-1 px-3 py-1.5 rounded-full bg-slate-900 text-white font-bold text-[11px] shadow hover:bg-black transition cursor-pointer active:scale-95">
+              <i data-lucide="shield-check" class="w-3.5 h-3.5"></i>
+              <span>Complete Driver KYC</span>
+            </button>
+          `}
+        </div>
+      `;
+      if (window.lucide) lucide.createIcons();
+      return;
+    }
+
+    container.innerHTML = vehicles.map(v => {
+      const isApproved = v.status === 'approved';
+      const isPending = v.status === 'pending';
+      const isRejected = v.status === 'rejected';
+      const isActive = !!v.is_default;
+      const vehIcon = v.vehicle_type === 'car' ? '🚗' : (v.vehicle_type === 'auto' ? '🛺' : '🛵');
+      const categoryLabel = v.vehicle_type === 'car' ? 'Car Seat' : (v.vehicle_type === 'auto' ? 'Auto' : 'Bike');
+
+      return `
+        <div class="p-3 rounded-2xl bg-white border ${isActive ? 'border-blue-400 ring-2 ring-blue-100 shadow-sm' : 'border-slate-200'} space-y-2 transition">
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-2.5">
+              <div class="w-9 h-9 rounded-xl ${isActive ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-600'} flex items-center justify-center text-lg flex-shrink-0">
+                ${vehIcon}
+              </div>
+              <div>
+                <div class="flex items-center gap-1.5">
+                  <h5 class="text-xs font-black text-slate-900">${v.vehicle_name || categoryLabel}</h5>
+                  <span class="text-[9px] uppercase font-bold px-1.5 py-0.2 rounded bg-slate-100 text-slate-600">${categoryLabel}</span>
+                  ${isActive ? `
+                    <span class="inline-flex items-center gap-0.5 text-[9px] font-black uppercase text-blue-700 bg-blue-50 px-2 py-0.5 rounded-full border border-blue-200">
+                      Active
+                    </span>
+                  ` : ''}
+                </div>
+                <div class="flex items-center gap-2 mt-0.5">
+                  <span class="font-mono font-bold text-xs text-slate-800 tracking-wide">${v.vehicle_number}</span>
+                  ${v.rc_photo ? `
+                    <button type="button" onclick="openImageLightbox('${v.rc_photo}', '${v.vehicle_number} RC Document')" class="text-[10px] text-blue-600 hover:text-blue-800 font-semibold underline cursor-pointer">
+                      View RC
+                    </button>
+                  ` : ''}
+                </div>
+              </div>
+            </div>
+
+            <div>
+              ${isApproved ? `
+                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-50 text-emerald-700 border border-emerald-200">
+                  Approved ✓
+                </span>
+              ` : isPending ? `
+                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-black bg-amber-50 text-amber-700 border border-amber-200">
+                  <span class="w-1.5 h-1.5 rounded-full bg-amber-500 animate-ping"></span>
+                  Pending Review
+                </span>
+              ` : `
+                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-black bg-rose-50 text-rose-700 border border-rose-200">
+                  Rejected ✕
+                </span>
+              `}
+            </div>
+          </div>
+
+          ${isRejected && v.rejection_reason ? `
+            <div class="p-2 rounded-lg bg-rose-50 text-rose-700 text-[11px] font-medium border border-rose-100">
+              Note: ${v.rejection_reason}
+            </div>
+          ` : ''}
+
+          ${isApproved && !isActive ? `
+            <div class="pt-1.5 border-t border-slate-100 flex items-center justify-end">
+              <button type="button" onclick="handleSwitchActiveVehicle('${v.id}')" class="px-3 py-1 rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 text-xs font-bold transition cursor-pointer flex items-center gap-1 active:scale-95">
+                <i data-lucide="check" class="w-3.5 h-3.5"></i>
+                <span>Set as Active Driving Vehicle</span>
+              </button>
+            </div>
+          ` : ''}
+        </div>
+      `;
+    }).join('');
+
+    if (window.lucide) lucide.createIcons();
+  };
+
+  // -------------------------------------------------------------------------
   // SUPER ADMIN DASHBOARD ENGINE (shanthankolupula123@gmail.com)
   // -------------------------------------------------------------------------
   async function loadAdminKycSubmissions(showToastMsg = false) {
@@ -3160,8 +3459,9 @@
       let rejectedCount = 0;
 
       subs.forEach(s => {
-        if (s.status === 'approved') approvedCount++;
-        else if (s.status === 'rejected') rejectedCount++;
+        const hasPendingVeh = s.vehicles && s.vehicles.some(v => v.status === 'pending');
+        if (s.status === 'approved' && !hasPendingVeh) approvedCount++;
+        else if (s.status === 'rejected' && !hasPendingVeh) rejectedCount++;
         else pendingCount++;
       });
 
@@ -3212,7 +3512,9 @@
     const all = state.admin.submissions || [];
     const filtered = all.filter(s => {
       if (filter === 'all') return true;
-      if (filter === 'pending') return s.status === 'pending' || !s.status;
+      if (filter === 'pending') {
+        return s.status === 'pending' || !s.status || (s.vehicles && s.vehicles.some(v => v.status === 'pending'));
+      }
       return s.status === filter;
     });
 
@@ -3329,6 +3631,67 @@
             </div>
           </div>
 
+          <!-- Registered Vehicles (Multi-Vehicle Management & Review) -->
+          ${(sub.vehicles && sub.vehicles.length > 0) ? `
+            <div class="pt-3 border-t border-slate-100">
+              <div class="flex items-center justify-between mb-2">
+                <span class="text-[10px] font-black uppercase text-slate-400 tracking-wider">Registered Vehicles (${sub.vehicles.length})</span>
+              </div>
+              <div class="space-y-2">
+                ${sub.vehicles.map(v => {
+                  const isVehApproved = v.status === 'approved';
+                  const isVehRejected = v.status === 'rejected';
+                  const isVehPending = !isVehApproved && !isVehRejected;
+                  const vehIcon = v.vehicle_type === 'car' ? '🚗' : (v.vehicle_type === 'auto' ? '🛺' : '🛵');
+                  const categoryName = v.vehicle_type === 'car' ? 'Car Seat' : (v.vehicle_type === 'auto' ? 'Auto' : 'Bike');
+                  
+                  return `
+                    <div class="p-3 rounded-xl border ${isVehPending ? 'border-amber-300 bg-amber-50/50' : 'border-slate-200 bg-slate-50'} flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+                      <div class="flex items-center gap-2.5">
+                        <span class="text-xl">${vehIcon}</span>
+                        <div>
+                          <div class="flex items-center gap-1.5 flex-wrap">
+                            <span class="font-black text-slate-900">${v.vehicle_name || categoryName}</span>
+                            <span class="px-1.5 py-0.5 rounded font-mono font-bold bg-white border border-slate-200 text-slate-800 text-[10px] tracking-wide">${v.vehicle_number}</span>
+                            ${v.is_default ? `<span class="text-[9px] font-black text-blue-700 bg-blue-100 px-2 py-0.2 rounded-full">Primary</span>` : ''}
+                          </div>
+                          <div class="flex items-center gap-2.5 mt-1">
+                            ${isVehApproved ? `<span class="text-[10px] font-bold text-emerald-700">✓ Approved</span>` :
+                              isVehRejected ? `<span class="text-[10px] font-bold text-rose-600">✕ Rejected</span>` :
+                              `<span class="text-[10px] font-bold text-amber-700 flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-amber-500 animate-ping"></span>Pending Admin Review</span>`}
+                            ${v.rc_photo ? `
+                              <button type="button" onclick="openImageLightbox('${v.rc_photo}', 'Vehicle RC - ${v.vehicle_number} (${sub.driver_name})')" class="text-[10px] text-blue-600 font-bold underline hover:text-blue-800 cursor-pointer">
+                                View RC Document
+                              </button>
+                            ` : ''}
+                          </div>
+                        </div>
+                      </div>
+                      <div class="flex items-center gap-1.5 self-end sm:self-center">
+                        ${isVehPending ? `
+                          <button type="button" onclick="handleAdminVehicleDecision('${sub.id || sub.user_id}', '${v.id}', 'rejected')" class="px-2.5 py-1 rounded-lg bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100 font-bold text-[10px] transition cursor-pointer">
+                            Reject RC
+                          </button>
+                          <button type="button" onclick="handleAdminVehicleDecision('${sub.id || sub.user_id}', '${v.id}', 'approved')" class="px-3 py-1 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 font-bold text-[10px] transition cursor-pointer shadow-sm">
+                            Approve Vehicle
+                          </button>
+                        ` : isVehApproved ? `
+                          <button type="button" onclick="handleAdminVehicleDecision('${sub.id || sub.user_id}', '${v.id}', 'rejected')" class="px-2 py-0.5 rounded-lg text-slate-500 hover:text-rose-600 text-[10px] font-semibold transition cursor-pointer">
+                            Revoke
+                          </button>
+                        ` : `
+                          <button type="button" onclick="handleAdminVehicleDecision('${sub.id || sub.user_id}', '${v.id}', 'approved')" class="px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 font-bold text-[10px] transition cursor-pointer">
+                            Re-Approve
+                          </button>
+                        `}
+                      </div>
+                    </div>
+                  `;
+                }).join('')}
+              </div>
+            </div>
+          ` : ''}
+
           <!-- Rejection Reason if any -->
           ${sub.rejection_reason ? `
             <div class="p-2.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-semibold">
@@ -3397,6 +3760,41 @@
     } catch (err) {
       console.error('Admin decision error:', err);
       showToast('Failed to update driver status: ' + err.message, 'danger');
+    }
+  };
+
+  window.handleAdminVehicleDecision = async function (userId, vehicleId, newStatus) {
+    const user = state.currentUser;
+    if (!user || user.email?.toLowerCase().trim() !== 'shanthankolupula123@gmail.com') {
+      showToast('Unauthorized: Super Admin access required.', 'danger');
+      return;
+    }
+
+    let rejectionReason = null;
+    if (newStatus === 'rejected') {
+      rejectionReason = prompt('Please specify rejection reason for this vehicle RC (e.g. Blurry RC photo, Invalid number plate):');
+      if (rejectionReason === null) return; // Cancelled
+      rejectionReason = rejectionReason.trim() || 'Uploaded vehicle RC was invalid or unreadable.';
+    }
+
+    try {
+      showToast(`Processing vehicle decision: ${newStatus.toUpperCase()}...`, 'info');
+
+      if (window.db?.kyc?.reviewDriverVehicle) {
+        await window.db.kyc.reviewDriverVehicle({
+          adminEmail: user.email,
+          userId,
+          vehicleId,
+          status: newStatus,
+          rejectionReason
+        });
+      }
+
+      showToast(`Vehicle status updated to ${newStatus}!`, 'success');
+      await loadAdminKycSubmissions();
+    } catch (err) {
+      console.error('Admin vehicle decision error:', err);
+      showToast('Failed to update vehicle status: ' + err.message, 'danger');
     }
   };
 

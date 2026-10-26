@@ -551,6 +551,90 @@
         throw new Error(data.error || 'Failed to process admin review.');
       }
       return data;
+    },
+
+    /**
+     * Add another secondary vehicle to driver's profile
+     */
+    async addDriverVehicle(payload) {
+      const apiBase = (typeof window !== 'undefined' && window.location.origin && window.location.origin.startsWith('http') && !window.location.origin.includes('localhost') && !window.location.origin.includes('127.0.0.1'))
+        ? window.location.origin
+        : 'https://www.routemate.pro';
+
+      const resp = await fetch(`${apiBase}/api/driver-kyc`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'add_vehicle',
+          user_id: payload.userId,
+          driver_name: payload.driverName,
+          driver_email: payload.driverEmail,
+          driver_phone: payload.driverPhone,
+          vehicle_number: payload.vehicleNumber,
+          vehicle_type: payload.vehicleType,
+          vehicle_name: payload.vehicleName,
+          rc_photo: payload.rcPhoto
+        })
+      });
+
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || !data.success) {
+        throw new Error(data.error || 'Failed to submit vehicle.');
+      }
+      return data;
+    },
+
+    /**
+     * Switch active driving vehicle
+     */
+    async switchDriverVehicle(userId, vehicleId) {
+      const apiBase = (typeof window !== 'undefined' && window.location.origin && window.location.origin.startsWith('http') && !window.location.origin.includes('localhost') && !window.location.origin.includes('127.0.0.1'))
+        ? window.location.origin
+        : 'https://www.routemate.pro';
+
+      const resp = await fetch(`${apiBase}/api/driver-kyc`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'switch_vehicle',
+          user_id: userId,
+          vehicle_id: vehicleId
+        })
+      });
+
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || !data.success) {
+        throw new Error(data.error || 'Failed to switch vehicle.');
+      }
+      return data;
+    },
+
+    /**
+     * Super Admin decision for secondary vehicle
+     */
+    async reviewDriverVehicle(payload) {
+      const apiBase = (typeof window !== 'undefined' && window.location.origin && window.location.origin.startsWith('http') && !window.location.origin.includes('localhost') && !window.location.origin.includes('127.0.0.1'))
+        ? window.location.origin
+        : 'https://www.routemate.pro';
+
+      const resp = await fetch(`${apiBase}/api/driver-kyc`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'vehicle_decision',
+          adminEmail: payload.adminEmail,
+          user_id: payload.userId,
+          vehicle_id: payload.vehicleId,
+          status: payload.status,
+          rejectionReason: payload.rejectionReason
+        })
+      });
+
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || !data.success) {
+        throw new Error(data.error || 'Failed to review vehicle.');
+      }
+      return data;
     }
   };
 

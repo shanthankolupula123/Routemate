@@ -126,11 +126,35 @@ module.exports = async (req, res) => {
       }
     } catch (e) {}
 
+    // Ensure each submission has a populated vehicles array
+    allSubmissions.forEach(sub => {
+      if (!sub.vehicles || !Array.isArray(sub.vehicles) || sub.vehicles.length === 0) {
+        if (sub.vehicle_number) {
+          sub.vehicles = [
+            {
+              id: 'veh_primary_' + (sub.id || sub.user_id),
+              user_id: sub.user_id || sub.id,
+              vehicle_number: sub.vehicle_number,
+              vehicle_type: sub.vehicle_type || 'bike',
+              vehicle_name: sub.vehicle_name || (sub.vehicle_type === 'car' ? 'Car Seat' : (sub.vehicle_type === 'auto' ? 'Auto' : 'Two-Wheeler / Bike')),
+              rc_photo: sub.rc_photo,
+              status: sub.status || 'pending',
+              is_default: true,
+              submitted_at: sub.submitted_at || new Date().toISOString()
+            }
+          ];
+        } else {
+          sub.vehicles = [];
+        }
+      }
+    });
+
     if (userId) {
       const userSub = allSubmissions.find(s => s.user_id === userId || s.id === userId);
       return res.status(200).json({
         success: true,
         submission: userSub || null,
+        vehicles: userSub ? (userSub.vehicles || []) : [],
         status: userSub ? userSub.status : 'not_submitted'
       });
     }
@@ -220,6 +244,11 @@ module.exports = async (req, res) => {
         list[idx].rejection_reason = isApproved ? null : rejectionReason;
         list[idx].reviewed_at = new Date().toISOString();
         list[idx].reviewed_by = cleanAdmin;
+        if (isApproved && list[idx].vehicles) {
+          list[idx].vehicles.forEach(v => {
+            if (v.status === 'pending') v.status = 'approved';
+          });
+        }
         saveStore(list);
       }
 
@@ -228,6 +257,173 @@ module.exports = async (req, res) => {
         message: isApproved ? 'Driver successfully approved!' : 'Driver KYC rejected.',
         status,
         targetId
+      });
+    }
+
+    // -----------------------------------------------------------------------
+    // ACTION: Add Another Vehicle (Secondary Vehicle KYC Submission)
+    // -----------------------------------------------------------------------
+    if (action === 'add_vehicle') {
+      const { user_id, vehicle_number, vehicle_type, vehicle_name, rc_photo } = body;
+
+      if (!user_id || !vehicle_number || !rc_photo) {
+        return res.status(400).json({
+          success: false,
+          error: 'Vehicle Number and Registration Certificate (RC) photo are mandatory.'
+        });
+      }
+
+      const cleanVehNum = String(vehicle_number).trim().toUpperCase();
+      const list = getStore();
+      let sub = list.find(s => s.user_id === user_id || s.id === user_id || s.driver_email === body.driver_email);
+
+      if (!sub) {
+        sub = {
+          id: user_id,
+          user_id,
+          driver_name: body.driver_name || 'Driver',
+          driver_email: body.driver_email || '',
+          driver_phone: body.driver_phone || '',
+          status: 'approved',
+          vehicles: []
+        };
+        list.push(sub);
+      }
+
+      if (!sub.vehicles || !Array.isArray(sub.vehicles)) {
+        sub.vehicles = [];
+      }
+
+      // Check for duplicate vehicle number
+      const existing = sub.vehicles.find(v => v.vehicle_number === cleanVehNum);
+      if (existing) {
+        return res.status(400).json({
+          success: false,
+          error: `Vehicle ${cleanVehNum} is already registered under your account.`
+        });
+      }
+
+      const newVehicle = {
+        id: 'veh_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
+        user_id,
+        vehicle_number: cleanVehNum,
+        vehicle_type: vehicle_type || 'bike',
+        vehicle_name: vehicle_name || (vehicle_type === 'car' ? 'Car Seat' : (vehicle_type === 'auto' ? 'Auto' : 'Bike')),
+        rc_photo,
+        status: 'pending', // Strictly Pending Super Admin review
+        is_default: sub.vehicles.length === 0,
+        submitted_at: new Date().toISOString()
+      };
+
+      sub.vehicles.push(newVehicle);
+      saveStore(list);
+
+      // Best effort sync to Supabase driver_kyc notes
+      try {
+        await fetch(`${SUPABASE_URL}/rest/v1/driver_kyc?or=(id.eq.${encodeURIComponent(user_id)},user_id.eq.${encodeURIComponent(user_id)})`, {
+          method: 'PATCH',
+          headers: {
+            'apikey': SUPABASE_KEY,
+            'Authorization': `Bearer ${SUPABASE_KEY}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            notes: JSON.stringify({ vehicles: sub.vehicles })
+          })
+        });
+      } catch (e) {}
+
+      return res.status(200).json({
+        success: true,
+        message: 'New vehicle submitted successfully! Super Admin will review your RC document.',
+        vehicle: newVehicle,
+        vehicles: sub.vehicles
+      });
+    }
+
+    // -----------------------------------------------------------------------
+    // ACTION: Switch Active Vehicle
+    // -----------------------------------------------------------------------
+    if (action === 'switch_vehicle') {
+      const { user_id, vehicle_id } = body;
+      const list = getStore();
+      const sub = list.find(s => s.user_id === user_id || s.id === user_id);
+
+      if (!sub || !sub.vehicles) {
+        return res.status(404).json({ success: false, error: 'Vehicle records not found.' });
+      }
+
+      const target = sub.vehicles.find(v => v.id === vehicle_id);
+      if (!target) {
+        return res.status(404).json({ success: false, error: 'Vehicle not found.' });
+      }
+
+      if (target.status !== 'approved') {
+        return res.status(400).json({
+          success: false,
+          error: 'This vehicle is pending Super Admin verification. You can only drive with approved vehicles.'
+        });
+      }
+
+      sub.vehicles.forEach(v => {
+        v.is_default = (v.id === vehicle_id);
+      });
+      sub.vehicle_number = target.vehicle_number;
+      sub.vehicle_type = target.vehicle_type;
+      saveStore(list);
+
+      return res.status(200).json({
+        success: true,
+        message: `Switched active driving vehicle to ${target.vehicle_name || target.vehicle_number}`,
+        activeVehicle: target,
+        vehicles: sub.vehicles
+      });
+    }
+
+    // -----------------------------------------------------------------------
+    // ACTION: Super Admin Decision for Secondary Vehicle
+    // -----------------------------------------------------------------------
+    if (action === 'vehicle_decision') {
+      const { adminEmail, user_id, vehicle_id, status, rejectionReason } = body;
+      const cleanAdmin = String(adminEmail || '').trim().toLowerCase();
+
+      if (cleanAdmin !== SUPER_ADMIN_EMAIL) {
+        return res.status(403).json({
+          success: false,
+          error: 'Unauthorized: Only Super Admin (shanthankolupula123@gmail.com) can verify vehicles.'
+        });
+      }
+
+      const list = getStore();
+      const sub = list.find(s => s.user_id === user_id || s.id === user_id || (s.vehicles && s.vehicles.some(v => v.id === vehicle_id)));
+
+      if (!sub || !sub.vehicles) {
+        return res.status(404).json({ success: false, error: 'Driver vehicles not found.' });
+      }
+
+      const targetVeh = sub.vehicles.find(v => v.id === vehicle_id);
+      if (!targetVeh) {
+        return res.status(404).json({ success: false, error: 'Target vehicle not found.' });
+      }
+
+      targetVeh.status = status;
+      targetVeh.rejection_reason = (status === 'rejected') ? (rejectionReason || 'RC document not clear') : null;
+      targetVeh.reviewed_at = new Date().toISOString();
+      targetVeh.reviewed_by = cleanAdmin;
+
+      if (status === 'approved' && !sub.vehicles.some(v => v.is_default && v.status === 'approved')) {
+        targetVeh.is_default = true;
+        sub.vehicle_number = targetVeh.vehicle_number;
+        sub.vehicle_type = targetVeh.vehicle_type;
+      }
+
+      saveStore(list);
+
+      return res.status(200).json({
+        success: true,
+        message: `Vehicle ${targetVeh.vehicle_number} status updated to ${status}!`,
+        vehicle: targetVeh,
+        vehicles: sub.vehicles
       });
     }
 
