@@ -2263,38 +2263,295 @@
   // =========================================================================
   // ACTIVITY & SOS
   // =========================================================================
-  function renderActivityList() {
+  function formatRideTimestamp(isoString) {
+    if (!isoString) return 'Recent';
+    try {
+      const d = new Date(isoString);
+      if (isNaN(d.getTime())) return 'Recent';
+      const now = new Date();
+      const isToday = d.toDateString() === now.toDateString();
+      const timeStr = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      if (isToday) return `Today, ${timeStr}`;
+      const yesterday = new Date(now);
+      yesterday.setDate(now.getDate() - 1);
+      if (d.toDateString() === yesterday.toDateString()) return `Yesterday, ${timeStr}`;
+      return `${d.toLocaleDateString([], { day: 'numeric', month: 'short' })}, ${timeStr}`;
+    } catch (e) {
+      return 'Recent';
+    }
+  }
+
+  async function renderActivityList(showToastMsg = false) {
     const list = document.getElementById('activityList');
     if (!list) return;
 
-    list.innerHTML = `
-      <div class="p-4 rounded-2xl border border-slate-200 bg-white shadow-sm flex items-center justify-between">
-        <div>
-          <div class="flex items-center gap-1.5">
-            <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
-            <h4 class="text-xs font-black text-slate-900">Uppal ➔ Jangaon (NH 163)</h4>
+    const user = state.currentUser;
+    if (!user) {
+      list.innerHTML = `
+        <div class="routemate-card p-8 text-center bg-white border border-slate-200/80">
+          <div class="w-12 h-12 rounded-2xl bg-slate-100 text-slate-400 mx-auto flex items-center justify-center mb-2">
+            <i data-lucide="lock" class="w-6 h-6"></i>
           </div>
-          <p class="text-[11px] text-slate-400 mt-0.5">Today • Direct UPI Settled • Zero Fee</p>
+          <h4 class="text-xs font-bold text-slate-700">Sign in to view activity</h4>
+          <p class="text-[11px] text-slate-400 mt-0.5">Your ride history will appear here once signed in.</p>
         </div>
-        <span class="text-xs font-black text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-full">
-          ₹110 Saved
-        </span>
-      </div>
+      `;
+      if (window.lucide) lucide.createIcons();
+      return;
+    }
 
-      <div class="p-4 rounded-2xl border border-slate-200 bg-white shadow-sm flex items-center justify-between">
-        <div>
-          <div class="flex items-center gap-1.5">
-            <span class="w-2 h-2 rounded-full bg-slate-400"></span>
-            <h4 class="text-xs font-black text-slate-900">Bhongir ➔ Uppal Metro</h4>
-          </div>
-          <p class="text-[11px] text-slate-400 mt-0.5">Yesterday • Bike Pillion</p>
-        </div>
-        <span class="text-xs font-black text-slate-700 bg-slate-100 px-2.5 py-1 rounded-full">
-          Completed
-        </span>
+    if (showToastMsg) showToast('Refreshing ride activity...', 'info');
+
+    // Show clean loading spinner state while fetching
+    list.innerHTML = `
+      <div class="p-8 text-center text-slate-400 space-y-2">
+        <div class="w-6 h-6 border-2 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto"></div>
+        <p class="text-xs font-semibold">Loading your ride activity...</p>
       </div>
     `;
+
+    try {
+      let rides = [];
+
+      // Query from Supabase rides table
+      if (window.db?.supabaseRest) {
+        const resp = await window.db.supabaseRest('rides?select=*&order=created_at.desc&limit=50');
+        if (resp.ok && Array.isArray(resp.data)) {
+          rides = resp.data;
+        }
+      }
+
+      // Normalized user phone digits, email, and ID
+      const userPhoneDigits = String(user.phone || '').replace(/\D/g, '').slice(-10);
+      const userEmail = String(user.email || '').toLowerCase().trim();
+      const userId = String(user.id || '').trim();
+
+      // Filter rows belonging to the authenticated user
+      const userRides = [];
+      const seenIds = new Set();
+
+      // 1. Check current in-memory active rider request first
+      if (state.activeRiderRequest) {
+        userRides.push({
+          id: state.activeRiderRequest.id,
+          pickup: state.activeRiderRequest.pickup,
+          drop: state.activeRiderRequest.drop,
+          fare: state.activeRiderRequest.fare,
+          vehicleType: state.activeRiderRequest.vehicleType || 'bike',
+          status: state.activeRiderRequest.status || 'searching',
+          userRole: 'commuter',
+          createdAt: state.activeRiderRequest.createdAt || new Date().toISOString(),
+          isActiveMemory: true
+        });
+        seenIds.add(state.activeRiderRequest.id);
+      }
+
+      // 2. Check current in-memory active driver trip
+      if (state.activeDriverTrip) {
+        userRides.push({
+          id: state.activeDriverTrip.id,
+          pickup: state.activeDriverTrip.pickup,
+          drop: state.activeDriverTrip.drop,
+          fare: state.activeDriverTrip.fare,
+          vehicleType: state.activeDriverTrip.vehicleType || 'bike',
+          status: state.activeDriverTrip.status || 'accepted',
+          userRole: 'driver',
+          createdAt: state.activeDriverTrip.createdAt || new Date().toISOString(),
+          isActiveMemory: true
+        });
+        seenIds.add(state.activeDriverTrip.id);
+      }
+
+      // 3. Process database rows
+      for (const row of rides) {
+        let notes = {};
+        if (typeof row.notes === 'string') {
+          try { notes = JSON.parse(row.notes || '{}'); } catch (e) {}
+        } else if (row.notes && typeof row.notes === 'object') {
+          notes = row.notes;
+        }
+
+        const rideId = String(row.vehicle_number || notes.id || row.id || '').trim();
+        if (seenIds.has(rideId)) continue;
+
+        const riderId = String(notes.riderId || notes.rider_id || '').trim();
+        const riderEmail = String(notes.riderEmail || notes.rider_email || '').toLowerCase().trim();
+        const riderPhone = String(notes.riderPhone || notes.rider_phone || '').replace(/\D/g, '').slice(-10);
+
+        const driverObj = notes.driver || {};
+        const driverId = String(driverObj.id || '').trim();
+        const driverEmail = String(driverObj.email || '').toLowerCase().trim();
+        const driverPhone = String(driverObj.phone || '').replace(/\D/g, '').slice(-10);
+
+        let userRole = null;
+        if ((userId && riderId && riderId === userId) || (userEmail && riderEmail && riderEmail === userEmail) || (userPhoneDigits && riderPhone && riderPhone === userPhoneDigits)) {
+          userRole = 'commuter';
+        } else if ((userId && driverId && driverId === userId) || (userEmail && driverEmail && driverEmail === userEmail) || (userPhoneDigits && driverPhone && driverPhone === userPhoneDigits)) {
+          userRole = 'driver';
+        }
+
+        if (userRole) {
+          seenIds.add(rideId);
+          userRides.push({
+            id: rideId,
+            dbId: row.id,
+            pickup: row.pickup || notes.pickup || 'Uppal Metro, Hyderabad',
+            drop: row.drop_location || notes.drop || 'Jangaon Bus Depot',
+            fare: Math.round(Number(row.per_seat_price || notes.fare || 110)),
+            vehicleType: notes.vehicleType || row.vehicle_type || 'bike',
+            status: notes.status || row.status || 'completed',
+            userRole: userRole,
+            driverName: driverObj.name || (row.driver_name ? String(row.driver_name).replace(/\s*\([^)]*\)/g, '').trim() : ''),
+            riderName: notes.riderName || 'Commuter',
+            createdAt: row.created_at || notes.createdAt || new Date().toISOString()
+          });
+        }
+      }
+
+      // Sort by newest first
+      userRides.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+      // Render Empty State if no records found
+      if (userRides.length === 0) {
+        list.innerHTML = `
+          <div class="routemate-card p-8 text-center bg-white border border-slate-200/80">
+            <div class="w-14 h-14 rounded-2xl bg-blue-50 text-blue-600 mx-auto flex items-center justify-center mb-3 shadow-inner">
+              <i data-lucide="clock" class="w-7 h-7 text-blue-600"></i>
+            </div>
+            <h3 class="text-sm font-black text-slate-800">No ride activity yet</h3>
+            <p class="text-xs text-slate-400 max-w-xs mx-auto mt-1 leading-relaxed">
+              You haven't taken or offered any rides yet. Book a ride as a commuter or switch to Driver mode to get started!
+            </p>
+            <div class="pt-4 flex items-center justify-center gap-2">
+              <button type="button" onclick="navigateToTab('book')" class="px-5 py-2.5 btn-pill-primary text-xs font-bold shadow-md cursor-pointer inline-flex items-center gap-1.5 active:scale-95">
+                <i data-lucide="compass" class="w-4 h-4"></i>
+                <span>Find a Ride</span>
+              </button>
+            </div>
+          </div>
+        `;
+        if (window.lucide) lucide.createIcons();
+        return;
+      }
+
+      // Render actual user ride activity records
+      list.innerHTML = userRides.map(ride => {
+        const status = String(ride.status || 'completed').toLowerCase();
+
+        let badgeHtml = '';
+        if (status === 'searching') {
+          badgeHtml = `
+            <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-black bg-amber-100 text-amber-800 border border-amber-200">
+              <span class="w-1.5 h-1.5 rounded-full bg-amber-500 animate-ping"></span>
+              <span>Searching</span>
+            </span>
+          `;
+        } else if (status === 'active') {
+          badgeHtml = `
+            <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-black bg-blue-100 text-blue-800 border border-blue-200">
+              <span class="w-1.5 h-1.5 rounded-full bg-blue-600 animate-ping"></span>
+              <span>Active Request</span>
+            </span>
+          `;
+        } else if (status === 'driver_accepted' || status === 'accepted') {
+          badgeHtml = `
+            <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-black bg-cyan-100 text-cyan-800 border border-cyan-200">
+              <span>Driver Accepted</span>
+            </span>
+          `;
+        } else if (status === 'ride_started' || status === 'in_progress') {
+          badgeHtml = `
+            <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-black bg-indigo-100 text-indigo-800 border border-indigo-200">
+              <span>Ride in Progress</span>
+            </span>
+          `;
+        } else if (status === 'completed') {
+          badgeHtml = `
+            <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-black bg-emerald-100 text-emerald-800 border border-emerald-200">
+              <span>Completed ✓</span>
+            </span>
+          `;
+        } else if (status === 'cancelled') {
+          badgeHtml = `
+            <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-black bg-slate-100 text-slate-600 border border-slate-200">
+              <span>Cancelled</span>
+            </span>
+          `;
+        } else {
+          badgeHtml = `
+            <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-black bg-slate-100 text-slate-700 border border-slate-200 capitalize">
+              <span>${status.replace(/_/g, ' ')}</span>
+            </span>
+          `;
+        }
+
+        const vehEmoji = ride.vehicleType === 'car' ? '🚗' : (ride.vehicleType === 'auto' ? '🛺' : '🛵');
+        const vehLabel = ride.vehicleType === 'car' ? 'Car Seat' : (ride.vehicleType === 'auto' ? 'Auto' : 'Bike');
+        const roleLabel = ride.userRole === 'driver' ? '🛵 Driver' : '🚗 Commuter';
+        const roleBg = ride.userRole === 'driver' ? 'bg-emerald-50 text-emerald-800 border-emerald-200' : 'bg-blue-50 text-blue-800 border-blue-200';
+        const formattedDate = formatRideTimestamp(ride.createdAt);
+
+        return `
+          <div class="p-4 rounded-2xl border border-slate-200/90 bg-white shadow-sm hover:shadow-md transition space-y-2.5">
+            <div class="flex items-start justify-between gap-2">
+              <div class="space-y-1 min-w-0">
+                <div class="flex items-center gap-1.5 flex-wrap">
+                  <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[9px] font-black border ${roleBg}">
+                    ${roleLabel}
+                  </span>
+                  <span class="text-[10px] text-slate-400 font-medium">${formattedDate}</span>
+                </div>
+                <h4 class="text-xs font-black text-slate-900 truncate">
+                  ${ride.pickup} ➔ ${ride.drop}
+                </h4>
+              </div>
+              <div class="flex-shrink-0">
+                ${badgeHtml}
+              </div>
+            </div>
+
+            <div class="flex items-center justify-between text-xs pt-2 border-t border-slate-100 text-slate-600">
+              <div class="flex items-center gap-2">
+                <span class="inline-flex items-center gap-1 font-semibold text-[11px]">
+                  <span>${vehEmoji}</span>
+                  <span>${vehLabel}</span>
+                </span>
+                <span class="text-slate-300">•</span>
+                <span class="text-[11px] text-slate-500 font-semibold">Direct UPI</span>
+              </div>
+              <div class="text-right">
+                <span class="text-xs font-black text-blue-700">₹${ride.fare}</span>
+              </div>
+            </div>
+
+            ${(status === 'searching' || status === 'driver_accepted' || status === 'ride_started') ? `
+              <div class="pt-1">
+                <button type="button" onclick="navigateToTab('${ride.userRole === 'driver' ? 'drive' : 'book'}')" class="w-full py-2 rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer">
+                  <i data-lucide="radio" class="w-3.5 h-3.5"></i>
+                  <span>View Live HUD & Tracking</span>
+                </button>
+              </div>
+            ` : ''}
+          </div>
+        `;
+      }).join('');
+
+      if (window.lucide) lucide.createIcons();
+      if (showToastMsg) showToast(`Loaded ${userRides.length} ride activity records.`, 'success');
+    } catch (err) {
+      console.error('Failed to load ride activity:', err);
+      list.innerHTML = `
+        <div class="p-6 text-center bg-rose-50 border border-rose-200 rounded-2xl text-rose-700 text-xs space-y-2">
+          <p class="font-bold">Unable to load ride activity right now.</p>
+          <p class="text-[11px] text-rose-600">${err.message || 'Network error'}</p>
+          <button type="button" onclick="renderActivityList(true)" class="px-4 py-2 bg-white border border-rose-200 rounded-xl text-xs font-bold text-rose-700 hover:bg-rose-100 transition cursor-pointer">
+            Try Again
+          </button>
+        </div>
+      `;
+    }
   }
+  window.renderActivityList = renderActivityList;
 
   window.triggerEmergencySOS = function () {
     const lat = state.userGPS?.lat || state.pickupCoords.lat;

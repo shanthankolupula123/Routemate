@@ -337,20 +337,17 @@
         <div class="mt-4 pt-3 border-t border-slate-100">
           <span class="text-[11px] font-black uppercase tracking-wider text-slate-400 block mb-2">Select Vehicle Type</span>
           <div class="grid grid-cols-3 gap-2">
-            <div onclick="selectVehicle('bike')" id="vehPill-bike" class="vehicle-pill active p-2.5 text-center">
-              <span class="text-xl block mb-0.5">🛵</span>
+            <div onclick="selectVehicle('bike')" id="vehPill-bike" class="vehicle-pill active py-3 px-2 text-center transition cursor-pointer">
+              <span class="text-2xl block mb-1">🛵</span>
               <span class="text-xs font-extrabold text-slate-900 block">Bike</span>
-              <span class="text-[11px] font-black text-blue-600">₹110</span>
             </div>
-            <div onclick="selectVehicle('car')" id="vehPill-car" class="vehicle-pill p-2.5 text-center">
-              <span class="text-xl block mb-0.5">🚗</span>
+            <div onclick="selectVehicle('car')" id="vehPill-car" class="vehicle-pill py-3 px-2 text-center transition cursor-pointer">
+              <span class="text-2xl block mb-1">🚗</span>
               <span class="text-xs font-extrabold text-slate-900 block">Car Seat</span>
-              <span class="text-[11px] font-black text-blue-600">₹220</span>
             </div>
-            <div onclick="selectVehicle('auto')" id="vehPill-auto" class="vehicle-pill p-2.5 text-center">
-              <span class="text-xl block mb-0.5">🛺</span>
+            <div onclick="selectVehicle('auto')" id="vehPill-auto" class="vehicle-pill py-3 px-2 text-center transition cursor-pointer">
+              <span class="text-2xl block mb-1">🛺</span>
               <span class="text-xs font-extrabold text-slate-900 block">Auto</span>
-              <span class="text-[11px] font-black text-blue-600">₹150</span>
             </div>
           </div>
         </div>
@@ -500,9 +497,17 @@
     <!-- ===================================================================== -->
     <div id="activityScreen" class="hidden space-y-4">
       <div class="routemate-card p-5">
-        <h2 class="text-sm font-black text-slate-900 mb-3">Your Ride Activity</h2>
+        <div class="flex items-center justify-between mb-3">
+          <div>
+            <h2 class="text-sm font-black text-slate-900">Your Ride Activity</h2>
+            <p class="text-[11px] text-slate-400">Live requests and past trips</p>
+          </div>
+          <button type="button" onclick="renderActivityList(true)" title="Refresh Activity" class="p-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 transition cursor-pointer active:scale-95">
+            <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i>
+          </button>
+        </div>
         <div id="activityList" class="space-y-3">
-          <!-- Dynamically populated -->
+          <!-- Dynamically populated from Supabase rides table -->
         </div>
       </div>
     </div>
@@ -1063,7 +1068,7 @@
   </audio>
 
   <!-- Core Scripts -->
-  <script src="supabaseClient.js?v=20261026_driver_kyc_admin_v47"></script>
-  <script src="app.js?v=20261026_driver_kyc_admin_v47"></script>
+  <script src="supabaseClient.js?v=20261026_realtime_activity_v48"></script>
+  <script src="app.js?v=20261026_realtime_activity_v48"></script>
 </body>
 </html>
