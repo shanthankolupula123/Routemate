@@ -2772,29 +2772,45 @@
         if (window.db?.matching) window.db.matching.stopDriverPolling();
         state.driverOnline = false;
 
+        const vehName = submission?.vehicle_name || (submission?.vehicles && submission.vehicles[0]?.vehicle_name) || '';
+        const vehColor = submission?.vehicle_color || (submission?.vehicles && submission.vehicles[0]?.vehicle_color) || '';
+        const vehDetails = vehName ? `${vehName} ${vehColor ? `(${vehColor})` : ''}` : '';
+
         gateContainer.innerHTML = `
-          <div class="routemate-card p-6 text-center space-y-3.5 border border-amber-200 bg-amber-50/70 shadow-md">
-            <div class="w-14 h-14 rounded-2xl bg-amber-100 text-amber-700 mx-auto flex items-center justify-center font-black shadow-inner">
-              <i data-lucide="clock" class="w-7 h-7 text-amber-600 animate-pulse"></i>
+          <div class="routemate-card p-6 text-center space-y-4 border border-amber-200 bg-amber-50/70 shadow-md animate-in fade-in">
+            <div class="w-16 h-16 rounded-2xl bg-amber-100 text-amber-700 mx-auto flex items-center justify-center font-black shadow-inner relative">
+              <i data-lucide="clock" class="w-8 h-8 text-amber-600 animate-pulse"></i>
+              <span class="absolute -top-1 -right-1 flex h-3.5 w-3.5">
+                <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                <span class="relative inline-flex rounded-full h-3.5 w-3.5 bg-amber-500"></span>
+              </span>
             </div>
             <div>
-              <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-100 text-amber-800 text-[11px] font-black mb-1 border border-amber-200">
-                <span class="w-2 h-2 rounded-full bg-amber-500 animate-ping"></span>
-                <span>Status: Pending KYC Approval</span>
+              <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-100 text-amber-900 text-[11px] font-black mb-1.5 border border-amber-200">
+                <span>Documents Under Review - Pending Verification</span>
               </span>
-              <h3 class="text-sm font-black text-slate-900 mt-1">Verification Under Super Admin Review</h3>
+              <h3 class="text-base font-black text-slate-900 mt-1">Your account will be verified and approved within 24 to 48 hours.</h3>
               <p class="text-xs text-slate-600 leading-relaxed max-w-sm mx-auto mt-1">
-                Your driving license, identity proof, and vehicle details have been safely received and are currently under review by Routemate Super Admin.
+                Your driving license, identity proof, vehicle details, and RC document have been securely pushed to Super Admin review (<span class="font-mono text-blue-700 font-bold">shanthankolupula123@gmail.com</span>).
               </p>
             </div>
-            <div class="p-3 bg-white/90 rounded-2xl border border-amber-200 text-left text-xs space-y-1.5 max-w-xs mx-auto shadow-sm">
+            <div class="p-3.5 bg-white/95 rounded-2xl border border-amber-200 text-left text-xs space-y-2 max-w-xs mx-auto shadow-sm">
               <div class="flex items-center justify-between text-[11px]">
                 <span class="text-slate-500 font-semibold">DL Number:</span>
                 <span class="font-mono font-bold text-slate-800">${submission?.dl_number || 'Submitted'}</span>
               </div>
               <div class="flex items-center justify-between text-[11px]">
-                <span class="text-slate-500 font-semibold">Vehicle:</span>
+                <span class="text-slate-500 font-semibold">Vehicle Plate:</span>
                 <span class="font-mono font-bold text-slate-800">${submission?.vehicle_number || 'Submitted'}</span>
+              </div>
+              ${vehDetails ? `
+              <div class="flex items-center justify-between text-[11px]">
+                <span class="text-slate-500 font-semibold">Vehicle & Colour:</span>
+                <span class="font-bold text-slate-800">${vehDetails}</span>
+              </div>` : ''}
+              <div class="flex items-center justify-between text-[11px] pt-1.5 border-t border-slate-100">
+                <span class="text-slate-500 font-semibold">Expected Approval:</span>
+                <span class="font-bold text-emerald-700">Within 24 to 48 Hours</span>
               </div>
               <div class="flex items-center justify-between text-[11px]">
                 <span class="text-slate-500 font-semibold">Reviewer:</span>
@@ -2886,6 +2902,27 @@
   }
   window.checkDriverKycStatus = checkDriverKycStatus;
 
+  function refreshKycPreviews() {
+    const previewMap = {
+      driver_photo: 'kycPreviewDriverPhoto',
+      dl_front: 'kycPreviewDlFront',
+      dl_back: 'kycPreviewDlBack',
+      aadhaar_front: 'kycPreviewAadhaarFront',
+      aadhaar_back: 'kycPreviewAadhaarBack',
+      rc_photo: 'kycPreviewRcPhoto'
+    };
+
+    Object.entries(previewMap).forEach(([fieldKey, elId]) => {
+      const dataUrl = state.kyc.formData[fieldKey];
+      const previewEl = document.getElementById(elId);
+      if (previewEl && dataUrl) {
+        previewEl.innerHTML = `
+          <img src="${dataUrl}" alt="Preview" class="w-full h-full object-cover rounded-xl cursor-pointer hover:opacity-90 transition shadow-sm" onclick="openImageLightbox('${dataUrl}', '${fieldKey.toUpperCase()}')" />
+        `;
+      }
+    });
+  }
+
   // -------------------------------------------------------------------------
   // MULTI-STEP DRIVER KYC SUBMISSION WIZARD
   // -------------------------------------------------------------------------
@@ -2913,6 +2950,7 @@
     }
 
     updateKycStepUI();
+    refreshKycPreviews();
     modal.classList.remove('hidden');
     if (window.lucide) lucide.createIcons();
   };
@@ -2980,6 +3018,7 @@
     if (nextStep >= 1 && nextStep <= 4) {
       state.kyc.currentStep = nextStep;
       updateKycStepUI();
+      refreshKycPreviews();
     }
   };
 
@@ -3016,7 +3055,7 @@
       1: 'Personal & Photo',
       2: 'Driving License',
       3: 'Aadhaar Card',
-      4: 'Vehicle RC'
+      4: 'Vehicle Details & RC'
     };
     if (stepNumEl) stepNumEl.textContent = step;
     if (stepTitleEl) stepTitleEl.textContent = titles[step] || '';
@@ -3030,6 +3069,7 @@
     if (btnNext) btnNext.classList.toggle('hidden', step === 4);
     if (btnSubmit) btnSubmit.classList.toggle('hidden', step !== 4);
 
+    refreshKycPreviews();
     if (window.lucide) lucide.createIcons();
   }
 
@@ -3053,28 +3093,39 @@
       const compressedDataUrl = await compressImage(file, 1200, 0.72);
       state.kyc.formData[fieldKey] = compressedDataUrl;
 
-      // Update thumbnail preview
-      const previewMap = {
-        driver_photo: 'kycPreviewDriverPhoto',
-        dl_front: 'kycPreviewDlFront',
-        dl_back: 'kycPreviewDlBack',
-        aadhaar_front: 'kycPreviewAadhaarFront',
-        aadhaar_back: 'kycPreviewAadhaarBack',
-        rc_photo: 'kycPreviewRcPhoto'
-      };
-
-      const previewId = previewMap[fieldKey];
-      const previewEl = document.getElementById(previewId);
-      if (previewEl) {
-        previewEl.innerHTML = `
-          <img src="${compressedDataUrl}" alt="Preview" class="w-full h-full object-cover cursor-pointer hover:opacity-90" onclick="openImageLightbox('${compressedDataUrl}', '${fieldKey.toUpperCase()}')" />
-        `;
-      }
-      showToast('Photo uploaded & verified ✓', 'success');
+      // Update thumbnail preview instantly
+      refreshKycPreviews();
+      showToast('Photo uploaded & preview verified ✓', 'success');
     } catch (err) {
       console.error('Image compression error:', err);
       showToast('Failed to process image: ' + err.message, 'danger');
     }
+  };
+
+  window.showKycPendingConfirmationModal = function (details = {}) {
+    const modal = document.getElementById('kycPendingConfirmationModal');
+    if (!modal) return;
+
+    const nameEl = document.getElementById('kycConfirmDriverName');
+    const vehNumEl = document.getElementById('kycConfirmVehicleNumber');
+    const vehDetEl = document.getElementById('kycConfirmVehicleDetails');
+
+    if (nameEl) nameEl.textContent = details.driverName || state.currentUser?.name || 'Driver';
+    if (vehNumEl) vehNumEl.textContent = details.vehicleNumber || 'Submitted';
+    if (vehDetEl) {
+      const name = details.vehicleName || 'Vehicle';
+      const color = details.vehicleColor ? `(${details.vehicleColor})` : '';
+      vehDetEl.textContent = `${name} ${color}`.trim();
+    }
+
+    modal.classList.remove('hidden');
+    if (window.lucide) lucide.createIcons();
+  };
+
+  window.closeKycPendingConfirmationModal = function () {
+    const modal = document.getElementById('kycPendingConfirmationModal');
+    if (modal) modal.classList.add('hidden');
+    navigateToTab('drive');
   };
 
   window.handleDriverKycFormSubmit = async function (e) {
@@ -3087,11 +3138,21 @@
     }
 
     const vehNum = document.getElementById('kycInputVehicleNumber')?.value.trim();
+    const vehName = document.getElementById('kycInputVehicleName')?.value.trim();
+    const vehColor = document.getElementById('kycInputVehicleColor')?.value.trim();
     const vehType = document.getElementById('kycSelectVehicleType')?.value || 'bike';
     const declaration = document.getElementById('kycCheckboxDeclaration')?.checked;
 
     if (!vehNum || vehNum.length < 5) {
       showKycError('Please enter a valid Vehicle Registration Number (e.g. TG 09 EA 1234).');
+      return;
+    }
+    if (!vehName) {
+      showKycError('Please enter your Vehicle / Bike Name (e.g. Honda Activa 6G).');
+      return;
+    }
+    if (!vehColor) {
+      showKycError('Please enter your Vehicle Colour (e.g. Black / Matte Red).');
       return;
     }
     if (!state.kyc.formData.rc_photo) {
@@ -3111,21 +3172,44 @@
     try {
       showToast('Submitting driver documents securely...', 'info');
 
+      const driverName = document.getElementById('kycInputDriverName')?.value.trim() || user.name;
+      const driverPhone = '+91' + document.getElementById('kycInputDriverPhone')?.value.replace(/\D/g, '');
+      const dlNumber = document.getElementById('kycInputDlNumber')?.value.trim().toUpperCase();
+      const aadhaarNumber = document.getElementById('kycInputAadhaarNumber')?.value.replace(/\D/g, '');
+
       const payload = {
         userId: user.id,
-        driverName: document.getElementById('kycInputDriverName')?.value.trim() || user.name,
-        driverPhone: '+91' + document.getElementById('kycInputDriverPhone')?.value.replace(/\D/g, ''),
+        user_id: user.id,
+        driverName,
+        driver_name: driverName,
+        driverPhone,
+        driver_phone: driverPhone,
         driverEmail: user.email,
+        driver_email: user.email,
         driverPhoto: state.kyc.formData.driver_photo,
-        dlNumber: document.getElementById('kycInputDlNumber')?.value.trim().toUpperCase(),
+        driver_photo: state.kyc.formData.driver_photo,
+        dlNumber,
+        dl_number: dlNumber,
         dlFrontPhoto: state.kyc.formData.dl_front,
+        dl_front_photo: state.kyc.formData.dl_front,
         dlBackPhoto: state.kyc.formData.dl_back,
-        aadhaarNumber: document.getElementById('kycInputAadhaarNumber')?.value.replace(/\D/g, ''),
+        dl_back_photo: state.kyc.formData.dl_back,
+        aadhaarNumber,
+        aadhaar_number: aadhaarNumber,
         aadhaarFrontPhoto: state.kyc.formData.aadhaar_front,
+        aadhaar_front_photo: state.kyc.formData.aadhaar_front,
         aadhaarBackPhoto: state.kyc.formData.aadhaar_back,
+        aadhaar_back_photo: state.kyc.formData.aadhaar_back,
         vehicleNumber: vehNum.toUpperCase(),
+        vehicle_number: vehNum.toUpperCase(),
+        vehicleName: vehName,
+        vehicle_name: vehName,
+        vehicleColor: vehColor,
+        vehicle_color: vehColor,
         vehicleType: vehType,
-        rcPhoto: state.kyc.formData.rc_photo
+        vehicle_type: vehType,
+        rcPhoto: state.kyc.formData.rc_photo,
+        rc_photo: state.kyc.formData.rc_photo
       };
 
       if (window.db?.kyc?.submitDriverKyc) {
@@ -3133,7 +3217,12 @@
       }
 
       closeDriverKycModal();
-      showToast('Driver KYC submitted! Super Admin will review your documents shortly.', 'success');
+      showKycPendingConfirmationModal({
+        driverName,
+        vehicleNumber: vehNum.toUpperCase(),
+        vehicleName: vehName,
+        vehicleColor: vehColor
+      });
       await checkDriverKycStatus(true);
     } catch (err) {
       console.error('Driver KYC submission error:', err);
@@ -3219,6 +3308,7 @@
     const typeInput = document.querySelector('input[name="addVehicleType"]:checked');
     const vehicleType = typeInput ? typeInput.value : 'bike';
     const vehicleName = document.getElementById('addVehicleNameInput')?.value.trim();
+    const vehicleColor = document.getElementById('addVehicleColorInput')?.value.trim();
     const vehicleNumberRaw = document.getElementById('addVehicleNumberInput')?.value.trim();
     const cleanNumber = (vehicleNumberRaw || '').toUpperCase().replace(/\s+/g, '');
 
@@ -3229,6 +3319,22 @@
     if (!cleanNumber || cleanNumber.length < 5) {
       if (errBox) {
         errBox.textContent = 'Please enter a valid Vehicle Registration Number (e.g. TG09EA1234).';
+        errBox.classList.remove('hidden');
+      }
+      return;
+    }
+
+    if (!vehicleName) {
+      if (errBox) {
+        errBox.textContent = 'Please enter your Vehicle / Bike Name (e.g. Hero Splendor Plus).';
+        errBox.classList.remove('hidden');
+      }
+      return;
+    }
+
+    if (!vehicleColor) {
+      if (errBox) {
+        errBox.textContent = 'Please enter your Vehicle Colour (e.g. Black / Grey).';
         errBox.classList.remove('hidden');
       }
       return;
@@ -3250,13 +3356,23 @@
       showToast('Submitting vehicle details for Super Admin review...', 'info');
       const payload = {
         userId: user.id,
+        user_id: user.id,
         driverName: user.name || 'Driver',
+        driver_name: user.name || 'Driver',
         driverEmail: user.email || '',
+        driver_email: user.email || '',
         driverPhone: user.phone || '',
+        driver_phone: user.phone || '',
         vehicleNumber: cleanNumber,
+        vehicle_number: cleanNumber,
         vehicleType,
-        vehicleName: vehicleName || (vehicleType === 'car' ? 'Car Seat' : (vehicleType === 'auto' ? 'Auto' : 'Two-Wheeler / Bike')),
-        rcPhoto: addVehicleRcCompressedBase64
+        vehicle_type: vehicleType,
+        vehicleName,
+        vehicle_name: vehicleName,
+        vehicleColor,
+        vehicle_color: vehicleColor,
+        rcPhoto: addVehicleRcCompressedBase64,
+        rc_photo: addVehicleRcCompressedBase64
       };
 
       if (window.db?.kyc?.addDriverVehicle) {
@@ -3377,9 +3493,14 @@
                 ${vehIcon}
               </div>
               <div>
-                <div class="flex items-center gap-1.5">
+                <div class="flex items-center gap-1.5 flex-wrap">
                   <h5 class="text-xs font-black text-slate-900">${v.vehicle_name || categoryLabel}</h5>
                   <span class="text-[9px] uppercase font-bold px-1.5 py-0.2 rounded bg-slate-100 text-slate-600">${categoryLabel}</span>
+                  ${v.vehicle_color ? `
+                    <span class="text-[9px] font-bold px-1.5 py-0.2 rounded bg-blue-50 text-blue-700 border border-blue-200">
+                      ${v.vehicle_color}
+                    </span>
+                  ` : ''}
                   ${isActive ? `
                     <span class="inline-flex items-center gap-0.5 text-[9px] font-black uppercase text-blue-700 bg-blue-50 px-2 py-0.5 rounded-full border border-blue-200">
                       Active
@@ -3537,6 +3658,17 @@
       const isRejected = sub.status === 'rejected';
       const isPending = !isApproved && !isRejected;
 
+      const dlFront = sub.dl_front_photo || sub.dlFrontPhoto || '';
+      const dlBack = sub.dl_back_photo || sub.dlBackPhoto || '';
+      const aadhaarFront = sub.aadhaar_front_photo || sub.aadhaarFrontPhoto || '';
+      const aadhaarBack = sub.aadhaar_back_photo || sub.aadhaarBackPhoto || '';
+      const rcPhoto = sub.rc_photo || sub.rcPhoto || '';
+      const driverPhoto = sub.driver_photo || sub.driverPhoto || '';
+      const vehName = sub.vehicle_name || sub.vehicleName || '';
+      const vehColor = sub.vehicle_color || sub.vehicleColor || '';
+      const vehNumber = sub.vehicle_number || sub.vehicleNumber || 'N/A';
+      const vehType = sub.vehicle_type || sub.vehicleType || 'bike';
+
       let statusBadge = `
         <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-black bg-amber-100 text-amber-800 border border-amber-200">
           <span class="w-1.5 h-1.5 rounded-full bg-amber-500 animate-ping"></span>
@@ -3564,8 +3696,8 @@
           <!-- Driver Profile Header -->
           <div class="flex items-start justify-between">
             <div class="flex items-center gap-3">
-              <div class="w-12 h-12 rounded-2xl bg-slate-100 border border-slate-200 overflow-hidden flex-shrink-0 cursor-pointer" onclick="openImageLightbox('${sub.driver_photo || ''}', '${sub.driver_name || 'Driver'} Selfie')">
-                ${sub.driver_photo ? `<img src="${sub.driver_photo}" alt="Selfie" class="w-full h-full object-cover" />` : `<div class="w-full h-full flex items-center justify-center text-xs font-bold text-slate-400">Photo</div>`}
+              <div class="w-12 h-12 rounded-2xl bg-slate-100 border border-slate-200 overflow-hidden flex-shrink-0 cursor-pointer" onclick="openImageLightbox('${driverPhoto}', '${sub.driver_name || 'Driver'} Selfie')">
+                ${driverPhoto ? `<img src="${driverPhoto}" alt="Selfie" class="w-full h-full object-cover" onerror="this.onerror=null;this.parentElement.innerHTML='<div class=\\'w-full h-full flex items-center justify-center text-[9px] text-slate-400\\'>Photo</div>';" />` : `<div class="w-full h-full flex items-center justify-center text-xs font-bold text-slate-400">Photo</div>`}
               </div>
               <div>
                 <h3 class="text-sm font-black text-slate-900">${sub.driver_name || 'Driver'}</h3>
@@ -3580,18 +3712,24 @@
           <div class="grid grid-cols-2 gap-2 p-3 bg-slate-50 rounded-2xl border border-slate-200/80 text-xs font-mono">
             <div>
               <span class="text-[10px] text-slate-400 uppercase font-sans font-bold block">Driving License</span>
-              <span class="font-bold text-slate-900 text-xs">${sub.dl_number || 'N/A'}</span>
+              <span class="font-bold text-slate-900 text-xs">${sub.dl_number || sub.dlNumber || 'N/A'}</span>
             </div>
             <div>
               <span class="text-[10px] text-slate-400 uppercase font-sans font-bold block">Vehicle Number</span>
-              <span class="font-bold text-slate-900 text-xs">${sub.vehicle_number || 'N/A'}</span>
+              <span class="font-bold text-slate-900 text-xs">${vehNumber}</span>
+            </div>
+            <div class="col-span-2 pt-1 border-t border-slate-200/60 flex items-center justify-between">
+              <div>
+                <span class="text-[10px] text-slate-400 uppercase font-sans font-bold block">Vehicle Details</span>
+                <span class="font-bold text-slate-900 text-xs">${vehName || 'Vehicle'}${vehColor ? ` • <span class="text-blue-600 font-semibold">${vehColor}</span>` : ''}</span>
+              </div>
+              <span class="text-[10px] font-sans font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full uppercase">${vehType}</span>
             </div>
             <div class="col-span-2 pt-1 border-t border-slate-200/60 flex items-center justify-between">
               <div>
                 <span class="text-[10px] text-slate-400 uppercase font-sans font-bold block">Aadhaar ID</span>
                 <span class="font-bold text-slate-900 text-xs">${formattedAadhaar}</span>
               </div>
-              <span class="text-[10px] font-sans font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full uppercase">${sub.vehicle_type || 'bike'}</span>
             </div>
           </div>
 
@@ -3600,32 +3738,32 @@
             <span class="text-[10px] font-black uppercase text-slate-400 tracking-wider block mb-1.5">Submitted Document Photos (Tap to Inspect)</span>
             <div class="grid grid-cols-5 gap-1.5">
               <!-- DL Front -->
-              <div class="relative group aspect-square rounded-xl bg-slate-100 border border-slate-200 overflow-hidden cursor-pointer" onclick="openImageLightbox('${sub.dl_front_photo || ''}', 'Driving License Front - ${sub.driver_name}')" title="DL Front">
-                ${sub.dl_front_photo ? `<img src="${sub.dl_front_photo}" alt="DL Front" class="w-full h-full object-cover group-hover:scale-105 transition" />` : `<div class="w-full h-full flex items-center justify-center text-[9px] text-slate-400">DL Front</div>`}
+              <div class="relative group aspect-square rounded-xl bg-slate-100 border border-slate-200 overflow-hidden cursor-pointer" onclick="openImageLightbox('${dlFront}', 'Driving License Front - ${sub.driver_name}')" title="DL Front">
+                ${dlFront ? `<img src="${dlFront}" alt="DL Front" class="w-full h-full object-cover group-hover:scale-105 transition" onerror="this.onerror=null;this.parentElement.innerHTML='<div class=\\'w-full h-full flex items-center justify-center text-[9px] text-slate-400\\'>DL Front</div>';" />` : `<div class="w-full h-full flex items-center justify-center text-[9px] text-slate-400">DL Front</div>`}
                 <span class="absolute bottom-0 inset-x-0 bg-slate-900/70 text-white text-[8px] font-bold text-center py-0.5">DL Front</span>
               </div>
 
               <!-- DL Back -->
-              <div class="relative group aspect-square rounded-xl bg-slate-100 border border-slate-200 overflow-hidden cursor-pointer" onclick="openImageLightbox('${sub.dl_back_photo || ''}', 'Driving License Back - ${sub.driver_name}')" title="DL Back">
-                ${sub.dl_back_photo ? `<img src="${sub.dl_back_photo}" alt="DL Back" class="w-full h-full object-cover group-hover:scale-105 transition" />` : `<div class="w-full h-full flex items-center justify-center text-[9px] text-slate-400">DL Back</div>`}
+              <div class="relative group aspect-square rounded-xl bg-slate-100 border border-slate-200 overflow-hidden cursor-pointer" onclick="openImageLightbox('${dlBack}', 'Driving License Back - ${sub.driver_name}')" title="DL Back">
+                ${dlBack ? `<img src="${dlBack}" alt="DL Back" class="w-full h-full object-cover group-hover:scale-105 transition" onerror="this.onerror=null;this.parentElement.innerHTML='<div class=\\'w-full h-full flex items-center justify-center text-[9px] text-slate-400\\'>DL Back</div>';" />` : `<div class="w-full h-full flex items-center justify-center text-[9px] text-slate-400">DL Back</div>`}
                 <span class="absolute bottom-0 inset-x-0 bg-slate-900/70 text-white text-[8px] font-bold text-center py-0.5">DL Back</span>
               </div>
 
               <!-- Aadhaar Front -->
-              <div class="relative group aspect-square rounded-xl bg-slate-100 border border-slate-200 overflow-hidden cursor-pointer" onclick="openImageLightbox('${sub.aadhaar_front_photo || ''}', 'Aadhaar Front - ${sub.driver_name}')" title="Aadhaar Front">
-                ${sub.aadhaar_front_photo ? `<img src="${sub.aadhaar_front_photo}" alt="Aadhaar Front" class="w-full h-full object-cover group-hover:scale-105 transition" />` : `<div class="w-full h-full flex items-center justify-center text-[9px] text-slate-400">Aadhaar F</div>`}
+              <div class="relative group aspect-square rounded-xl bg-slate-100 border border-slate-200 overflow-hidden cursor-pointer" onclick="openImageLightbox('${aadhaarFront}', 'Aadhaar Front - ${sub.driver_name}')" title="Aadhaar Front">
+                ${aadhaarFront ? `<img src="${aadhaarFront}" alt="Aadhaar Front" class="w-full h-full object-cover group-hover:scale-105 transition" onerror="this.onerror=null;this.parentElement.innerHTML='<div class=\\'w-full h-full flex items-center justify-center text-[9px] text-slate-400\\'>Aadhaar F</div>';" />` : `<div class="w-full h-full flex items-center justify-center text-[9px] text-slate-400">Aadhaar F</div>`}
                 <span class="absolute bottom-0 inset-x-0 bg-slate-900/70 text-white text-[8px] font-bold text-center py-0.5">Aadhaar F</span>
               </div>
 
               <!-- Aadhaar Back -->
-              <div class="relative group aspect-square rounded-xl bg-slate-100 border border-slate-200 overflow-hidden cursor-pointer" onclick="openImageLightbox('${sub.aadhaar_back_photo || ''}', 'Aadhaar Back - ${sub.driver_name}')" title="Aadhaar Back">
-                ${sub.aadhaar_back_photo ? `<img src="${sub.aadhaar_back_photo}" alt="Aadhaar Back" class="w-full h-full object-cover group-hover:scale-105 transition" />` : `<div class="w-full h-full flex items-center justify-center text-[9px] text-slate-400">Aadhaar B</div>`}
+              <div class="relative group aspect-square rounded-xl bg-slate-100 border border-slate-200 overflow-hidden cursor-pointer" onclick="openImageLightbox('${aadhaarBack}', 'Aadhaar Back - ${sub.driver_name}')" title="Aadhaar Back">
+                ${aadhaarBack ? `<img src="${aadhaarBack}" alt="Aadhaar Back" class="w-full h-full object-cover group-hover:scale-105 transition" onerror="this.onerror=null;this.parentElement.innerHTML='<div class=\\'w-full h-full flex items-center justify-center text-[9px] text-slate-400\\'>Aadhaar B</div>';" />` : `<div class="w-full h-full flex items-center justify-center text-[9px] text-slate-400">Aadhaar B</div>`}
                 <span class="absolute bottom-0 inset-x-0 bg-slate-900/70 text-white text-[8px] font-bold text-center py-0.5">Aadhaar B</span>
               </div>
 
               <!-- Vehicle RC -->
-              <div class="relative group aspect-square rounded-xl bg-slate-100 border border-slate-200 overflow-hidden cursor-pointer" onclick="openImageLightbox('${sub.rc_photo || ''}', 'Vehicle RC - ${sub.driver_name}')" title="RC Document">
-                ${sub.rc_photo ? `<img src="${sub.rc_photo}" alt="RC Photo" class="w-full h-full object-cover group-hover:scale-105 transition" />` : `<div class="w-full h-full flex items-center justify-center text-[9px] text-slate-400">RC Photo</div>`}
+              <div class="relative group aspect-square rounded-xl bg-slate-100 border border-slate-200 overflow-hidden cursor-pointer" onclick="openImageLightbox('${rcPhoto}', 'Vehicle RC - ${sub.driver_name}')" title="RC Document">
+                ${rcPhoto ? `<img src="${rcPhoto}" alt="RC Photo" class="w-full h-full object-cover group-hover:scale-105 transition" onerror="this.onerror=null;this.parentElement.innerHTML='<div class=\\'w-full h-full flex items-center justify-center text-[9px] text-slate-400\\'>RC Doc</div>';" />` : `<div class="w-full h-full flex items-center justify-center text-[9px] text-slate-400">RC Photo</div>`}
                 <span class="absolute bottom-0 inset-x-0 bg-slate-900/70 text-white text-[8px] font-bold text-center py-0.5">RC Doc</span>
               </div>
             </div>
@@ -3652,6 +3790,7 @@
                         <div>
                           <div class="flex items-center gap-1.5 flex-wrap">
                             <span class="font-black text-slate-900">${v.vehicle_name || categoryName}</span>
+                            ${v.vehicle_color ? `<span class="px-1.5 py-0.5 rounded font-bold bg-blue-50 text-blue-700 text-[9px] border border-blue-200">${v.vehicle_color}</span>` : ''}
                             <span class="px-1.5 py-0.5 rounded font-mono font-bold bg-white border border-slate-200 text-slate-800 text-[10px] tracking-wide">${v.vehicle_number}</span>
                             ${v.is_default ? `<span class="text-[9px] font-black text-blue-700 bg-blue-100 px-2 py-0.2 rounded-full">Primary</span>` : ''}
                           </div>

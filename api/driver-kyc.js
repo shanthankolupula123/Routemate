@@ -126,17 +126,34 @@ module.exports = async (req, res) => {
       }
     } catch (e) {}
 
-    // Ensure each submission has a populated vehicles array
+    // Ensure each submission has normalized photos, vehicle details, and populated vehicles array
     allSubmissions.forEach(sub => {
+      let notesData = {};
+      if (sub.notes && typeof sub.notes === 'string' && sub.notes.trim().startsWith('{')) {
+        try { notesData = JSON.parse(sub.notes); } catch (e) {}
+      }
+
+      sub.dl_front_photo = sub.dl_front_photo || sub.dlFrontPhoto || sub.dl_front || notesData.dl_front_photo || '';
+      sub.dl_back_photo = sub.dl_back_photo || sub.dlBackPhoto || sub.dl_back || notesData.dl_back_photo || '';
+      sub.aadhaar_front_photo = sub.aadhaar_front_photo || sub.aadhaarFrontPhoto || sub.aadhaar_front || notesData.aadhaar_front_photo || '';
+      sub.aadhaar_back_photo = sub.aadhaar_back_photo || sub.aadhaarBackPhoto || sub.aadhaar_back || notesData.aadhaar_back_photo || '';
+      sub.rc_photo = sub.rc_photo || sub.rcPhoto || (sub.vehicles && sub.vehicles[0]?.rc_photo) || notesData.rc_photo || '';
+      sub.driver_photo = sub.driver_photo || sub.driverPhoto || sub.avatar_url || notesData.driver_photo || '';
+      sub.vehicle_name = sub.vehicle_name || sub.vehicleName || notesData.vehicle_name || (sub.vehicles && sub.vehicles[0]?.vehicle_name) || (sub.vehicle_type === 'car' ? 'Car Seat' : (sub.vehicle_type === 'auto' ? 'Auto' : 'Two-Wheeler / Bike'));
+      sub.vehicle_color = sub.vehicle_color || sub.vehicleColor || notesData.vehicle_color || (sub.vehicles && sub.vehicles[0]?.vehicle_color) || 'Standard';
+
       if (!sub.vehicles || !Array.isArray(sub.vehicles) || sub.vehicles.length === 0) {
-        if (sub.vehicle_number) {
+        if (notesData.vehicles && Array.isArray(notesData.vehicles) && notesData.vehicles.length > 0) {
+          sub.vehicles = notesData.vehicles;
+        } else if (sub.vehicle_number) {
           sub.vehicles = [
             {
               id: 'veh_primary_' + (sub.id || sub.user_id),
               user_id: sub.user_id || sub.id,
               vehicle_number: sub.vehicle_number,
               vehicle_type: sub.vehicle_type || 'bike',
-              vehicle_name: sub.vehicle_name || (sub.vehicle_type === 'car' ? 'Car Seat' : (sub.vehicle_type === 'auto' ? 'Auto' : 'Two-Wheeler / Bike')),
+              vehicle_name: sub.vehicle_name,
+              vehicle_color: sub.vehicle_color,
               rc_photo: sub.rc_photo,
               status: sub.status || 'pending',
               is_default: true,
@@ -146,6 +163,11 @@ module.exports = async (req, res) => {
         } else {
           sub.vehicles = [];
         }
+      } else {
+        sub.vehicles.forEach(v => {
+          if (!v.vehicle_color && sub.vehicle_color) v.vehicle_color = sub.vehicle_color;
+          if (!v.vehicle_name && sub.vehicle_name) v.vehicle_name = sub.vehicle_name;
+        });
       }
     });
 
@@ -264,26 +286,30 @@ module.exports = async (req, res) => {
     // ACTION: Add Another Vehicle (Secondary Vehicle KYC Submission)
     // -----------------------------------------------------------------------
     if (action === 'add_vehicle') {
-      const { user_id, vehicle_number, vehicle_type, vehicle_name, rc_photo } = body;
+      const cleanUserId = body.user_id || body.userId;
+      const cleanVehNum = String(body.vehicle_number || body.vehicleNumber || '').trim().toUpperCase();
+      const cleanVehType = body.vehicle_type || body.vehicleType || 'bike';
+      const cleanVehName = body.vehicle_name || body.vehicleName || (cleanVehType === 'car' ? 'Car Seat' : (cleanVehType === 'auto' ? 'Auto' : 'Bike'));
+      const cleanVehColor = body.vehicle_color || body.vehicleColor || body.vehicle_colour || body.vehicleColour || 'Standard';
+      const cleanRcPhoto = body.rc_photo || body.rcPhoto;
 
-      if (!user_id || !vehicle_number || !rc_photo) {
+      if (!cleanUserId || !cleanVehNum || !cleanRcPhoto) {
         return res.status(400).json({
           success: false,
           error: 'Vehicle Number and Registration Certificate (RC) photo are mandatory.'
         });
       }
 
-      const cleanVehNum = String(vehicle_number).trim().toUpperCase();
       const list = getStore();
-      let sub = list.find(s => s.user_id === user_id || s.id === user_id || s.driver_email === body.driver_email);
+      let sub = list.find(s => s.user_id === cleanUserId || s.id === cleanUserId || s.driver_email === body.driver_email);
 
       if (!sub) {
         sub = {
-          id: user_id,
-          user_id,
-          driver_name: body.driver_name || 'Driver',
-          driver_email: body.driver_email || '',
-          driver_phone: body.driver_phone || '',
+          id: cleanUserId,
+          user_id: cleanUserId,
+          driver_name: body.driver_name || body.driverName || 'Driver',
+          driver_email: body.driver_email || body.driverEmail || '',
+          driver_phone: body.driver_phone || body.driverPhone || '',
           status: 'approved',
           vehicles: []
         };
@@ -305,11 +331,12 @@ module.exports = async (req, res) => {
 
       const newVehicle = {
         id: 'veh_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
-        user_id,
+        user_id: cleanUserId,
         vehicle_number: cleanVehNum,
-        vehicle_type: vehicle_type || 'bike',
-        vehicle_name: vehicle_name || (vehicle_type === 'car' ? 'Car Seat' : (vehicle_type === 'auto' ? 'Auto' : 'Bike')),
-        rc_photo,
+        vehicle_type: cleanVehType,
+        vehicle_name: cleanVehName,
+        vehicle_color: cleanVehColor,
+        rc_photo: cleanRcPhoto,
         status: 'pending', // Strictly Pending Super Admin review
         is_default: sub.vehicles.length === 0,
         submitted_at: new Date().toISOString()
@@ -430,91 +457,106 @@ module.exports = async (req, res) => {
     // -----------------------------------------------------------------------
     // ACTION: Driver Document Upload & Submission
     // -----------------------------------------------------------------------
-    const {
-      user_id,
-      driver_name,
-      driver_phone,
-      driver_email,
-      driver_photo,
-      dl_number,
-      dl_front_photo,
-      dl_back_photo,
-      aadhaar_number,
-      aadhaar_front_photo,
-      aadhaar_back_photo,
-      vehicle_number,
-      rc_photo
-    } = body;
+    const cleanUserId = body.user_id || body.userId;
+    const cleanDriverName = body.driver_name || body.driverName;
+    const cleanDriverPhone = body.driver_phone || body.driverPhone || '';
+    const cleanDriverEmail = body.driver_email || body.driverEmail || '';
+    const cleanDriverPhoto = body.driver_photo || body.driverPhoto || null;
+    const cleanDlNumber = body.dl_number || body.dlNumber;
+    const cleanDlFront = body.dl_front_photo || body.dlFrontPhoto || body.dl_front;
+    const cleanDlBack = body.dl_back_photo || body.dlBackPhoto || body.dl_back;
+    const cleanAadhaarNumber = body.aadhaar_number || body.aadhaarNumber;
+    const cleanAadhaarFront = body.aadhaar_front_photo || body.aadhaarFrontPhoto || body.aadhaar_front;
+    const cleanAadhaarBack = body.aadhaar_back_photo || body.aadhaarBackPhoto || body.aadhaar_back;
+    const cleanVehicleNumber = body.vehicle_number || body.vehicleNumber;
+    const cleanVehicleType = body.vehicle_type || body.vehicleType || 'bike';
+    const cleanVehicleName = body.vehicle_name || body.vehicleName || (cleanVehicleType === 'car' ? 'Car Seat' : (cleanVehicleType === 'auto' ? 'Auto' : 'Two-Wheeler / Bike'));
+    const cleanVehicleColor = body.vehicle_color || body.vehicleColor || body.vehicle_colour || body.vehicleColour || 'Standard';
+    const cleanRcPhoto = body.rc_photo || body.rcPhoto;
 
-    if (!user_id || !driver_name || !dl_number || !aadhaar_number || !vehicle_number) {
+    if (!cleanUserId || !cleanDriverName || !cleanDlNumber || !cleanAadhaarNumber || !cleanVehicleNumber) {
       return res.status(400).json({
         success: false,
         error: 'Missing mandatory fields: Name, DL Number, Aadhaar Number, and Vehicle Number are required.'
       });
     }
 
-    if (!dl_front_photo || !dl_back_photo) {
+    if (!cleanDlFront || !cleanDlBack) {
       return res.status(400).json({
         success: false,
         error: 'Both front and back photos of your Driving License are mandatory.'
       });
     }
 
-    if (!aadhaar_front_photo || !aadhaar_back_photo) {
+    if (!cleanAadhaarFront || !cleanAadhaarBack) {
       return res.status(400).json({
         success: false,
         error: 'Both front and back photos of your Aadhaar Card are mandatory.'
       });
     }
 
-    if (!rc_photo) {
+    if (!cleanRcPhoto) {
       return res.status(400).json({
         success: false,
         error: 'Vehicle Registration Certificate (RC) document photo is mandatory.'
       });
     }
 
+    const isUUID = (str) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(str || ''));
+
     const submissionRecord = {
-      id: user_id,
-      user_id,
-      driver_name: String(driver_name).trim(),
-      driver_phone: String(driver_phone || '').trim(),
-      driver_email: String(driver_email || '').trim().toLowerCase(),
-      driver_photo: driver_photo || null,
-      dl_number: String(dl_number).trim().toUpperCase(),
-      dl_front_photo,
-      dl_back_photo,
-      aadhaar_number: String(aadhaar_number).replace(/\s/g, '').trim(),
-      aadhaar_front_photo,
-      aadhaar_back_photo,
-      vehicle_number: String(vehicle_number).trim().toUpperCase(),
-      rc_photo,
+      id: cleanUserId,
+      user_id: cleanUserId,
+      driver_name: String(cleanDriverName).trim(),
+      driver_phone: String(cleanDriverPhone).trim(),
+      driver_email: String(cleanDriverEmail).trim().toLowerCase(),
+      driver_photo: cleanDriverPhoto,
+      dl_number: String(cleanDlNumber).trim().toUpperCase(),
+      dl_front_photo: cleanDlFront,
+      dl_back_photo: cleanDlBack,
+      aadhaar_number: String(cleanAadhaarNumber).replace(/\s/g, '').trim(),
+      aadhaar_front_photo: cleanAadhaarFront,
+      aadhaar_back_photo: cleanAadhaarBack,
+      vehicle_number: String(cleanVehicleNumber).trim().toUpperCase(),
+      vehicle_type: cleanVehicleType,
+      vehicle_name: cleanVehicleName,
+      vehicle_color: cleanVehicleColor,
+      rc_photo: cleanRcPhoto,
       status: 'pending', // Strictly Pending Approval
       rejection_reason: null,
-      submitted_at: new Date().toISOString()
+      submitted_at: new Date().toISOString(),
+      vehicles: [
+        {
+          id: 'veh_primary_' + cleanUserId,
+          user_id: cleanUserId,
+          vehicle_number: String(cleanVehicleNumber).trim().toUpperCase(),
+          vehicle_type: cleanVehicleType,
+          vehicle_name: cleanVehicleName,
+          vehicle_color: cleanVehicleColor,
+          rc_photo: cleanRcPhoto,
+          status: 'pending',
+          is_default: true,
+          submitted_at: new Date().toISOString()
+        }
+      ]
     };
 
-    // 1. Save to Supabase `driver_kyc` table
+    // 1. Save / Upsert to Supabase `driver_kyc` table
     try {
-      await fetch(`${SUPABASE_URL}/rest/v1/driver_kyc`, {
-        method: 'POST',
+      // Check if row exists for user_id
+      const checkRes = await fetch(`${SUPABASE_URL}/rest/v1/driver_kyc?user_id=eq.${encodeURIComponent(cleanUserId)}&select=id`, {
         headers: {
           'apikey': SUPABASE_KEY,
-          'Authorization': `Bearer ${SUPABASE_KEY}`,
-          'Content-Type': 'application/json',
-          'Prefer': 'resolution=merge-duplicates,return=representation'
-        },
-        body: JSON.stringify(submissionRecord)
+          'Authorization': `Bearer ${SUPABASE_KEY}`
+        }
       });
-    } catch (supaErr) {
-      console.warn('[Driver KYC API] driver_kyc table insert notice:', supaErr.message);
-    }
+      let existingRows = [];
+      if (checkRes.ok) existingRows = await checkRes.json();
 
-    // 2. Sync to Supabase `profiles` table
-    try {
-      const kycRoleMetadata = JSON.stringify({
-        kyc_status: 'pending',
+      const supaPayload = {
+        user_id: cleanUserId,
         driver_name: submissionRecord.driver_name,
+        driver_phone: submissionRecord.driver_phone,
         driver_email: submissionRecord.driver_email,
         driver_photo: submissionRecord.driver_photo,
         dl_number: submissionRecord.dl_number,
@@ -525,10 +567,60 @@ module.exports = async (req, res) => {
         aadhaar_back_photo: submissionRecord.aadhaar_back_photo,
         vehicle_number: submissionRecord.vehicle_number,
         rc_photo: submissionRecord.rc_photo,
+        status: 'pending',
         submitted_at: submissionRecord.submitted_at
+      };
+
+      if (existingRows && Array.isArray(existingRows) && existingRows.length > 0) {
+        await fetch(`${SUPABASE_URL}/rest/v1/driver_kyc?user_id=eq.${encodeURIComponent(cleanUserId)}`, {
+          method: 'PATCH',
+          headers: {
+            'apikey': SUPABASE_KEY,
+            'Authorization': `Bearer ${SUPABASE_KEY}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(supaPayload)
+        });
+      } else {
+        if (isUUID(cleanUserId)) supaPayload.id = cleanUserId;
+        await fetch(`${SUPABASE_URL}/rest/v1/driver_kyc`, {
+          method: 'POST',
+          headers: {
+            'apikey': SUPABASE_KEY,
+            'Authorization': `Bearer ${SUPABASE_KEY}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(supaPayload)
+        });
+      }
+    } catch (supaErr) {
+      console.warn('[Driver KYC API] driver_kyc table insert notice:', supaErr.message);
+    }
+
+    // 2. Sync to Supabase `profiles` table
+    try {
+      const kycRoleMetadata = JSON.stringify({
+        kyc_status: 'pending',
+        driver_name: submissionRecord.driver_name,
+        driver_email: submissionRecord.driver_email,
+        driver_phone: submissionRecord.driver_phone,
+        driver_photo: submissionRecord.driver_photo,
+        dl_number: submissionRecord.dl_number,
+        dl_front_photo: submissionRecord.dl_front_photo,
+        dl_back_photo: submissionRecord.dl_back_photo,
+        aadhaar_number: submissionRecord.aadhaar_number,
+        aadhaar_front_photo: submissionRecord.aadhaar_front_photo,
+        aadhaar_back_photo: submissionRecord.aadhaar_back_photo,
+        vehicle_number: submissionRecord.vehicle_number,
+        vehicle_name: submissionRecord.vehicle_name,
+        vehicle_color: submissionRecord.vehicle_color,
+        vehicle_type: submissionRecord.vehicle_type,
+        rc_photo: submissionRecord.rc_photo,
+        submitted_at: submissionRecord.submitted_at,
+        vehicles: submissionRecord.vehicles
       });
 
-      await fetch(`${SUPABASE_URL}/rest/v1/profiles?id=eq.${encodeURIComponent(user_id)}`, {
+      await fetch(`${SUPABASE_URL}/rest/v1/profiles?id=eq.${encodeURIComponent(cleanUserId)}`, {
         method: 'PATCH',
         headers: {
           'apikey': SUPABASE_KEY,
@@ -546,7 +638,7 @@ module.exports = async (req, res) => {
 
     // 3. Save to persistent store
     const list = getStore();
-    const existingIdx = list.findIndex(s => s.user_id === user_id || s.id === user_id);
+    const existingIdx = list.findIndex(s => s.user_id === cleanUserId || s.id === cleanUserId);
     if (existingIdx !== -1) {
       list[existingIdx] = submissionRecord;
     } else {
@@ -556,7 +648,7 @@ module.exports = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      message: 'KYC documents submitted successfully. Status is Pending Admin Approval.',
+      message: 'Documents Under Review - Pending Verification. Your account will be verified and approved within 24 to 48 hours.',
       status: 'pending',
       submission: submissionRecord
     });
