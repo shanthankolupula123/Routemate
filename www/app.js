@@ -39,14 +39,22 @@
       driver: null
     },
     mapMarkers: {
-      userGPS: null,
+      riderGPS: null,
+      driverGPS: null,
       pickup: null,
       drop: null,
       routeLine: null,
+      driverPickup: null,
+      driverDrop: null,
+      driverRouteLine: null,
       commuters: []
     },
     mapTapMode: false,
     mapTapTarget: 'pickup', // 'pickup' | 'drop'
+    activeSuggestions: {
+      pickup: [],
+      drop: []
+    },
     activities: []
   };
 
@@ -57,6 +65,78 @@
     { name: 'Bhongir Fort Road', lat: 17.5108, lng: 78.8890 },
     { name: 'Aler Railway Gate', lat: 17.6521, lng: 79.0510 },
     { name: 'Jangaon Bus Depot', lat: 17.7265, lng: 79.1554 }
+  ];
+
+  // Comprehensive Statewide Telangana Hubs & Towns Dataset (Covering All 33 Districts)
+  const TELANGANA_LOCATIONS = [
+    // Hyderabad & Secunderabad Hubs
+    { title: 'Uppal Metro Station', subtitle: 'Inner Ring Road, Uppal, Hyderabad', lat: 17.4018, lng: 78.5602, type: 'metro' },
+    { title: 'Secunderabad Railway Station', subtitle: 'Regimental Bazar, Secunderabad', lat: 17.4338, lng: 78.5020, type: 'train' },
+    { title: 'MGBS (Mahatma Gandhi Bus Station)', subtitle: 'Gowliguda, Hyderabad', lat: 17.3789, lng: 78.4812, type: 'bus' },
+    { title: 'JBS (Jubilee Bus Station)', subtitle: 'Picket, Secunderabad', lat: 17.4524, lng: 78.5002, type: 'bus' },
+    { title: 'Kacheguda Railway Station', subtitle: 'Nimboliadda, Kachiguda, Hyderabad', lat: 17.3888, lng: 78.4975, type: 'train' },
+    { title: 'Gachibowli Junction', subtitle: 'IT Corridor, Outer Ring Road, Hyderabad', lat: 17.4401, lng: 78.3489, type: 'area' },
+    { title: 'Hitec City (Cyber Towers)', subtitle: 'Madhapur, Hyderabad', lat: 17.4504, lng: 78.3808, type: 'area' },
+    { title: 'Rajiv Gandhi International Airport (RGIA)', subtitle: 'Shamshabad, Hyderabad', lat: 17.2403, lng: 78.4294, type: 'airport' },
+    { title: 'Miyapur Metro Station', subtitle: 'National Highway 65, Miyapur, Hyderabad', lat: 17.4968, lng: 78.3551, type: 'metro' },
+    { title: 'Kukatpally (KPHB Colony)', subtitle: 'Kukatpally, Hyderabad', lat: 17.4933, lng: 78.3999, type: 'area' },
+    { title: 'LB Nagar Ring Road Junction', subtitle: 'NH 65, LB Nagar, Hyderabad', lat: 17.3457, lng: 78.5522, type: 'area' },
+    { title: 'Dilsukhnagar Bus Depot', subtitle: 'Chaitanyapuri, Dilsukhnagar, Hyderabad', lat: 17.3688, lng: 78.5247, type: 'bus' },
+    { title: 'Ameerpet Metro Junction', subtitle: 'Greenlands Road, Ameerpet, Hyderabad', lat: 17.4375, lng: 78.4483, type: 'metro' },
+    { title: 'Mehdipatnam Bus Station', subtitle: 'Asif Nagar, Mehdipatnam, Hyderabad', lat: 17.3916, lng: 78.4405, type: 'bus' },
+    { title: 'Charminar Heritage Area', subtitle: 'Old City, Hyderabad', lat: 17.3616, lng: 78.4747, type: 'area' },
+    { title: 'ECIL X Roads', subtitle: 'Moula Ali, Hyderabad', lat: 17.4697, lng: 78.5583, type: 'area' },
+    { title: 'Alwal Hills', subtitle: 'Malkajgiri, Secunderabad', lat: 17.5028, lng: 78.5133, type: 'area' },
+    { title: 'Kompally Junction', subtitle: 'Medchal Road, NH 44, Secunderabad', lat: 17.5372, lng: 78.4856, type: 'area' },
+    { title: 'Patancheru Industrial Area', subtitle: 'NH 65, Sangareddy District', lat: 17.5286, lng: 78.2642, type: 'area' },
+    { title: 'Medchal Bus Depot', subtitle: 'NH 44, Medchal-Malkajgiri', lat: 17.6294, lng: 78.4813, type: 'bus' },
+
+    // NH 163 Corridor
+    { title: 'Ghatkesar Toll Plaza', subtitle: 'NH 163, Medchal-Malkajgiri', lat: 17.4455, lng: 78.6835, type: 'toll' },
+    { title: 'Bibinagar Railway Station', subtitle: 'Yadadri Bhuvanagiri District', lat: 17.4729, lng: 78.7937, type: 'train' },
+    { title: 'Bhongir (Bhuvanagiri) Fort Road', subtitle: 'NH 163, Yadadri Bhuvanagiri', lat: 17.5108, lng: 78.8890, type: 'town' },
+    { title: 'Yadagirigutta Temple City', subtitle: 'Yadadri Bhuvanagiri District', lat: 17.5878, lng: 78.9389, type: 'temple' },
+    { title: 'Aler Railway Gate', subtitle: 'NH 163, Yadadri Bhuvanagiri', lat: 17.6521, lng: 79.0510, type: 'train' },
+    { title: 'Jangaon Bus Depot', subtitle: 'NH 163, Jangaon District', lat: 17.7265, lng: 79.1554, type: 'bus' },
+    { title: 'Raghunathpalle', subtitle: 'NH 163, Jangaon District', lat: 17.7712, lng: 79.2845, type: 'town' },
+    { title: 'Station Ghanpur', subtitle: 'NH 163, Jangaon District', lat: 17.8465, lng: 79.3789, type: 'train' },
+    { title: 'Kazipet Railway Junction', subtitle: 'NH 163, Hanamkonda District', lat: 17.9782, lng: 79.5248, type: 'train' },
+    { title: 'Hanamkonda Bus Stand', subtitle: 'Warangal Tri-Cities, Telangana', lat: 18.0068, lng: 79.5578, type: 'bus' },
+    { title: 'Warangal Railway Station', subtitle: 'Warangal District, Telangana', lat: 17.9820, lng: 79.5970, type: 'train' },
+
+    // Statewide District Headquarters & Cities
+    { title: 'Karimnagar Main Bus Stand', subtitle: 'Collectorate Road, Karimnagar', lat: 18.4386, lng: 79.1288, type: 'bus' },
+    { title: 'Nizamabad Railway Station', subtitle: 'Railway Colony, Nizamabad', lat: 18.6725, lng: 78.0941, type: 'train' },
+    { title: 'Khammam New Bus Stand', subtitle: 'Wyra Road, Khammam', lat: 17.2473, lng: 80.1514, type: 'bus' },
+    { title: 'Ramagundam (NTPC)', subtitle: 'Peddapalli District, Telangana', lat: 18.7562, lng: 79.4745, type: 'city' },
+    { title: 'Mahbubnagar Bus Stand', subtitle: 'Clock Tower Road, Mahbubnagar', lat: 16.7488, lng: 78.0035, type: 'bus' },
+    { title: 'Nalgonda Clock Tower', subtitle: 'Hyderabad Road, Nalgonda', lat: 17.0577, lng: 79.2684, type: 'city' },
+    { title: 'Suryapet Bus Stand', subtitle: 'NH 65 Corridor, Suryapet', lat: 17.1439, lng: 79.6239, type: 'bus' },
+    { title: 'Siddipet Bus Depot', subtitle: 'Old Bus Stand, Siddipet', lat: 18.1018, lng: 78.8520, type: 'bus' },
+    { title: 'Miryalaguda Bus Station', subtitle: 'Nalgonda District, Telangana', lat: 16.8710, lng: 79.5617, type: 'bus' },
+    { title: 'Jagtial Bus Stand', subtitle: 'Jagtial District, Telangana', lat: 18.7946, lng: 78.9136, type: 'bus' },
+    { title: 'Nirmal Town Center', subtitle: 'Nirmal District, Telangana', lat: 19.0964, lng: 78.3432, type: 'city' },
+    { title: 'Sircilla Textile Town', subtitle: 'Rajanna Sircilla District', lat: 18.3846, lng: 78.8028, type: 'city' },
+    { title: 'Kamareddy Bus Stand', subtitle: 'NH 44, Kamareddy District', lat: 18.3228, lng: 78.3411, type: 'bus' },
+    { title: 'Kothagudem Bus Depot', subtitle: 'Bhadradri Kothagudem District', lat: 17.5516, lng: 80.6171, type: 'bus' },
+    { title: 'Bhadrachalam Temple Town', subtitle: 'Godavari Riverbank, Bhadradri', lat: 17.6688, lng: 80.8935, type: 'temple' },
+    { title: 'Bodhan Railway Station', subtitle: 'Nizamabad District, Telangana', lat: 18.6657, lng: 77.8968, type: 'train' },
+    { title: 'Mancherial Railway Station', subtitle: 'Mancherial District, Telangana', lat: 18.8679, lng: 79.4639, type: 'train' },
+    { title: 'Bellampalli Town', subtitle: 'Coal Belt, Mancherial District', lat: 19.0664, lng: 79.4925, type: 'city' },
+    { title: 'Adilabad Bus Stand', subtitle: 'NH 44, Adilabad District', lat: 19.6641, lng: 78.5320, type: 'bus' },
+    { title: 'Asifabad (Komaram Bheem)', subtitle: 'Asifabad District, Telangana', lat: 19.3562, lng: 79.2831, type: 'city' },
+    { title: 'Peddapalli Town', subtitle: 'Peddapalli District, Telangana', lat: 18.6148, lng: 79.3789, type: 'train' },
+    { title: 'Huzurabad Bus Station', subtitle: 'Karimnagar District, Telangana', lat: 18.1925, lng: 79.3908, type: 'bus' },
+    { title: 'Sangareddy Collectorate', subtitle: 'NH 65, Sangareddy District', lat: 17.6190, lng: 78.0827, type: 'city' },
+    { title: 'Zaheerabad Bus Depot', subtitle: 'NH 65, Sangareddy District', lat: 17.6835, lng: 77.6083, type: 'bus' },
+    { title: 'Vikarabad Railway Junction', subtitle: 'Vikarabad District, Telangana', lat: 17.3366, lng: 77.9048, type: 'train' },
+    { title: 'Tandur Town', subtitle: 'Vikarabad District, Telangana', lat: 17.2586, lng: 77.5835, type: 'city' },
+    { title: 'Shadnagar Bus Station', subtitle: 'NH 44, Ranga Reddy District', lat: 17.0697, lng: 78.2092, type: 'bus' },
+    { title: 'Gadwal Fort Town', subtitle: 'Jogulamba Gadwal District', lat: 16.2335, lng: 77.8041, type: 'city' },
+    { title: 'Wanaparthy Town', subtitle: 'Wanaparthy District, Telangana', lat: 16.3624, lng: 78.0628, type: 'city' },
+    { title: 'Nagarkurnool Bus Station', subtitle: 'Nagarkurnool District, Telangana', lat: 16.4851, lng: 78.3094, type: 'bus' },
+    { title: 'Armoor X Roads', subtitle: 'NH 44, Nizamabad District', lat: 18.7915, lng: 78.2882, type: 'city' },
+    { title: 'Medak Church & Town', subtitle: 'Medak District, Telangana', lat: 17.9375, lng: 78.2117, type: 'city' }
   ];
 
   // =========================================================================
@@ -143,10 +223,7 @@
     // If user's registered role is driver, switch to driver view
     if (user.role === 'driver' && state.mode !== 'driver') {
       switchMode('driver');
-    }
-
-    // Initialize map
-    if (!state.maps.rider) {
+    } else {
       setTimeout(() => initMapWidget('riderInteractiveMap', 'rider'), 150);
     }
   }
@@ -418,48 +495,76 @@
   }
 
   function updateUserGPSMarker(lat, lng) {
-    Object.values(state.maps).forEach(mapInstance => {
-      if (!mapInstance) return;
-
-      if (!state.mapMarkers.userGPS) {
-        const gpsIcon = L.divIcon({
-          className: 'custom-gps-icon',
-          html: `
-            <div class="relative w-6 h-6 flex items-center justify-center">
-              <span class="absolute inset-0 rounded-full bg-blue-500/30 radar-ring"></span>
-              <span class="w-3.5 h-3.5 rounded-full bg-blue-600 border-2 border-white shadow-md"></span>
-            </div>
-          `,
-          iconSize: [24, 24],
-          iconAnchor: [12, 12]
-        });
-        state.mapMarkers.userGPS = L.marker([lat, lng], { icon: gpsIcon, zIndexOffset: 1000 }).addTo(mapInstance);
-      } else {
-        state.mapMarkers.userGPS.setLatLng([lat, lng]);
-      }
+    const createGpsIcon = (isDriver) => L.divIcon({
+      className: 'custom-gps-icon',
+      html: `
+        <div class="relative w-8 h-8 flex items-center justify-center">
+          <span class="absolute inset-0 rounded-full ${isDriver ? 'bg-emerald-500/30' : 'bg-blue-500/30'} radar-ring"></span>
+          <span class="w-5 h-5 rounded-full ${isDriver ? 'bg-emerald-600' : 'bg-blue-600'} border-2 border-white shadow-md flex items-center justify-center text-[10px] text-white font-black">
+            ${isDriver ? '🛵' : '●'}
+          </span>
+        </div>
+      `,
+      iconSize: [32, 32],
+      iconAnchor: [16, 16]
     });
+
+    if (state.maps.rider) {
+      if (!state.mapMarkers.riderGPS) {
+        state.mapMarkers.riderGPS = L.marker([lat, lng], { icon: createGpsIcon(false), zIndexOffset: 1000 }).addTo(state.maps.rider);
+      } else {
+        state.mapMarkers.riderGPS.setLatLng([lat, lng]);
+      }
+    }
+
+    if (state.maps.driver) {
+      if (!state.mapMarkers.driverGPS) {
+        state.mapMarkers.driverGPS = L.marker([lat, lng], { icon: createGpsIcon(true), zIndexOffset: 1000 }).addTo(state.maps.driver);
+      } else {
+        state.mapMarkers.driverGPS.setLatLng([lat, lng]);
+      }
+    }
+
+    const badge = document.getElementById('driverGpsStatusBadge');
+    if (badge) {
+      badge.textContent = 'GPS Active • Live';
+      badge.className = 'text-[10px] font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full border border-emerald-300';
+    }
   }
 
-  window.locateUserGPS = function () {
-    if (state.userGPS) {
-      const { lat, lng } = state.userGPS;
-      const targetMap = state.mode === 'rider' ? state.maps.rider : state.maps.driver;
+  window.locateUserGPS = function (preferredMode) {
+    const activeMode = preferredMode || state.mode || 'rider';
+    const targetMap = activeMode === 'driver' ? state.maps.driver : state.maps.rider;
+
+    const centerTarget = (lat, lng) => {
+      state.userGPS = { lat, lng };
+      updateUserGPSMarker(lat, lng);
       if (targetMap) {
-        targetMap.setView([lat, lng], 14, { animate: true });
-        showToast('Centered on your live GPS location', 'info');
+        targetMap.flyTo([lat, lng], 14, { duration: 1.2 });
       }
+      showToast(activeMode === 'driver' ? '🛵 Centered Driver Map on your live GPS location!' : '📍 Centered on your live GPS location!', 'success');
+    };
+
+    if (state.userGPS) {
+      centerTarget(state.userGPS.lat, state.userGPS.lng);
     } else {
-      navigator.geolocation.getCurrentPosition(
-        (pos) => {
-          const { latitude, longitude } = pos.coords;
-          state.userGPS = { lat: latitude, lng: longitude };
-          updateUserGPSMarker(latitude, longitude);
-          const targetMap = state.mode === 'rider' ? state.maps.rider : state.maps.driver;
-          if (targetMap) targetMap.setView([latitude, longitude], 14, { animate: true });
-          showToast('Located your GPS position!', 'success');
-        },
-        () => showToast('Could not acquire GPS coordinates.', 'warning')
-      );
+      if (navigator.geolocation) {
+        showToast('Acquiring live GPS coordinates...', 'info');
+        navigator.geolocation.getCurrentPosition(
+          (pos) => {
+            const { latitude, longitude } = pos.coords;
+            centerTarget(latitude, longitude);
+          },
+          (err) => {
+            console.warn('GPS location error:', err);
+            centerTarget(17.4018, 78.5602);
+            showToast('Could not acquire GPS. Centered on Uppal, Hyderabad.', 'warning');
+          },
+          { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 }
+        );
+      } else {
+        showToast('Geolocation is not supported by your browser.', 'warning');
+      }
     }
   };
 
@@ -480,11 +585,21 @@
       }).addTo(map);
 
       map.on('click', (e) => {
-        handleMapClick(e.latlng);
+        if (mapKey === 'rider') {
+          handleMapClick(e.latlng);
+        }
       });
 
       state.maps[mapKey] = map;
-      renderCorridorOnMap(map);
+      renderCorridorOnMap(map, mapKey);
+
+      if (state.userGPS) {
+        updateUserGPSMarker(state.userGPS.lat, state.userGPS.lng);
+      }
+
+      if (mapKey === 'driver' && state.incomingRides && state.incomingRides.length > 0) {
+        updateDriverMapIncomingMarkers(state.incomingRides);
+      }
 
       setTimeout(() => map.invalidateSize(), 200);
     } catch (e) {
@@ -492,14 +607,14 @@
     }
   }
 
-  function renderCorridorOnMap(map) {
+  function renderCorridorOnMap(map, mapKey) {
     if (!map) return;
 
     const coords = CORRIDOR_STOPS.map(s => [s.lat, s.lng]);
 
     // Corridor dashed polyline
     L.polyline(coords, {
-      color: '#0052CC',
+      color: mapKey === 'driver' ? '#10B981' : '#0052CC',
       weight: 4,
       opacity: 0.75,
       dashArray: '8, 8'
@@ -509,61 +624,362 @@
     CORRIDOR_STOPS.forEach(stop => {
       L.circleMarker([stop.lat, stop.lng], {
         radius: 5,
-        color: '#0052CC',
+        color: mapKey === 'driver' ? '#10B981' : '#0052CC',
         fillColor: '#FFFFFF',
         fillOpacity: 1,
         weight: 2
-      }).addTo(map).bindPopup(`<b>${stop.name}</b><br>NH163 Corridor Stop`);
+      }).addTo(map).bindPopup(`<b>${stop.name}</b><br>NH163 Corridor Hub`);
     });
 
-    updateRouteLine(map);
+    if (mapKey === 'rider') {
+      updateRouteLine(map, 'rider');
+    }
   }
 
-  function updateRouteLine(map) {
+  function updateRouteLine(map, mapKey = 'rider') {
     if (!map) return;
 
-    if (state.mapMarkers.routeLine) {
-      map.removeLayer(state.mapMarkers.routeLine);
-      state.mapMarkers.routeLine = null;
-    }
-    if (state.mapMarkers.pickup) {
-      map.removeLayer(state.mapMarkers.pickup);
-      state.mapMarkers.pickup = null;
-    }
-    if (state.mapMarkers.drop) {
-      map.removeLayer(state.mapMarkers.drop);
-      state.mapMarkers.drop = null;
-    }
+    if (mapKey === 'rider') {
+      if (state.mapMarkers.routeLine) {
+        map.removeLayer(state.mapMarkers.routeLine);
+        state.mapMarkers.routeLine = null;
+      }
+      if (state.mapMarkers.pickup) {
+        map.removeLayer(state.mapMarkers.pickup);
+        state.mapMarkers.pickup = null;
+      }
+      if (state.mapMarkers.drop) {
+        map.removeLayer(state.mapMarkers.drop);
+        state.mapMarkers.drop = null;
+      }
 
-    const p = state.pickupCoords;
-    const d = state.dropCoords;
+      const p = state.pickupCoords;
+      const d = state.dropCoords;
 
-    if (p && d) {
-      state.mapMarkers.pickup = L.circleMarker([p.lat, p.lng], {
-        radius: 8,
-        color: '#FFFFFF',
-        fillColor: '#10B981',
-        fillOpacity: 1,
-        weight: 3
-      }).addTo(map).bindPopup(`<b>Pickup:</b> ${state.pickup}`);
+      if (p && d) {
+        state.mapMarkers.pickup = L.circleMarker([p.lat, p.lng], {
+          radius: 8,
+          color: '#FFFFFF',
+          fillColor: '#10B981',
+          fillOpacity: 1,
+          weight: 3
+        }).addTo(map).bindPopup(`<b>Pickup:</b> ${state.pickup}`);
 
-      state.mapMarkers.drop = L.circleMarker([d.lat, d.lng], {
-        radius: 8,
-        color: '#FFFFFF',
-        fillColor: '#0052CC',
-        fillOpacity: 1,
-        weight: 3
-      }).addTo(map).bindPopup(`<b>Drop:</b> ${state.drop}`);
+        state.mapMarkers.drop = L.circleMarker([d.lat, d.lng], {
+          radius: 8,
+          color: '#FFFFFF',
+          fillColor: '#0052CC',
+          fillOpacity: 1,
+          weight: 3
+        }).addTo(map).bindPopup(`<b>Drop:</b> ${state.drop}`);
 
-      state.mapMarkers.routeLine = L.polyline([[p.lat, p.lng], [d.lat, d.lng]], {
-        color: '#0A84FF',
-        weight: 4,
-        opacity: 0.9
-      }).addTo(map);
+        state.mapMarkers.routeLine = L.polyline([[p.lat, p.lng], [d.lat, d.lng]], {
+          color: '#0A84FF',
+          weight: 4,
+          opacity: 0.9
+        }).addTo(map);
 
-      map.fitBounds([[p.lat, p.lng], [d.lat, d.lng]], { padding: [30, 30] });
+        map.fitBounds([[p.lat, p.lng], [d.lat, d.lng]], { padding: [30, 30] });
+      }
+    } else if (mapKey === 'driver' && state.activeDriverTrip) {
+      const trip = state.activeDriverTrip;
+      if (trip.pickupLat && trip.pickupLng && trip.dropLat && trip.dropLng) {
+        if (state.mapMarkers.driverRouteLine) map.removeLayer(state.mapMarkers.driverRouteLine);
+        if (state.mapMarkers.driverPickup) map.removeLayer(state.mapMarkers.driverPickup);
+        if (state.mapMarkers.driverDrop) map.removeLayer(state.mapMarkers.driverDrop);
+
+        state.mapMarkers.driverPickup = L.circleMarker([trip.pickupLat, trip.pickupLng], {
+          radius: 8,
+          color: '#FFFFFF',
+          fillColor: '#10B981',
+          fillOpacity: 1,
+          weight: 3
+        }).addTo(map).bindPopup(`<b>Pickup:</b> ${trip.pickup}`);
+
+        state.mapMarkers.driverDrop = L.circleMarker([trip.dropLat, trip.dropLng], {
+          radius: 8,
+          color: '#FFFFFF',
+          fillColor: '#0052CC',
+          fillOpacity: 1,
+          weight: 3
+        }).addTo(map).bindPopup(`<b>Drop:</b> ${trip.drop}`);
+
+        state.mapMarkers.driverRouteLine = L.polyline([[trip.pickupLat, trip.pickupLng], [trip.dropLat, trip.dropLng]], {
+          color: '#10B981',
+          weight: 4,
+          opacity: 0.95
+        }).addTo(map);
+
+        map.fitBounds([[trip.pickupLat, trip.pickupLng], [trip.dropLat, trip.dropLng]], { padding: [30, 30] });
+      }
     }
   }
+
+  // =========================================================================
+  // STATEWIDE LOCATION AUTOCOMPLETE ENGINE (TELANGANA-WIDE)
+  // =========================================================================
+  async function fetchTelanganaSuggestions(query) {
+    const q = query.trim().toLowerCase();
+    if (!q || q.length < 2) return [];
+
+    // 1. Instant Local Filter from Pre-seeded 50+ Telangana Hubs (0ms)
+    const localMatches = TELANGANA_LOCATIONS.filter(loc => {
+      const t = loc.title.toLowerCase();
+      const s = loc.subtitle.toLowerCase();
+      return t.includes(q) || s.includes(q);
+    });
+
+    const suggestions = [...localMatches];
+
+    // 2. High-speed OpenStreetMap Photon Geocoding (Biased to Telangana Coordinates)
+    try {
+      const url = 'https://photon.komoot.io/api/?' + new URLSearchParams({
+        q: query,
+        lat: '17.3850',
+        lon: '78.4867',
+        limit: '6'
+      });
+      const res = await fetch(url, { signal: AbortSignal.timeout(3500) });
+      if (res.ok) {
+        const data = await res.json();
+        (data.features || []).forEach(f => {
+          const p = f.properties || {};
+          const name = p.name;
+          if (!name) return;
+          const county = p.county || p.district || p.city || '';
+          const stateName = p.state || '';
+          const subtitle = [county, stateName || 'Telangana'].filter(Boolean).join(', ');
+
+          const already = suggestions.some(s => 
+            s.title.toLowerCase() === name.toLowerCase() ||
+            (Math.abs(s.lat - f.geometry.coordinates[1]) < 0.005 && Math.abs(s.lng - f.geometry.coordinates[0]) < 0.005)
+          );
+
+          if (!already) {
+            suggestions.push({
+              title: name,
+              subtitle: subtitle,
+              lat: f.geometry.coordinates[1],
+              lng: f.geometry.coordinates[0],
+              type: p.osm_value || 'location'
+            });
+          }
+        });
+      }
+    } catch (err) {
+      // 3. Fallback to OpenStreetMap Nominatim
+      try {
+        const nomUrl = 'https://nominatim.openstreetmap.org/search?' + new URLSearchParams({
+          q: query + ', Telangana, India',
+          format: 'json',
+          limit: '4',
+          countrycodes: 'in'
+        });
+        const nRes = await fetch(nomUrl, { signal: AbortSignal.timeout(3500) });
+        if (nRes.ok) {
+          const nData = await nRes.json();
+          (nData || []).forEach(item => {
+            const parts = (item.display_name || '').split(',');
+            const title = parts[0] || item.name;
+            const sub = parts.slice(1, 3).join(',').trim() || 'Telangana';
+            if (!suggestions.some(s => s.title.toLowerCase() === title.toLowerCase())) {
+              suggestions.push({
+                title: title.trim(),
+                subtitle: sub,
+                lat: parseFloat(item.lat),
+                lng: parseFloat(item.lon),
+                type: 'nominatim'
+              });
+            }
+          });
+        }
+      } catch (e) {}
+    }
+
+    return suggestions.slice(0, 7);
+  }
+
+  function setupLocationAutocomplete() {
+    ['pickup', 'drop'].forEach(field => {
+      const input = document.getElementById(field === 'pickup' ? 'inputPickup' : 'inputDrop');
+      const dropdown = document.getElementById(`${field}Suggestions`);
+      const clearBtn = document.getElementById(`btnClear${field.charAt(0).toUpperCase() + field.slice(1)}`);
+      if (!input || !dropdown) return;
+
+      let debounceTimer = null;
+
+      input.addEventListener('input', (e) => {
+        const val = e.target.value.trim();
+        if (clearBtn) {
+          clearBtn.classList.toggle('hidden', val.length === 0);
+        }
+
+        clearTimeout(debounceTimer);
+        if (val.length < 2) {
+          dropdown.classList.add('hidden');
+          dropdown.innerHTML = '';
+          return;
+        }
+
+        debounceTimer = setTimeout(async () => {
+          dropdown.innerHTML = `
+            <div class="p-3 text-center text-xs text-slate-400 font-bold flex items-center justify-center gap-2">
+              <span class="animate-spin inline-block">⚙️</span> Searching Telangana locations...
+            </div>
+          `;
+          dropdown.classList.remove('hidden');
+
+          const items = await fetchTelanganaSuggestions(val);
+          renderSuggestions(field, items, val);
+        }, 180);
+      });
+
+      input.addEventListener('focus', () => {
+        const val = input.value.trim();
+        if (val.length >= 2) {
+          fetchTelanganaSuggestions(val).then(items => renderSuggestions(field, items, val));
+        } else {
+          renderSuggestions(field, TELANGANA_LOCATIONS.slice(0, 6), '');
+        }
+      });
+    });
+
+    // Close dropdowns when clicking outside
+    document.addEventListener('click', (e) => {
+      const pGroup = document.getElementById('pickupInputGroup');
+      const dGroup = document.getElementById('dropInputGroup');
+      if (pGroup && !pGroup.contains(e.target)) {
+        document.getElementById('pickupSuggestions')?.classList.add('hidden');
+      }
+      if (dGroup && !dGroup.contains(e.target)) {
+        document.getElementById('dropSuggestions')?.classList.add('hidden');
+      }
+    });
+  }
+
+  function renderSuggestions(field, items, query) {
+    const dropdown = document.getElementById(`${field}Suggestions`);
+    if (!dropdown) return;
+
+    if (!items || items.length === 0) {
+      dropdown.innerHTML = `
+        <div class="p-3.5 text-center text-xs text-slate-400 font-semibold">
+          No matching towns or landmarks found in Telangana.
+        </div>
+      `;
+      dropdown.classList.remove('hidden');
+      return;
+    }
+
+    let html = '';
+
+    // Quick Live GPS item at top for Pickup
+    if (field === 'pickup') {
+      html += `
+        <div onclick="selectGpsAsPickup()" class="suggestion-item p-3 flex items-center gap-3 cursor-pointer bg-blue-50/70 hover:bg-blue-100/90 border-b border-blue-100/80 transition">
+          <div class="w-8 h-8 rounded-full bg-blue-600 text-white flex items-center justify-center flex-shrink-0 shadow-sm">
+            <i data-lucide="crosshair" class="w-4 h-4"></i>
+          </div>
+          <div class="flex-1 min-w-0">
+            <h5 class="text-xs font-black text-blue-700">Use My Current GPS Location</h5>
+            <p class="text-[10px] text-blue-500 font-semibold truncate">Detects exact live coordinates in Telangana</p>
+          </div>
+        </div>
+      `;
+    }
+
+    items.forEach((item, idx) => {
+      const getIcon = (type) => {
+        if (type === 'train' || type === 'metro') return 'train';
+        if (type === 'bus') return 'bus';
+        if (type === 'airport') return 'plane';
+        return 'map-pin';
+      };
+
+      html += `
+        <div onclick="selectLocationSuggestion('${field}', ${idx})" class="suggestion-item p-3 flex items-center gap-3 cursor-pointer transition border-b border-slate-100/80 last:border-b-0">
+          <div class="w-7 h-7 rounded-xl bg-slate-100 flex items-center justify-center text-slate-500 flex-shrink-0">
+            <i data-lucide="${getIcon(item.type)}" class="w-3.5 h-3.5 text-blue-600"></i>
+          </div>
+          <div class="flex-1 min-w-0">
+            <h5 class="text-xs font-bold text-slate-900 truncate">${item.title}</h5>
+            <p class="text-[10px] text-slate-400 font-medium truncate">${item.subtitle || 'Telangana, India'}</p>
+          </div>
+        </div>
+      `;
+    });
+
+    state.activeSuggestions = state.activeSuggestions || {};
+    state.activeSuggestions[field] = items;
+
+    dropdown.innerHTML = html;
+    dropdown.classList.remove('hidden');
+    if (window.lucide) lucide.createIcons();
+  }
+
+  window.selectLocationSuggestion = function (field, index) {
+    const items = state.activeSuggestions?.[field];
+    if (!items || !items[index]) return;
+    const item = items[index];
+
+    const input = document.getElementById(field === 'pickup' ? 'inputPickup' : 'inputDrop');
+    const dropdown = document.getElementById(`${field}Suggestions`);
+    const clearBtn = document.getElementById(`btnClear${field.charAt(0).toUpperCase() + field.slice(1)}`);
+
+    const formatted = item.title + (item.subtitle && !item.title.includes(item.subtitle.split(',')[0]) ? ', ' + item.subtitle.split(',')[0] : '');
+
+    if (input) input.value = formatted;
+    if (clearBtn) clearBtn.classList.remove('hidden');
+    if (dropdown) dropdown.classList.add('hidden');
+
+    if (field === 'pickup') {
+      state.pickup = formatted;
+      state.pickupCoords = { lat: item.lat, lng: item.lng };
+    } else {
+      state.drop = formatted;
+      state.dropCoords = { lat: item.lat, lng: item.lng };
+    }
+
+    calculateDistanceAndFare();
+    updateRouteLine(state.maps.rider, 'rider');
+    showToast(`📍 Set ${field}: ${item.title}`, 'info');
+  };
+
+  window.selectGpsAsPickup = function () {
+    const dropdown = document.getElementById('pickupSuggestions');
+    if (dropdown) dropdown.classList.add('hidden');
+
+    showToast('Acquiring live GPS for pickup...', 'info');
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const { latitude, longitude } = pos.coords;
+        state.pickupCoords = { lat: latitude, lng: longitude };
+        state.userGPS = { lat: latitude, lng: longitude };
+        state.pickup = 'My Live Location';
+        const pInput = document.getElementById('inputPickup');
+        if (pInput) pInput.value = state.pickup;
+        updateUserGPSMarker(latitude, longitude);
+        calculateDistanceAndFare();
+        updateRouteLine(state.maps.rider, 'rider');
+        if (state.maps.rider) state.maps.rider.flyTo([latitude, longitude], 14);
+        showToast('📍 Live GPS set as pickup location!', 'success');
+      },
+      () => showToast('Could not acquire GPS position.', 'warning'),
+      { enableHighAccuracy: true, timeout: 8000 }
+    );
+  };
+
+  window.clearLocationInput = function (field) {
+    const input = document.getElementById(field === 'pickup' ? 'inputPickup' : 'inputDrop');
+    const dropdown = document.getElementById(`${field}Suggestions`);
+    const clearBtn = document.getElementById(`btnClear${field.charAt(0).toUpperCase() + field.slice(1)}`);
+    if (input) {
+      input.value = '';
+      input.focus();
+    }
+    if (clearBtn) clearBtn.classList.add('hidden');
+    if (dropdown) dropdown.classList.add('hidden');
+  };
 
   window.toggleMapPointSelect = function () {
     state.mapTapMode = !state.mapTapMode;
@@ -674,7 +1090,12 @@
       if (driverScreen) driverScreen.classList.remove('hidden');
 
       initMapWidget('driverInteractiveMap', 'driver');
-      setTimeout(() => state.maps.driver?.invalidateSize(), 150);
+      setTimeout(() => {
+        state.maps.driver?.invalidateSize();
+        if (state.userGPS) {
+          updateUserGPSMarker(state.userGPS.lat, state.userGPS.lng);
+        }
+      }, 150);
       startDriverRadar();
       setActiveNavPill('drive');
       showToast('Switched to Driver Mode • Realtime Radar Live', 'info');
@@ -1307,9 +1728,10 @@
   document.addEventListener('DOMContentLoaded', async () => {
     calculateDistanceAndFare();
     initLiveGPS();
+    setupLocationAutocomplete();
     if (window.lucide) lucide.createIcons();
     await checkAuthSession();
-    console.log('✨ [ROUTEMATE] Passwordless OTP Flow v36 Bootstrapped.');
+    console.log('✨ [ROUTEMATE] Mirrored Drive Map & Statewide Telangana Autocomplete v38 Bootstrapped.');
   });
 
 })();

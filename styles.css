@@ -238,3 +238,31 @@ body {
   opacity: 1;
   transform: translateX(-50%) translateY(0);
 }
+
+/* Location Autocomplete Dropdown Styles */
+.suggestion-dropdown {
+  animation: dropdown-slide 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes dropdown-slide {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.suggestion-item {
+  transition: all 0.15s ease;
+}
+
+.suggestion-item:hover, .suggestion-item.active {
+  background-color: #EFF6FF;
+}
+
+.suggestion-item:active {
+  background-color: #DBEAFE;
+}
