@@ -1,7 +1,6 @@
 /**
- * Routemate - Supabase Realtime & REST Client (v33 Pristine Architecture)
- * Official Royal Blue Brand Redesign
- * Direct, highly-reliable matching engine with strict session isolation
+ * Routemate - Supabase Realtime & Auth Client (v34 Production Grade)
+ * Full Supabase Auth (Email/Pass + Google OAuth) + Realtime Postgres Changes + Direct REST Fallback
  */
 
 (function (window) {
@@ -11,6 +10,24 @@
     url: 'https://hjieeilzfbvubkhmlmdg.supabase.co',
     publishableKey: 'sb_publishable_FD8-opedLq151SNuBbWp9g_bLI5hB_a'
   };
+
+  // Initialize official Supabase client instance with auto session persistence
+  let supabase = null;
+  if (typeof window.supabase !== 'undefined' && typeof window.supabase.createClient === 'function') {
+    try {
+      supabase = window.supabase.createClient(SUPABASE_CONFIG.url, SUPABASE_CONFIG.publishableKey, {
+        auth: {
+          persistSession: true,
+          autoRefreshToken: true,
+          detectSessionInUrl: true,
+          storage: window.localStorage
+        }
+      });
+      console.log('✅ [SUPABASE CLIENT] Initialized with Realtime & Auth support.');
+    } catch (e) {
+      console.warn('⚠️ [SUPABASE CLIENT] Error initializing supabase client:', e);
+    }
+  }
 
   /**
    * Direct fetch helper to Supabase PostgREST
@@ -65,10 +82,101 @@
     }
   }
 
+  // =========================================================================
+  // SUPABASE AUTHENTICATION MODULE
+  // =========================================================================
+  const auth = {
+    /**
+     * Email & Password Sign Up
+     */
+    async signUp(email, password, { name, role, phone } = {}) {
+      if (!supabase) throw new Error('Supabase SDK not loaded');
+
+      const { data, error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          data: {
+            name: name || 'Verified Commuter',
+            role: role || 'rider',
+            phone: phone || '+91 98480 23145',
+            avatar: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=120&h=120&q=80'
+          }
+        }
+      });
+
+      if (error) throw error;
+      return data;
+    },
+
+    /**
+     * Email & Password Login
+     */
+    async signIn(email, password) {
+      if (!supabase) throw new Error('Supabase SDK not loaded');
+
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email,
+        password
+      });
+
+      if (error) throw error;
+      return data;
+    },
+
+    /**
+     * Google OAuth Login
+     */
+    async signInWithGoogle() {
+      if (!supabase) throw new Error('Supabase SDK not loaded');
+
+      const { data, error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: window.location.origin
+        }
+      });
+
+      if (error) throw error;
+      return data;
+    },
+
+    /**
+     * Sign Out
+     */
+    async signOut() {
+      if (supabase) {
+        await supabase.auth.signOut().catch(() => {});
+      }
+      localStorage.removeItem('routemate_user');
+      localStorage.removeItem('routemate_auth_token');
+    },
+
+    /**
+     * Get Current Active Session
+     */
+    async getSession() {
+      if (!supabase) return null;
+      const { data } = await supabase.auth.getSession();
+      return data?.session || null;
+    },
+
+    /**
+     * Listen to Auth state changes
+     */
+    onAuthStateChange(callback) {
+      if (!supabase) return;
+      return supabase.auth.onAuthStateChange((event, session) => {
+        if (typeof callback === 'function') {
+          callback(event, session);
+        }
+      });
+    }
+  };
+
   /**
    * Session Isolation Filter:
-   * Prevents a user on Device B / Driver Mode from seeing or accepting their own booked ride.
-   * Cross-device testing with two separate accounts (Device A vs Device B) works cleanly.
+   * Prevents a user on Driver Mode from seeing or accepting their own booked ride.
    */
   function isSelfBookedRide(rideRow, currentUser) {
     if (!rideRow || !currentUser) return false;
@@ -141,11 +249,20 @@
     const riderPhone = notes.riderPhone || '+91 98480 23145';
     const riderRating = notes.riderRating || 4.9;
 
+    const pickupLat = notes.pickupLat || notes.pickup_lat || 17.4018;
+    const pickupLng = notes.pickupLng || notes.pickup_lng || 78.5602;
+    const dropLat = notes.dropLat || notes.drop_lat || 17.7265;
+    const dropLng = notes.dropLng || notes.drop_lng || 79.1554;
+
     return {
       id: rideId,
       dbId: row.id,
       pickup,
       drop,
+      pickupLat,
+      pickupLng,
+      dropLat,
+      dropLng,
       fare,
       distance,
       pin,
@@ -161,10 +278,14 @@
     };
   }
 
-  // Matching Engine Module
+  // =========================================================================
+  // REALTIME MATCHING ENGINE (REALTIME CHANNELS + 1S POLLING FAILSAFE)
+  // =========================================================================
   const matching = {
     _riderTimer: null,
     _driverTimer: null,
+    _realtimeChannel: null,
+    _riderChannel: null,
     _lastAlertRideId: null,
 
     /**
@@ -192,6 +313,10 @@
         pin: pin,
         pickup: reqData.pickup,
         drop: reqData.drop,
+        pickupLat: reqData.pickupLat || 17.4018,
+        pickupLng: reqData.pickupLng || 78.5602,
+        dropLat: reqData.dropLat || 17.7265,
+        dropLng: reqData.dropLng || 79.1554,
         vehicleType: vehicleType,
         createdAt: new Date().toISOString()
       };
@@ -210,7 +335,7 @@
         per_seat_price: fare,
         payment_preference: 'upi',
         verified: true,
-        status: 'active', // Allowed by DB check constraint
+        status: 'active',
         notes: JSON.stringify(notesPayload)
       };
 
@@ -234,12 +359,53 @@
     },
 
     /**
-     * RIDER: Start 1-second polling loop to detect driver acceptance
+     * RIDER: Start Realtime + Polling listener for driver acceptance
      */
     startRiderPolling(requestId, onStatusChange) {
       this.stopRiderPolling();
-      console.log('📡 [ROUTEMATE RIDER] Started polling for driver acceptance:', requestId);
+      console.log('📡 [ROUTEMATE RIDER] Subscribing to ride acceptance:', requestId);
 
+      // 1. Supabase Realtime Channel
+      if (supabase) {
+        try {
+          this._riderChannel = supabase
+            .channel(`rider-ride-${requestId}`)
+            .on(
+              'postgres_changes',
+              {
+                event: 'UPDATE',
+                schema: 'public',
+                table: 'rides',
+                filter: `vehicle_number=eq.${requestId}`
+              },
+              (payload) => {
+                console.log('⚡ [REALTIME RIDER UPDATE RECEIVED]:', payload);
+                if (payload.new) {
+                  let notes = {};
+                  try { notes = JSON.parse(payload.new.notes || '{}'); } catch(e){}
+                  if (notes.status === 'driver_accepted' || notes.status === 'ride_started' || payload.new.status === 'completed') {
+                    this.stopRiderPolling();
+                    if (typeof onStatusChange === 'function') {
+                      onStatusChange({
+                        status: notes.status || 'driver_accepted',
+                        driver: notes.driver,
+                        pin: notes.pin,
+                        fare: payload.new.per_seat_price || notes.fare,
+                        pickup: payload.new.pickup,
+                        drop: payload.new.drop_location
+                      });
+                    }
+                  }
+                }
+              }
+            )
+            .subscribe();
+        } catch(e) {
+          console.warn('Realtime rider channel error:', e);
+        }
+      }
+
+      // 2. Failsafe 1-second Polling
       this._riderTimer = setInterval(async () => {
         try {
           const resp = await supabaseRest(`rides?vehicle_number=eq.${encodeURIComponent(requestId)}&select=*&limit=1`);
@@ -249,7 +415,7 @@
             try { notes = JSON.parse(row.notes || '{}'); } catch (e) {}
 
             if (notes.status === 'driver_accepted' || notes.status === 'ride_started' || row.status === 'completed') {
-              console.log('🎉 [ROUTEMATE RIDER] Driver accepted ride:', notes.driver);
+              console.log('🎉 [ROUTEMATE RIDER] Driver accepted ride via poll:', notes.driver);
               this.stopRiderPolling();
               if (typeof onStatusChange === 'function') {
                 onStatusChange({
@@ -274,14 +440,18 @@
         clearInterval(this._riderTimer);
         this._riderTimer = null;
       }
+      if (this._riderChannel && supabase) {
+        supabase.removeChannel(this._riderChannel);
+        this._riderChannel = null;
+      }
     },
 
     /**
-     * DRIVER: Start 1-second polling loop to fetch incoming ride requests
+     * DRIVER: Realtime Channel + 1-second radar polling loop
      */
     startDriverPolling(currentUser, onRidesUpdated) {
       this.stopDriverPolling();
-      console.log('📡 [ROUTEMATE DRIVER] Started direct 1-second radar polling loop');
+      console.log('📡 [ROUTEMATE DRIVER] Starting Realtime + Radar Polling for user:', currentUser?.name);
 
       const fetchRides = async () => {
         try {
@@ -296,7 +466,6 @@
             let notes = {};
             try { notes = JSON.parse(row.notes || '{}'); } catch (e) {}
 
-            // Must be an active searching request
             const isCompleted = row.status === 'completed' || row.status === 'cancelled' ||
                                 notes.status === 'driver_accepted' || notes.status === 'ride_started' ||
                                 notes.status === 'ride_completed' || notes.status === 'cancelled';
@@ -335,6 +504,28 @@
         }
       };
 
+      // 1. Supabase Realtime Channel for Instant 0ms Latency
+      if (supabase) {
+        try {
+          this._realtimeChannel = supabase
+            .channel('driver-rides-feed')
+            .on(
+              'postgres_changes',
+              { event: '*', schema: 'public', table: 'rides' },
+              (payload) => {
+                console.log('⚡ [REALTIME POSTGRES CHANGE DETECTED]:', payload.eventType);
+                fetchRides();
+              }
+            )
+            .subscribe((status) => {
+              console.log('📡 [REALTIME CHANNEL STATUS]:', status);
+            });
+        } catch (e) {
+          console.warn('Realtime channel error:', e);
+        }
+      }
+
+      // 2. Continuous 1-second Polling Failsafe
       fetchRides();
       this._driverTimer = setInterval(fetchRides, 1000);
     },
@@ -343,6 +534,10 @@
       if (this._driverTimer) {
         clearInterval(this._driverTimer);
         this._driverTimer = null;
+      }
+      if (this._realtimeChannel && supabase) {
+        supabase.removeChannel(this._realtimeChannel);
+        this._realtimeChannel = null;
       }
     },
 
@@ -370,7 +565,7 @@
       const resp = await supabaseRest(`rides?vehicle_number=eq.${encodeURIComponent(requestId)}`, {
         method: 'PATCH',
         body: {
-          status: 'completed', // Immediately removes from other drivers' radars
+          status: 'completed',
           notes: updateNotes
         }
       });
@@ -378,9 +573,6 @@
       return { success: resp.ok };
     },
 
-    /**
-     * Start ride after verifying PIN
-     */
     async startRide(requestId) {
       const updateNotes = JSON.stringify({
         status: 'ride_started',
@@ -392,9 +584,6 @@
       });
     },
 
-    /**
-     * Complete ride and confirm payment
-     */
     async completeRide(requestId) {
       const updateNotes = JSON.stringify({
         status: 'ride_completed',
@@ -406,9 +595,6 @@
       });
     },
 
-    /**
-     * Cancel active ride
-     */
     async cancelRequest(requestId) {
       this.stopRiderPolling();
       return await supabaseRest(`rides?vehicle_number=eq.${encodeURIComponent(requestId)}`, {
@@ -420,6 +606,8 @@
 
   // Export clean global database object
   window.db = {
+    supabase,
+    auth,
     supabaseRest,
     matching,
     isSelfBookedRide,

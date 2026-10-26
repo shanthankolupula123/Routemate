@@ -35,8 +35,11 @@
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
+  <!-- Official Supabase JavaScript SDK v2 -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
   <!-- Official Brand Stylesheet -->
-  <link rel="stylesheet" href="styles.css?v=20261026_redesign_v33" />
+  <link rel="stylesheet" href="styles.css?v=20261026_realtime_auth_v34" />
 </head>
 <body class="bg-slate-50 min-h-screen text-slate-800 pb-28 select-none">
 
@@ -59,11 +62,13 @@
         </div>
       </div>
 
-      <!-- User Profile & Quick Switcher -->
-      <button type="button" onclick="openProfileSwitcherModal()" class="flex items-center gap-2 p-1.5 pl-2.5 rounded-full bg-slate-100 hover:bg-slate-200 text-xs font-semibold text-slate-700 transition cursor-pointer">
-        <span id="headerUserName" class="max-w-[90px] truncate">Commuter</span>
-        <img id="headerUserAvatar" src="https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=80&h=80&q=80" alt="Avatar" class="w-7 h-7 rounded-full object-cover border border-white shadow-sm" />
-      </button>
+      <!-- Auth State & Profile Switcher -->
+      <div class="flex items-center gap-2">
+        <button type="button" onclick="openAuthModal()" id="btnHeaderAuth" class="flex items-center gap-2 p-1.5 pl-2.5 rounded-full bg-slate-100 hover:bg-slate-200 text-xs font-semibold text-slate-700 transition cursor-pointer">
+          <span id="headerUserName" class="max-w-[90px] truncate">Sign In</span>
+          <img id="headerUserAvatar" src="https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=80&h=80&q=80" alt="Avatar" class="w-7 h-7 rounded-full object-cover border border-white shadow-sm" />
+        </button>
+      </div>
     </div>
 
     <!-- Mode Selector: Rider vs Driver Slider -->
@@ -102,16 +107,16 @@
           </span>
         </div>
         <div class="flex items-center gap-2 overflow-x-auto pb-1.5 no-scrollbar">
-          <button type="button" onclick="setQuickRoute('Uppal Metro, Hyderabad', 'Jangaon Bus Depot')" class="flex-shrink-0 px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-bold rounded-full border border-blue-200 transition cursor-pointer">
+          <button type="button" onclick="setQuickRoute('Uppal Metro, Hyderabad', 'Jangaon Bus Depot', 17.4018, 78.5602, 17.7265, 79.1554)" class="flex-shrink-0 px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-bold rounded-full border border-blue-200 transition cursor-pointer">
             Uppal ➔ Jangaon
           </button>
-          <button type="button" onclick="setQuickRoute('Ghatkesar Toll Plaza', 'Bhongir Fort Road')" class="flex-shrink-0 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-full transition cursor-pointer">
+          <button type="button" onclick="setQuickRoute('Ghatkesar Toll Plaza', 'Bhongir Fort Road', 17.4455, 78.6835, 17.5108, 78.8890)" class="flex-shrink-0 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-full transition cursor-pointer">
             Ghatkesar ➔ Bhongir
           </button>
-          <button type="button" onclick="setQuickRoute('Bhongir Fort Road', 'Aler Railway Gate')" class="flex-shrink-0 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-full transition cursor-pointer">
+          <button type="button" onclick="setQuickRoute('Bhongir Fort Road', 'Aler Railway Gate', 17.5108, 78.8890, 17.6521, 79.0510)" class="flex-shrink-0 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-full transition cursor-pointer">
             Bhongir ➔ Aler
           </button>
-          <button type="button" onclick="setQuickRoute('Aler Railway Gate', 'Jangaon Bus Depot')" class="flex-shrink-0 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-full transition cursor-pointer">
+          <button type="button" onclick="setQuickRoute('Aler Railway Gate', 'Jangaon Bus Depot', 17.6521, 79.0510, 17.7265, 79.1554)" class="flex-shrink-0 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-full transition cursor-pointer">
             Aler ➔ Jangaon
           </button>
         </div>
@@ -119,7 +124,12 @@
 
       <!-- Route Selection Card -->
       <div class="routemate-card p-5 relative">
-        <h2 class="text-sm font-black text-slate-900 mb-3">Where are you heading?</h2>
+        <div class="flex items-center justify-between mb-3">
+          <h2 class="text-sm font-black text-slate-900">Where are you heading?</h2>
+          <span class="text-[11px] font-bold text-blue-600 cursor-pointer hover:underline" onclick="toggleMapPointSelect()">
+            <i data-lucide="map-pin" class="w-3.5 h-3.5 inline"></i> Tap on Map
+          </span>
+        </div>
         
         <div class="space-y-3 relative">
           <!-- Pickup -->
@@ -137,6 +147,22 @@
           <div class="relative flex items-center">
             <span class="w-3 h-3 rounded-full bg-blue-600 absolute left-3.5 z-10 flex-shrink-0"></span>
             <input type="text" id="inputDrop" value="Jangaon Bus Depot" placeholder="Enter Destination" class="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-bold text-slate-900 focus:outline-none focus:border-blue-600 focus:bg-white transition" />
+          </div>
+        </div>
+
+        <!-- Real-Time Interactive Route Map Widget -->
+        <div class="mt-4 rounded-2xl overflow-hidden border border-slate-200 relative">
+          <div id="riderInteractiveMap" class="w-full h-44 bg-slate-100 z-0"></div>
+          
+          <!-- GPS Locate Floating Button -->
+          <button type="button" onclick="locateUserGPS()" title="Find My Location" class="absolute bottom-2.5 right-2.5 z-10 p-2 rounded-xl bg-white shadow-md border border-slate-200 text-slate-700 hover:text-blue-600 transition cursor-pointer">
+            <i data-lucide="crosshair" class="w-4 h-4"></i>
+          </button>
+
+          <!-- Dynamic Mode Badge -->
+          <div id="mapTapModeBadge" class="hidden absolute top-2.5 left-2.5 z-10 px-2.5 py-1 rounded-full bg-blue-600 text-white text-[10px] font-black shadow-md flex items-center gap-1.5 animate-pulse">
+            <span>Tap map to set</span>
+            <span id="mapTapTargetName">Pickup</span>
           </div>
         </div>
 
@@ -214,6 +240,21 @@
         </button>
       </div>
 
+      <!-- Driver Live Radar Map -->
+      <div class="routemate-card overflow-hidden">
+        <div class="p-3 bg-white border-b border-slate-100 flex items-center justify-between text-xs font-bold text-slate-700">
+          <div class="flex items-center gap-2">
+            <span class="w-2 h-2 rounded-full bg-blue-600 live-dot"></span>
+            <span>Live Corridor Radar</span>
+          </div>
+          <button type="button" onclick="locateUserGPS()" class="text-blue-600 hover:underline flex items-center gap-1">
+            <i data-lucide="crosshair" class="w-3.5 h-3.5"></i>
+            <span>My GPS</span>
+          </button>
+        </div>
+        <div id="driverInteractiveMap" class="w-full h-44 bg-slate-100 z-0"></div>
+      </div>
+
       <!-- Driver Active Duty / In-Progress Trip Card -->
       <div id="driverActiveTripCard" class="hidden"></div>
 
@@ -231,7 +272,7 @@
 
         <!-- Dynamic Incoming Cards Container -->
         <div id="incomingRidesContainer" class="space-y-3">
-          <!-- Fallback Empty Radar State (rendered when no rides) -->
+          <!-- Fallback Empty Radar State -->
           <div id="driverRadarEmptyState" class="routemate-card p-8 text-center">
             <div class="relative w-16 h-16 mx-auto mb-3 flex items-center justify-center">
               <span class="absolute inset-0 rounded-full bg-blue-400/20 radar-ring"></span>
@@ -250,20 +291,21 @@
     </div>
 
     <!-- ===================================================================== -->
-    <!-- SCREEN 3: INTERACTIVE MAP SCREEN -->
+    <!-- SCREEN 3: FULLSCREEN LIVE MAP SCREEN -->
     <!-- ===================================================================== -->
     <div id="mapScreen" class="hidden space-y-4">
       <div class="routemate-card overflow-hidden">
         <div class="p-3 bg-white border-b border-slate-100 flex items-center justify-between">
           <div class="flex items-center gap-2">
             <i data-lucide="map-pin" class="w-4 h-4 text-blue-600"></i>
-            <span class="text-xs font-black text-slate-900">Hyderabad ➔ Jangaon Corridor (NH 163)</span>
+            <span class="text-xs font-black text-slate-900">Hyderabad ➔ Jangaon (NH 163)</span>
           </div>
-          <button type="button" onclick="refreshMapBounds()" class="text-xs font-bold text-blue-600 hover:underline">
-            Recenter
+          <button type="button" onclick="locateUserGPS()" class="text-xs font-bold text-blue-600 hover:underline flex items-center gap-1">
+            <i data-lucide="crosshair" class="w-3.5 h-3.5"></i>
+            <span>My Location</span>
           </button>
         </div>
-        <div id="leafletMapContainer" class="w-full h-80 bg-slate-100"></div>
+        <div id="leafletMapContainer" class="w-full h-96 bg-slate-100"></div>
       </div>
     </div>
 
@@ -291,20 +333,24 @@
               <h3 id="profileUserName" class="text-base font-black text-slate-900">Verified Commuter</h3>
               <i data-lucide="badge-check" class="w-4 h-4 text-blue-600"></i>
             </div>
-            <p id="profileUserPhone" class="text-xs text-slate-500 font-mono mt-0.5">+91 98480 23145</p>
+            <p id="profileUserEmail" class="text-xs text-slate-500 font-mono mt-0.5">user@routemate.local</p>
             <p id="profileUserRole" class="text-[11px] font-bold text-blue-600 mt-1">Commuter Member • 4.95 ★</p>
           </div>
         </div>
 
         <div class="mt-5 pt-4 border-t border-slate-100 space-y-2">
-          <button type="button" onclick="openProfileSwitcherModal()" class="w-full py-3 btn-pill-secondary text-xs flex items-center justify-center gap-2 cursor-pointer">
-            <i data-lucide="users" class="w-4 h-4 text-slate-500"></i>
-            <span>Switch Test Account (Alice / Bob)</span>
+          <button type="button" onclick="openAuthModal()" class="w-full py-3 btn-pill-secondary text-xs flex items-center justify-center gap-2 cursor-pointer">
+            <i data-lucide="key" class="w-4 h-4 text-slate-500"></i>
+            <span>Supabase Auth & Account Switcher</span>
           </button>
           
           <button type="button" onclick="triggerEmergencySOS()" class="w-full py-3 btn-pill-danger text-xs flex items-center justify-center gap-2 cursor-pointer">
             <i data-lucide="alert-triangle" class="w-4 h-4 text-rose-600"></i>
             <span>Emergency SOS (112)</span>
+          </button>
+
+          <button type="button" onclick="handleSignOut()" id="btnSignOut" class="w-full py-3 text-slate-500 hover:text-slate-700 text-xs font-bold transition">
+            Sign Out
           </button>
         </div>
       </div>
@@ -339,37 +385,79 @@
   </nav>
 
   <!-- ========================================================================= -->
-  <!-- MODAL: ACCOUNT SWITCHER (FOR EASY CROSS-DEVICE TESTING) -->
+  <!-- MODAL: SUPABASE AUTH (SIGN IN / SIGN UP / GOOGLE OAUTH) -->
   <!-- ========================================================================= -->
-  <div id="accountModal" class="fixed inset-0 z-50 glass-modal hidden flex items-center justify-center p-4">
+  <div id="authModal" class="fixed inset-0 z-50 glass-modal hidden flex items-center justify-center p-4">
     <div class="bg-white rounded-3xl max-w-sm w-full p-6 shadow-2xl space-y-4">
-      <div class="flex items-center justify-between pb-3 border-b border-slate-100">
-        <h3 class="text-sm font-black text-slate-900">Switch Test Profile</h3>
-        <button type="button" onclick="closeProfileSwitcherModal()" class="text-slate-400 hover:text-slate-600">
+      <div class="flex items-center justify-between pb-2 border-b border-slate-100">
+        <div class="flex items-center gap-2">
+          <img src="app-logo.png" class="w-7 h-7 rounded-xl object-cover" />
+          <h3 class="text-sm font-black text-slate-900">Routemate Account</h3>
+        </div>
+        <button type="button" onclick="closeAuthModal()" class="text-slate-400 hover:text-slate-600">
           <i data-lucide="x" class="w-4 h-4"></i>
         </button>
       </div>
 
-      <p class="text-xs text-slate-500">
-        Select a profile to test multi-device session isolation between phones:
-      </p>
-
-      <div class="space-y-2.5">
-        <button type="button" onclick="setUserProfile('alice')" class="w-full p-3 rounded-2xl border border-slate-200 hover:border-blue-500 hover:bg-blue-50/50 flex items-center gap-3 transition text-left cursor-pointer">
-          <img src="https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=80&h=80&q=80" class="w-9 h-9 rounded-full object-cover" />
-          <div>
-            <div class="text-xs font-black text-slate-900">Alice (Rider Commuter)</div>
-            <div class="text-[11px] text-slate-400">alice.rider@routemate.local</div>
-          </div>
+      <!-- Auth Mode Tabs: Sign In vs Sign Up -->
+      <div class="flex bg-slate-100 p-1 rounded-full text-xs font-bold">
+        <button type="button" onclick="setAuthTab('signin')" id="authTabSignIn" class="w-1/2 py-2 rounded-full bg-white text-blue-700 shadow-sm transition">
+          Sign In
         </button>
-
-        <button type="button" onclick="setUserProfile('bob')" class="w-full p-3 rounded-2xl border border-slate-200 hover:border-blue-500 hover:bg-blue-50/50 flex items-center gap-3 transition text-left cursor-pointer">
-          <img src="https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=80&h=80&q=80" class="w-9 h-9 rounded-full object-cover" />
-          <div>
-            <div class="text-xs font-black text-slate-900">Bob (Verified Driver)</div>
-            <div class="text-[11px] text-slate-400">bob.driver@routemate.local</div>
-          </div>
+        <button type="button" onclick="setAuthTab('signup')" id="authTabSignUp" class="w-1/2 py-2 rounded-full text-slate-500 hover:text-slate-700 transition">
+          Create Account
         </button>
+      </div>
+
+      <!-- Google OAuth Button -->
+      <button type="button" onclick="handleGoogleSignIn()" class="w-full py-3 bg-white border border-slate-200 hover:bg-slate-50 rounded-2xl flex items-center justify-center gap-2.5 text-xs font-bold text-slate-700 shadow-sm transition cursor-pointer">
+        <svg class="w-4 h-4" viewBox="0 0 24 24">
+          <path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.8-2.4 3.65v3.03h3.88c2.27-2.09 3.665-5.17 3.665-9.12z"/>
+          <path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.03c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.25v3.13C3.27 21.44 7.33 24 12 24z"/>
+          <path fill="#FBBC05" d="M5.28 14.29c-.25-.72-.38-1.49-.38-2.29s.13-1.57.38-2.29V6.58H1.25C.45 8.18 0 10.03 0 12s.45 3.82 1.25 5.42l4.03-3.13z"/>
+          <path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.33 0 3.27 2.56 1.25 6.58l4.03 3.13c.95-2.83 3.6-4.96 6.72-4.96z"/>
+        </svg>
+        <span>Continue with Google</span>
+      </button>
+
+      <div class="flex items-center gap-2 my-2">
+        <span class="flex-1 h-px bg-slate-200"></span>
+        <span class="text-[10px] font-bold text-slate-400 uppercase tracking-widest">or email</span>
+        <span class="flex-1 h-px bg-slate-200"></span>
+      </div>
+
+      <!-- Auth Form Inputs -->
+      <form id="authForm" onsubmit="handleAuthSubmit(event)" class="space-y-2.5">
+        <div id="authNameField" class="hidden">
+          <input type="text" id="authNameInput" placeholder="Full Name" class="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold focus:outline-none focus:border-blue-600 focus:bg-white transition" />
+        </div>
+
+        <div>
+          <input type="email" id="authEmailInput" required placeholder="Email Address" class="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold focus:outline-none focus:border-blue-600 focus:bg-white transition" />
+        </div>
+
+        <div>
+          <input type="password" id="authPasswordInput" required placeholder="Password (min 6 characters)" minlength="6" class="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold focus:outline-none focus:border-blue-600 focus:bg-white transition" />
+        </div>
+
+        <button type="submit" id="btnAuthSubmit" class="w-full py-3 btn-pill-primary text-xs flex items-center justify-center gap-2 cursor-pointer mt-1">
+          <span>Sign In</span>
+        </button>
+      </form>
+
+      <!-- Instant Switcher for Multi-Device Testing -->
+      <div class="pt-3 border-t border-slate-100">
+        <span class="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-2">Instant Test Accounts</span>
+        <div class="grid grid-cols-2 gap-2">
+          <button type="button" onclick="setUserProfile('alice')" class="p-2 bg-blue-50 hover:bg-blue-100 rounded-xl text-left border border-blue-200 transition cursor-pointer">
+            <span class="text-xs font-bold text-blue-900 block truncate">Alice (Rider)</span>
+            <span class="text-[10px] text-blue-600 font-mono">alice.rider@...</span>
+          </button>
+          <button type="button" onclick="setUserProfile('bob')" class="p-2 bg-slate-100 hover:bg-slate-200 rounded-xl text-left border border-slate-200 transition cursor-pointer">
+            <span class="text-xs font-bold text-slate-900 block truncate">Bob (Driver)</span>
+            <span class="text-[10px] text-slate-500 font-mono">bob.driver@...</span>
+          </button>
+        </div>
       </div>
     </div>
   </div>
@@ -412,7 +500,7 @@
   </audio>
 
   <!-- Core Scripts -->
-  <script src="supabaseClient.js?v=20261026_redesign_v33"></script>
-  <script src="app.js?v=20261026_redesign_v33"></script>
+  <script src="supabaseClient.js?v=20261026_realtime_auth_v34"></script>
+  <script src="app.js?v=20261026_realtime_auth_v34"></script>
 </body>
 </html>
