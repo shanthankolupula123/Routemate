@@ -1911,7 +1911,7 @@
             <img src="${driver.avatar && !driver.avatar.includes('unsplash') ? driver.avatar : getInitialsAvatarSvg(driver.name || 'Driver', 120, '#10B981')}" alt="Driver" class="w-12 h-12 rounded-full object-cover border-2 border-emerald-400 shadow-md" />
             <div class="text-xs flex-1">
               <h4 class="font-black text-white text-sm">${driver.name || 'Verified Driver'}</h4>
-              <p class="text-slate-300 font-mono text-[11px]">${driver.vehicleNumber || 'TS 08 AB 1234'} • ${driver.vehicleName || 'Hero Splendor'}</p>
+              <p class="text-slate-300 font-mono text-[11px]">${driver.vehicleNumber || 'TG 08 AB 1234'} • ${driver.vehicleName || 'Hero Splendor'}</p>
               <p class="text-emerald-300 text-[10px] font-bold mt-0.5">Rating: 4.9 ★ • Verified Commuter</p>
             </div>
             <a href="tel:${driver.phone || '+919494285249'}" class="w-10 h-10 rounded-full bg-emerald-600 hover:bg-emerald-500 text-white flex items-center justify-center shadow-lg transition">
@@ -3091,7 +3091,7 @@
     const declaration = document.getElementById('kycCheckboxDeclaration')?.checked;
 
     if (!vehNum || vehNum.length < 5) {
-      showKycError('Please enter a valid Vehicle Registration Number (e.g. TS 09 EA 1234).');
+      showKycError('Please enter a valid Vehicle Registration Number (e.g. TG 09 EA 1234).');
       return;
     }
     if (!state.kyc.formData.rc_photo) {
@@ -3228,7 +3228,7 @@
 
     if (!cleanNumber || cleanNumber.length < 5) {
       if (errBox) {
-        errBox.textContent = 'Please enter a valid Vehicle Registration Number (e.g. TS09EA1234).';
+        errBox.textContent = 'Please enter a valid Vehicle Registration Number (e.g. TG09EA1234).';
         errBox.classList.remove('hidden');
       }
       return;

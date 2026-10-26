@@ -1137,7 +1137,7 @@
           phone: driverUser.phone,
           avatar: (driverUser.avatar_url && !driverUser.avatar_url.includes('unsplash')) ? driverUser.avatar_url : (driverUser.avatar && !driverUser.avatar.includes('unsplash') ? driverUser.avatar : getSvgInitialsAvatar(driverUser.name || 'Driver', '#10B981')),
           vehicleName: driverUser.vehicleName || 'Verified Commuter Vehicle',
-          vehicleNumber: driverUser.vehicleNumber || 'TS 08 AB 1234',
+          vehicleNumber: driverUser.vehicleNumber || 'TG 08 AB 1234',
           vehicleType: driverUser.vehicleType || 'bike',
           rating: 4.95
         },
@@ -1160,7 +1160,7 @@
                 phone: driverUser.phone,
                 avatar: driverUser.avatar_url || driverUser.avatar,
                 vehicleName: driverUser.vehicleName || 'Verified Commuter Vehicle',
-                vehicleNumber: driverUser.vehicleNumber || 'TS 08 AB 1234',
+                vehicleNumber: driverUser.vehicleNumber || 'TG 08 AB 1234',
                 vehicleType: driverUser.vehicleType || 'bike',
                 rating: 4.95
               }

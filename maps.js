@@ -1426,7 +1426,7 @@ function initTrackingMap(tripData) {
     pickup: (typeof state !== 'undefined' && state.pickup) || 'Uppal Ring Road Metro',
     drop: (typeof state !== 'undefined' && state.drop) || 'Jangaon Bus Depot',
     vehicle: 'Verified Vehicle',
-    plate: 'TS 08 -- ----',
+    plate: 'TG 08 -- ----',
     driver: 'Verified Commuter',
     vehicleType: 'bike'
   };
