@@ -445,6 +445,115 @@
     }
   };
 
+  // =========================================================================
+  // DRIVER KYC VERIFICATION & SUPER ADMIN APPROVAL MODULE
+  // =========================================================================
+  const kyc = {
+    /**
+     * Get Driver KYC status for a user
+     */
+    async getDriverKyc(userId) {
+      if (!userId) return { status: 'not_submitted' };
+      const apiBase = (typeof window !== 'undefined' && window.location.origin && window.location.origin.startsWith('http') && !window.location.origin.includes('localhost') && !window.location.origin.includes('127.0.0.1'))
+        ? window.location.origin
+        : 'https://www.routemate.pro';
+
+      // 1. Check API Gateway
+      try {
+        const resp = await fetch(`${apiBase}/api/driver-kyc?userId=${encodeURIComponent(userId)}`);
+        if (resp.ok) {
+          const data = await resp.json();
+          if (data && data.success) {
+            return data.submission || { status: data.status || 'not_submitted' };
+          }
+        }
+      } catch (e) {
+        console.warn('KYC check API notice:', e.message);
+      }
+
+      // 2. Direct Supabase Fallback
+      try {
+        const resp = await fetch(`${SUPABASE_CONFIG.url}/rest/v1/driver_kyc?user_id=eq.${encodeURIComponent(userId)}&select=*&order=submitted_at.desc&limit=1`, {
+          headers: {
+            'apikey': SUPABASE_CONFIG.publishableKey,
+            'Authorization': `Bearer ${SUPABASE_CONFIG.publishableKey}`
+          }
+        });
+        if (resp.ok) {
+          const rows = await resp.json();
+          if (rows && rows.length > 0) return rows[0];
+        }
+      } catch (e) {}
+
+      return { status: 'not_submitted' };
+    },
+
+    /**
+     * Submit Driver KYC documents (DL, Aadhaar, RC, Photo)
+     */
+    async submitDriverKyc(submissionData) {
+      const apiBase = (typeof window !== 'undefined' && window.location.origin && window.location.origin.startsWith('http') && !window.location.origin.includes('localhost') && !window.location.origin.includes('127.0.0.1'))
+        ? window.location.origin
+        : 'https://www.routemate.pro';
+
+      const resp = await fetch(`${apiBase}/api/driver-kyc`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'submit', ...submissionData })
+      });
+
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || !data.success) {
+        throw new Error(data.error || 'Failed to submit Driver KYC documents.');
+      }
+      return data;
+    },
+
+    /**
+     * Get All KYC submissions for Super Admin review
+     */
+    async getAllKycSubmissions() {
+      const apiBase = (typeof window !== 'undefined' && window.location.origin && window.location.origin.startsWith('http') && !window.location.origin.includes('localhost') && !window.location.origin.includes('127.0.0.1'))
+        ? window.location.origin
+        : 'https://www.routemate.pro';
+
+      const resp = await fetch(`${apiBase}/api/driver-kyc`);
+      if (resp.ok) {
+        const data = await resp.json();
+        if (data && data.success) return data.submissions || [];
+      }
+      return [];
+    },
+
+    /**
+     * Super Admin decision (Approve / Reject)
+     */
+    async reviewDriverKyc(targetId, status, rejectionReason, adminEmail) {
+      const apiBase = (typeof window !== 'undefined' && window.location.origin && window.location.origin.startsWith('http') && !window.location.origin.includes('localhost') && !window.location.origin.includes('127.0.0.1'))
+        ? window.location.origin
+        : 'https://www.routemate.pro';
+
+      const resp = await fetch(`${apiBase}/api/driver-kyc`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'decision',
+          id: targetId,
+          userId: targetId,
+          status,
+          rejectionReason,
+          adminEmail
+        })
+      });
+
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || !data.success) {
+        throw new Error(data.error || 'Failed to process admin review.');
+      }
+      return data;
+    }
+  };
+
   /**
    * Session Isolation Filter:
    * Prevents a user on Driver Mode from seeing or accepting their own booked ride.
@@ -1056,6 +1165,7 @@
   window.db = {
     getSupabase,
     auth,
+    kyc,
     supabaseRest,
     matching,
     isSelfBookedRide,

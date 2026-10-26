@@ -55,7 +55,25 @@
       pickup: [],
       drop: []
     },
-    activities: []
+    activities: [],
+    kyc: {
+      status: 'not_submitted', // 'not_submitted' | 'pending' | 'approved' | 'rejected'
+      submission: null,
+      currentStep: 1,
+      formData: {
+        driver_photo: '',
+        dl_front: '',
+        dl_back: '',
+        aadhaar_front: '',
+        aadhaar_back: '',
+        rc_photo: ''
+      }
+    },
+    admin: {
+      submissions: [],
+      activeFilter: 'pending', // 'pending' | 'approved' | 'rejected' | 'all'
+      isLoading: false
+    }
   };
 
   // Key Stops on Hyderabad ➔ Jangaon NH163 Corridor
@@ -427,6 +445,31 @@
     if (main) main.classList.remove('hidden');
     if (nav) nav.classList.remove('hidden');
 
+    // Super Admin Authorization Gate (Strictly shanthankolupula123@gmail.com)
+    const isSuperAdmin = (user.email || '').toLowerCase().trim() === 'shanthankolupula123@gmail.com';
+    const adminPill = document.getElementById('headerAdminPill');
+    const adminNav = document.getElementById('navTab-admin');
+    if (adminPill) {
+      if (isSuperAdmin) {
+        adminPill.classList.remove('hidden');
+        adminPill.classList.add('inline-flex');
+      } else {
+        adminPill.classList.add('hidden');
+        adminPill.classList.remove('inline-flex');
+      }
+    }
+    if (adminNav) {
+      if (isSuperAdmin) {
+        adminNav.classList.remove('hidden');
+      } else {
+        adminNav.classList.add('hidden');
+      }
+    }
+
+    if (isSuperAdmin) {
+      loadAdminKycSubmissions();
+    }
+
     updateProfileUI();
 
     // Default to commuter mode (user can freely toggle rider/driver anytime via header slider or bottom nav)
@@ -447,6 +490,15 @@
     state.pendingCompletionUser = null;
     localStorage.removeItem('routemate_user');
     closeProfileCompletionModal();
+
+    // Hide Super Admin controls
+    const adminPill = document.getElementById('headerAdminPill');
+    const adminNav = document.getElementById('navTab-admin');
+    if (adminPill) {
+      adminPill.classList.add('hidden');
+      adminPill.classList.remove('inline-flex');
+    }
+    if (adminNav) adminNav.classList.add('hidden');
 
     // Show Auth Screen & reset to Step 1
     const authScreen = document.getElementById('authScreen');
@@ -1597,9 +1649,10 @@
           updateUserGPSMarker(state.userGPS.lat, state.userGPS.lng);
         }
       }, 150);
-      startDriverRadar();
+
+      // Check KYC status to gate operational access
+      checkDriverKycStatus();
       setActiveNavPill('drive');
-      showToast('Switched to Driver Mode • Realtime Radar Live', 'info');
     }
 
     updateProfileUI();
@@ -1613,7 +1666,8 @@
       book: document.getElementById('riderScreen'),
       drive: document.getElementById('driverScreen'),
       activity: document.getElementById('activityScreen'),
-      profile: document.getElementById('profileScreen')
+      profile: document.getElementById('profileScreen'),
+      admin: document.getElementById('adminScreen')
     };
 
     Object.values(screens).forEach(el => el && el.classList.add('hidden'));
@@ -1622,6 +1676,15 @@
       switchMode('rider');
     } else if (tabName === 'drive') {
       switchMode('driver');
+    } else if (tabName === 'admin') {
+      const isSuperAdmin = (state.currentUser?.email || '').toLowerCase().trim() === 'shanthankolupula123@gmail.com';
+      if (!isSuperAdmin) {
+        showToast('Access restricted: Super Admin only.', 'danger');
+        navigateToTab('book');
+        return;
+      }
+      if (screens.admin) screens.admin.classList.remove('hidden');
+      loadAdminKycSubmissions();
     } else {
       if (screens[tabName]) screens[tabName].classList.remove('hidden');
       if (tabName === 'activity') {
@@ -1631,7 +1694,7 @@
   };
 
   function setActiveNavPill(activeTab) {
-    const tabs = ['book', 'drive', 'activity', 'profile'];
+    const tabs = ['book', 'drive', 'activity', 'profile', 'admin'];
     tabs.forEach(tab => {
       const btn = document.getElementById(`navTab-${tab}`);
       if (!btn) return;
@@ -2268,6 +2331,764 @@
     }
   }
   window.playNotificationSound = playNotificationSound;
+
+  // =========================================================================
+  // DRIVER KYC VERIFICATION & SUPER ADMIN APPROVAL ENGINE
+  // =========================================================================
+
+  /**
+   * Client-Side Image Compressor (Reduces multi-MB camera photos to clean ~100KB JPEGs)
+   */
+  async function compressImage(file, maxWidth = 1200, quality = 0.72) {
+    return new Promise((resolve, reject) => {
+      if (!file) return reject(new Error('No file provided for compression.'));
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => {
+          let width = img.width;
+          let height = img.height;
+          if (width > maxWidth) {
+            height = Math.round((height * maxWidth) / width);
+            width = maxWidth;
+          }
+          if (height > maxWidth) {
+            width = Math.round((width * maxWidth) / height);
+            height = maxWidth;
+          }
+          const canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, width, height);
+          resolve(canvas.toDataURL('image/jpeg', quality));
+        };
+        img.onerror = () => reject(new Error('Failed to load image for compression.'));
+        img.src = e.target.result;
+      };
+      reader.onerror = () => reject(new Error('Failed to read image file.'));
+      reader.readAsDataURL(file);
+    });
+  }
+  window.compressImage = compressImage;
+
+  /**
+   * Check & Enforce Driver KYC Status
+   * Gates Driver Radar and Live Broadcast access until admin approval
+   */
+  async function checkDriverKycStatus(forceRefresh = false) {
+    const user = state.currentUser;
+    const gateContainer = document.getElementById('driverKycGateContainer');
+    const operationalContainer = document.getElementById('driverOperationalContainer');
+
+    if (!user) {
+      if (gateContainer) gateContainer.innerHTML = '';
+      if (operationalContainer) operationalContainer.classList.add('hidden');
+      return;
+    }
+
+    try {
+      if (forceRefresh) showToast('Checking Driver KYC verification status...', 'info');
+
+      let kycRes = null;
+      if (window.db?.kyc?.getDriverKyc) {
+        kycRes = await window.db.kyc.getDriverKyc(user.id, user.email);
+      }
+
+      const status = kycRes?.status || (user.is_verified ? 'approved' : 'not_submitted');
+      const submission = kycRes?.submission || null;
+
+      state.kyc.status = status;
+      state.kyc.submission = submission;
+
+      if (!gateContainer) return;
+
+      // -----------------------------------------------------------------------
+      // CASE 1: APPROVED / VERIFIED DRIVER
+      // -----------------------------------------------------------------------
+      if (status === 'approved') {
+        if (operationalContainer) operationalContainer.classList.remove('hidden');
+
+        gateContainer.innerHTML = `
+          <div class="routemate-card p-3.5 bg-emerald-50/80 border border-emerald-200 flex items-center justify-between">
+            <div class="flex items-center gap-2.5">
+              <div class="w-8 h-8 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center font-black">
+                <i data-lucide="shield-check" class="w-4 h-4 text-emerald-600"></i>
+              </div>
+              <div>
+                <h4 class="text-xs font-black text-emerald-950">Verified Driver Account</h4>
+                <p class="text-[10px] text-emerald-700 font-semibold">KYC Approved by Super Admin • DL: ${submission?.dl_number || 'Verified'}</p>
+              </div>
+            </div>
+            <span class="text-[10px] font-black uppercase tracking-wider text-emerald-700 bg-emerald-100/90 px-2.5 py-1 rounded-full border border-emerald-200">
+              Verified ✓
+            </span>
+          </div>
+        `;
+
+        startDriverRadar();
+        if (forceRefresh) showToast('KYC Verified! You can now offer rides.', 'success');
+      }
+      // -----------------------------------------------------------------------
+      // CASE 2: PENDING KYC APPROVAL
+      // -----------------------------------------------------------------------
+      else if (status === 'pending') {
+        if (operationalContainer) operationalContainer.classList.add('hidden');
+        if (window.db?.matching) window.db.matching.stopDriverPolling();
+        state.driverOnline = false;
+
+        gateContainer.innerHTML = `
+          <div class="routemate-card p-6 text-center space-y-3.5 border border-amber-200 bg-amber-50/70 shadow-md">
+            <div class="w-14 h-14 rounded-2xl bg-amber-100 text-amber-700 mx-auto flex items-center justify-center font-black shadow-inner">
+              <i data-lucide="clock" class="w-7 h-7 text-amber-600 animate-pulse"></i>
+            </div>
+            <div>
+              <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-100 text-amber-800 text-[11px] font-black mb-1 border border-amber-200">
+                <span class="w-2 h-2 rounded-full bg-amber-500 animate-ping"></span>
+                <span>Status: Pending KYC Approval</span>
+              </span>
+              <h3 class="text-sm font-black text-slate-900 mt-1">Verification Under Super Admin Review</h3>
+              <p class="text-xs text-slate-600 leading-relaxed max-w-sm mx-auto mt-1">
+                Your driving license, identity proof, and vehicle details have been safely received and are currently under review by Routemate Super Admin.
+              </p>
+            </div>
+            <div class="p-3 bg-white/90 rounded-2xl border border-amber-200 text-left text-xs space-y-1.5 max-w-xs mx-auto shadow-sm">
+              <div class="flex items-center justify-between text-[11px]">
+                <span class="text-slate-500 font-semibold">DL Number:</span>
+                <span class="font-mono font-bold text-slate-800">${submission?.dl_number || 'Submitted'}</span>
+              </div>
+              <div class="flex items-center justify-between text-[11px]">
+                <span class="text-slate-500 font-semibold">Vehicle:</span>
+                <span class="font-mono font-bold text-slate-800">${submission?.vehicle_number || 'Submitted'}</span>
+              </div>
+              <div class="flex items-center justify-between text-[11px]">
+                <span class="text-slate-500 font-semibold">Reviewer:</span>
+                <span class="font-mono text-[10px] text-blue-700">shanthankolupula123@gmail.com</span>
+              </div>
+            </div>
+            <div class="pt-1 flex items-center justify-center gap-2">
+              <button type="button" onclick="checkDriverKycStatus(true)" class="px-4 py-2.5 rounded-xl bg-white border border-slate-200 text-xs font-bold text-slate-700 hover:bg-slate-50 transition shadow-sm cursor-pointer flex items-center gap-1.5">
+                <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i>
+                <span>Refresh Status</span>
+              </button>
+            </div>
+          </div>
+        `;
+
+        if (forceRefresh) showToast('Your KYC is pending review by Super Admin.', 'info');
+      }
+      // -----------------------------------------------------------------------
+      // CASE 3: REJECTED
+      // -----------------------------------------------------------------------
+      else if (status === 'rejected') {
+        if (operationalContainer) operationalContainer.classList.add('hidden');
+        if (window.db?.matching) window.db.matching.stopDriverPolling();
+        state.driverOnline = false;
+
+        const reason = submission?.rejection_reason || 'Uploaded document photos were not legible or invalid. Please re-upload clear photos.';
+
+        gateContainer.innerHTML = `
+          <div class="routemate-card p-6 text-center space-y-3.5 border border-rose-200 bg-rose-50/70 shadow-md">
+            <div class="w-14 h-14 rounded-2xl bg-rose-100 text-rose-600 mx-auto flex items-center justify-center font-black shadow-inner">
+              <i data-lucide="alert-circle" class="w-7 h-7 text-rose-600"></i>
+            </div>
+            <div>
+              <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-rose-100 text-rose-800 text-[11px] font-black mb-1 border border-rose-200">
+                <span>Status: KYC Needs Attention</span>
+              </span>
+              <h3 class="text-sm font-black text-slate-900 mt-1">Verification Rejected</h3>
+              <div class="p-3 my-2 bg-white rounded-2xl border border-rose-200 text-rose-700 font-semibold text-xs max-w-sm mx-auto shadow-sm">
+                Reason: ${reason}
+              </div>
+              <p class="text-xs text-slate-500 max-w-sm mx-auto">
+                Please update and re-submit clear photos of your Driving License, Aadhaar, RC, and Selfie.
+              </p>
+            </div>
+            <button type="button" onclick="openDriverKycModal()" class="px-5 py-3 btn-pill-primary text-xs font-bold shadow-md cursor-pointer inline-flex items-center gap-2">
+              <i data-lucide="upload" class="w-4 h-4"></i>
+              <span>Re-Submit Documents</span>
+            </button>
+          </div>
+        `;
+      }
+      // -----------------------------------------------------------------------
+      // CASE 4: NOT SUBMITTED
+      // -----------------------------------------------------------------------
+      else {
+        if (operationalContainer) operationalContainer.classList.add('hidden');
+        if (window.db?.matching) window.db.matching.stopDriverPolling();
+        state.driverOnline = false;
+
+        gateContainer.innerHTML = `
+          <div class="routemate-card p-6 text-center space-y-3.5 border border-blue-100 bg-white shadow-md">
+            <div class="w-14 h-14 rounded-2xl bg-blue-50 text-blue-600 mx-auto flex items-center justify-center font-black shadow-inner">
+              <i data-lucide="shield-alert" class="w-7 h-7 text-blue-600"></i>
+            </div>
+            <div>
+              <h3 class="text-sm font-black text-slate-900">Driver Verification Required</h3>
+              <p class="text-xs text-slate-500 max-w-sm mx-auto mt-1 leading-relaxed">
+                To ensure passenger safety and prevent unauthorized commercial operations, all Routemate drivers must verify their identity and vehicle documents before accepting rides.
+              </p>
+            </div>
+            <div class="p-3 bg-slate-50 rounded-2xl border border-slate-200/80 max-w-xs mx-auto text-left text-[11px] text-slate-600 space-y-1">
+              <div class="flex items-center gap-2">✓ Driving License (Front & Back)</div>
+              <div class="flex items-center gap-2">✓ Aadhaar Card / ID (Front & Back)</div>
+              <div class="flex items-center gap-2">✓ Vehicle Registration Certificate (RC)</div>
+              <div class="flex items-center gap-2">✓ Driver Selfie / Photo</div>
+            </div>
+            <button type="button" onclick="openDriverKycModal()" class="px-6 py-3.5 btn-pill-primary text-xs font-black shadow-lg cursor-pointer inline-flex items-center gap-2 active:scale-95">
+              <i data-lucide="id-card" class="w-4 h-4 text-cyan-200"></i>
+              <span>Start KYC Verification</span>
+            </button>
+          </div>
+        `;
+      }
+
+      if (window.lucide) lucide.createIcons();
+    } catch (err) {
+      console.warn('Driver KYC status check warning:', err);
+    }
+  }
+  window.checkDriverKycStatus = checkDriverKycStatus;
+
+  // -------------------------------------------------------------------------
+  // MULTI-STEP DRIVER KYC SUBMISSION WIZARD
+  // -------------------------------------------------------------------------
+  window.openDriverKycModal = function () {
+    const modal = document.getElementById('driverKycModal');
+    if (!modal) return;
+
+    state.kyc.currentStep = 1;
+
+    // Prefill user details if available
+    const nameInput = document.getElementById('kycInputDriverName');
+    const phoneInput = document.getElementById('kycInputDriverPhone');
+    if (nameInput && state.currentUser?.name) {
+      nameInput.value = state.currentUser.name;
+    }
+    if (phoneInput && state.currentUser?.phone) {
+      const cleanPhone = String(state.currentUser.phone).replace(/\D/g, '').slice(-10);
+      phoneInput.value = cleanPhone;
+    }
+
+    const errBox = document.getElementById('kycFormErrorMsg');
+    if (errBox) {
+      errBox.classList.add('hidden');
+      errBox.textContent = '';
+    }
+
+    updateKycStepUI();
+    modal.classList.remove('hidden');
+    if (window.lucide) lucide.createIcons();
+  };
+
+  window.closeDriverKycModal = function () {
+    const modal = document.getElementById('driverKycModal');
+    if (modal) modal.classList.add('hidden');
+  };
+
+  window.navigateKycStep = function (direction) {
+    const errBox = document.getElementById('kycFormErrorMsg');
+    if (errBox) errBox.classList.add('hidden');
+
+    const current = state.kyc.currentStep;
+
+    // Validate current step before advancing forward
+    if (direction > 0) {
+      if (current === 1) {
+        const name = document.getElementById('kycInputDriverName')?.value.trim();
+        const phone = document.getElementById('kycInputDriverPhone')?.value.replace(/\D/g, '');
+        if (!name || name.length < 2) {
+          showKycError('Please enter your full legal name as per government ID.');
+          return;
+        }
+        if (!phone || phone.length !== 10) {
+          showKycError('Please enter a valid 10-digit mobile number.');
+          return;
+        }
+        if (!state.kyc.formData.driver_photo) {
+          showKycError('Please upload your selfie / passport photo.');
+          return;
+        }
+      } else if (current === 2) {
+        const dlNum = document.getElementById('kycInputDlNumber')?.value.trim();
+        if (!dlNum || dlNum.length < 8) {
+          showKycError('Please enter a valid Driving License (DL) Number.');
+          return;
+        }
+        if (!state.kyc.formData.dl_front) {
+          showKycError('Please upload the front photo of your Driving License.');
+          return;
+        }
+        if (!state.kyc.formData.dl_back) {
+          showKycError('Please upload the back photo of your Driving License.');
+          return;
+        }
+      } else if (current === 3) {
+        const aadhaar = document.getElementById('kycInputAadhaarNumber')?.value.replace(/\D/g, '');
+        if (!aadhaar || aadhaar.length !== 12) {
+          showKycError('Please enter a valid 12-digit Aadhaar Card Number.');
+          return;
+        }
+        if (!state.kyc.formData.aadhaar_front) {
+          showKycError('Please upload the front photo of your Aadhaar Card.');
+          return;
+        }
+        if (!state.kyc.formData.aadhaar_back) {
+          showKycError('Please upload the back photo of your Aadhaar Card.');
+          return;
+        }
+      }
+    }
+
+    const nextStep = current + direction;
+    if (nextStep >= 1 && nextStep <= 4) {
+      state.kyc.currentStep = nextStep;
+      updateKycStepUI();
+    }
+  };
+
+  function showKycError(msg) {
+    const errBox = document.getElementById('kycFormErrorMsg');
+    if (errBox) {
+      errBox.textContent = msg;
+      errBox.classList.remove('hidden');
+    }
+    showToast(msg, 'danger');
+  }
+
+  function updateKycStepUI() {
+    const step = state.kyc.currentStep;
+
+    // Step contents
+    for (let i = 1; i <= 4; i++) {
+      const el = document.getElementById(`kycStepContent-${i}`);
+      const bar = document.getElementById(`kycStepBar-${i}`);
+      if (el) el.classList.toggle('hidden', i !== step);
+      if (bar) {
+        if (i <= step) {
+          bar.className = 'h-1.5 rounded-full bg-blue-600 transition-colors';
+        } else {
+          bar.className = 'h-1.5 rounded-full bg-slate-200 transition-colors';
+        }
+      }
+    }
+
+    // Step labels
+    const stepNumEl = document.getElementById('kycCurrentStepNumber');
+    const stepTitleEl = document.getElementById('kycStepTitle');
+    const titles = {
+      1: 'Personal & Photo',
+      2: 'Driving License',
+      3: 'Aadhaar Card',
+      4: 'Vehicle RC'
+    };
+    if (stepNumEl) stepNumEl.textContent = step;
+    if (stepTitleEl) stepTitleEl.textContent = titles[step] || '';
+
+    // Buttons
+    const btnPrev = document.getElementById('btnKycPrev');
+    const btnNext = document.getElementById('btnKycNext');
+    const btnSubmit = document.getElementById('btnKycSubmit');
+
+    if (btnPrev) btnPrev.classList.toggle('hidden', step === 1);
+    if (btnNext) btnNext.classList.toggle('hidden', step === 4);
+    if (btnSubmit) btnSubmit.classList.toggle('hidden', step !== 4);
+
+    if (window.lucide) lucide.createIcons();
+  }
+
+  window.formatAadhaarInput = function (e) {
+    const input = e.target;
+    let digits = input.value.replace(/\D/g, '').slice(0, 12);
+    let formatted = '';
+    for (let i = 0; i < digits.length; i++) {
+      if (i > 0 && i % 4 === 0) formatted += ' ';
+      formatted += digits[i];
+    }
+    input.value = formatted;
+  };
+
+  window.handleKycFileSelect = async function (e, fieldKey) {
+    const file = e.target?.files?.[0];
+    if (!file) return;
+
+    try {
+      showToast('Compressing photo for fast upload...', 'info');
+      const compressedDataUrl = await compressImage(file, 1200, 0.72);
+      state.kyc.formData[fieldKey] = compressedDataUrl;
+
+      // Update thumbnail preview
+      const previewMap = {
+        driver_photo: 'kycPreviewDriverPhoto',
+        dl_front: 'kycPreviewDlFront',
+        dl_back: 'kycPreviewDlBack',
+        aadhaar_front: 'kycPreviewAadhaarFront',
+        aadhaar_back: 'kycPreviewAadhaarBack',
+        rc_photo: 'kycPreviewRcPhoto'
+      };
+
+      const previewId = previewMap[fieldKey];
+      const previewEl = document.getElementById(previewId);
+      if (previewEl) {
+        previewEl.innerHTML = `
+          <img src="${compressedDataUrl}" alt="Preview" class="w-full h-full object-cover cursor-pointer hover:opacity-90" onclick="openImageLightbox('${compressedDataUrl}', '${fieldKey.toUpperCase()}')" />
+        `;
+      }
+      showToast('Photo uploaded & verified ✓', 'success');
+    } catch (err) {
+      console.error('Image compression error:', err);
+      showToast('Failed to process image: ' + err.message, 'danger');
+    }
+  };
+
+  window.handleDriverKycFormSubmit = async function (e) {
+    if (e && e.preventDefault) e.preventDefault();
+
+    const user = state.currentUser;
+    if (!user) {
+      showToast('Session expired. Please sign in again.', 'danger');
+      return;
+    }
+
+    const vehNum = document.getElementById('kycInputVehicleNumber')?.value.trim();
+    const vehType = document.getElementById('kycSelectVehicleType')?.value || 'bike';
+    const declaration = document.getElementById('kycCheckboxDeclaration')?.checked;
+
+    if (!vehNum || vehNum.length < 5) {
+      showKycError('Please enter a valid Vehicle Registration Number (e.g. TS 09 EA 1234).');
+      return;
+    }
+    if (!state.kyc.formData.rc_photo) {
+      showKycError('Please upload your Vehicle Registration Certificate (RC) photo.');
+      return;
+    }
+    if (!declaration) {
+      showKycError('Please certify the declaration checkbox to proceed.');
+      return;
+    }
+
+    const btnSubmit = document.getElementById('btnKycSubmit');
+    const btnText = document.getElementById('btnKycSubmitText');
+    if (btnSubmit) btnSubmit.disabled = true;
+    if (btnText) btnText.textContent = 'Submitting KYC...';
+
+    try {
+      showToast('Submitting driver documents securely...', 'info');
+
+      const payload = {
+        userId: user.id,
+        driverName: document.getElementById('kycInputDriverName')?.value.trim() || user.name,
+        driverPhone: '+91' + document.getElementById('kycInputDriverPhone')?.value.replace(/\D/g, ''),
+        driverEmail: user.email,
+        driverPhoto: state.kyc.formData.driver_photo,
+        dlNumber: document.getElementById('kycInputDlNumber')?.value.trim().toUpperCase(),
+        dlFrontPhoto: state.kyc.formData.dl_front,
+        dlBackPhoto: state.kyc.formData.dl_back,
+        aadhaarNumber: document.getElementById('kycInputAadhaarNumber')?.value.replace(/\D/g, ''),
+        aadhaarFrontPhoto: state.kyc.formData.aadhaar_front,
+        aadhaarBackPhoto: state.kyc.formData.aadhaar_back,
+        vehicleNumber: vehNum.toUpperCase(),
+        vehicleType: vehType,
+        rcPhoto: state.kyc.formData.rc_photo
+      };
+
+      if (window.db?.kyc?.submitDriverKyc) {
+        await window.db.kyc.submitDriverKyc(payload);
+      }
+
+      closeDriverKycModal();
+      showToast('Driver KYC submitted! Super Admin will review your documents shortly.', 'success');
+      await checkDriverKycStatus(true);
+    } catch (err) {
+      console.error('Driver KYC submission error:', err);
+      showKycError(err.message || 'Failed to submit KYC documents. Please try again.');
+    } finally {
+      if (btnSubmit) btnSubmit.disabled = false;
+      if (btnText) btnText.textContent = 'Submit for Verification';
+    }
+  };
+
+  // -------------------------------------------------------------------------
+  // SUPER ADMIN DASHBOARD ENGINE (shanthankolupula123@gmail.com)
+  // -------------------------------------------------------------------------
+  async function loadAdminKycSubmissions(showToastMsg = false) {
+    const user = state.currentUser;
+    if (!user || user.email?.toLowerCase().trim() !== 'shanthankolupula123@gmail.com') return;
+
+    if (showToastMsg) showToast('Refreshing driver submissions...', 'info');
+
+    try {
+      let subs = [];
+      if (window.db?.kyc?.getAllKycSubmissions) {
+        subs = await window.db.kyc.getAllKycSubmissions(user.email);
+      }
+
+      state.admin.submissions = subs || [];
+
+      // Compute statistics
+      let pendingCount = 0;
+      let approvedCount = 0;
+      let rejectedCount = 0;
+
+      subs.forEach(s => {
+        if (s.status === 'approved') approvedCount++;
+        else if (s.status === 'rejected') rejectedCount++;
+        else pendingCount++;
+      });
+
+      const mPending = document.getElementById('adminMetricPending');
+      const mApproved = document.getElementById('adminMetricApproved');
+      const mRejected = document.getElementById('adminMetricRejected');
+      const badgeFilter = document.getElementById('adminBadgeFilterPending');
+      const headerBadge = document.getElementById('headerAdminBadge');
+
+      if (mPending) mPending.textContent = pendingCount;
+      if (mApproved) mApproved.textContent = approvedCount;
+      if (mRejected) mRejected.textContent = rejectedCount;
+      if (badgeFilter) badgeFilter.textContent = pendingCount;
+
+      if (headerBadge) {
+        headerBadge.classList.toggle('hidden', pendingCount === 0);
+      }
+
+      renderAdminKycSubmissions();
+      if (showToastMsg) showToast(`Loaded ${subs.length} driver submissions.`, 'success');
+    } catch (err) {
+      console.error('Failed to load admin submissions:', err);
+      if (showToastMsg) showToast('Error loading submissions: ' + err.message, 'danger');
+    }
+  }
+  window.loadAdminKycSubmissions = loadAdminKycSubmissions;
+
+  window.setAdminKycFilter = function (filter) {
+    state.admin.activeFilter = filter;
+    const filters = ['pending', 'approved', 'rejected', 'all'];
+    filters.forEach(f => {
+      const btn = document.getElementById(`adminFilterBtn-${f}`);
+      if (!btn) return;
+      if (f === filter) {
+        btn.className = 'flex-1 py-1.5 rounded-xl bg-white text-slate-900 shadow-sm transition cursor-pointer text-center';
+      } else {
+        btn.className = 'flex-1 py-1.5 rounded-xl text-slate-500 hover:text-slate-800 transition cursor-pointer text-center';
+      }
+    });
+    renderAdminKycSubmissions();
+  };
+
+  function renderAdminKycSubmissions() {
+    const container = document.getElementById('adminKycListContainer');
+    if (!container) return;
+
+    const filter = state.admin.activeFilter;
+    const all = state.admin.submissions || [];
+    const filtered = all.filter(s => {
+      if (filter === 'all') return true;
+      if (filter === 'pending') return s.status === 'pending' || !s.status;
+      return s.status === filter;
+    });
+
+    if (filtered.length === 0) {
+      container.innerHTML = `
+        <div class="routemate-card p-8 text-center bg-white">
+          <div class="w-12 h-12 rounded-full bg-slate-100 text-slate-400 mx-auto flex items-center justify-center mb-2">
+            <i data-lucide="inbox" class="w-6 h-6"></i>
+          </div>
+          <h4 class="text-xs font-bold text-slate-700">No submissions found</h4>
+          <p class="text-[11px] text-slate-400 mt-0.5">There are no drivers in the '${filter}' category.</p>
+        </div>
+      `;
+      if (window.lucide) lucide.createIcons();
+      return;
+    }
+
+    container.innerHTML = filtered.map(sub => {
+      const isApproved = sub.status === 'approved';
+      const isRejected = sub.status === 'rejected';
+      const isPending = !isApproved && !isRejected;
+
+      let statusBadge = `
+        <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-black bg-amber-100 text-amber-800 border border-amber-200">
+          <span class="w-1.5 h-1.5 rounded-full bg-amber-500 animate-ping"></span>
+          Pending Approval
+        </span>
+      `;
+      if (isApproved) {
+        statusBadge = `
+          <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-black bg-emerald-100 text-emerald-800 border border-emerald-200">
+            Approved ✓
+          </span>
+        `;
+      } else if (isRejected) {
+        statusBadge = `
+          <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-black bg-rose-100 text-rose-800 border border-rose-200">
+            Rejected ✕
+          </span>
+        `;
+      }
+
+      const formattedAadhaar = sub.aadhaar_number ? sub.aadhaar_number.replace(/(\d{4})(\d{4})(\d{4})/, '$1 $2 $3') : 'Not entered';
+
+      return `
+        <div class="routemate-card p-5 bg-white border border-slate-200/90 shadow-sm space-y-4">
+          <!-- Driver Profile Header -->
+          <div class="flex items-start justify-between">
+            <div class="flex items-center gap-3">
+              <div class="w-12 h-12 rounded-2xl bg-slate-100 border border-slate-200 overflow-hidden flex-shrink-0 cursor-pointer" onclick="openImageLightbox('${sub.driver_photo || ''}', '${sub.driver_name || 'Driver'} Selfie')">
+                ${sub.driver_photo ? `<img src="${sub.driver_photo}" alt="Selfie" class="w-full h-full object-cover" />` : `<div class="w-full h-full flex items-center justify-center text-xs font-bold text-slate-400">Photo</div>`}
+              </div>
+              <div>
+                <h3 class="text-sm font-black text-slate-900">${sub.driver_name || 'Driver'}</h3>
+                <p class="text-xs text-slate-500 font-mono">${sub.driver_phone || ''}</p>
+                <p class="text-[11px] text-slate-400 truncate max-w-[180px]">${sub.driver_email || ''}</p>
+              </div>
+            </div>
+            <div>${statusBadge}</div>
+          </div>
+
+          <!-- Document Numbers Grid -->
+          <div class="grid grid-cols-2 gap-2 p-3 bg-slate-50 rounded-2xl border border-slate-200/80 text-xs font-mono">
+            <div>
+              <span class="text-[10px] text-slate-400 uppercase font-sans font-bold block">Driving License</span>
+              <span class="font-bold text-slate-900 text-xs">${sub.dl_number || 'N/A'}</span>
+            </div>
+            <div>
+              <span class="text-[10px] text-slate-400 uppercase font-sans font-bold block">Vehicle Number</span>
+              <span class="font-bold text-slate-900 text-xs">${sub.vehicle_number || 'N/A'}</span>
+            </div>
+            <div class="col-span-2 pt-1 border-t border-slate-200/60 flex items-center justify-between">
+              <div>
+                <span class="text-[10px] text-slate-400 uppercase font-sans font-bold block">Aadhaar ID</span>
+                <span class="font-bold text-slate-900 text-xs">${formattedAadhaar}</span>
+              </div>
+              <span class="text-[10px] font-sans font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full uppercase">${sub.vehicle_type || 'bike'}</span>
+            </div>
+          </div>
+
+          <!-- Document Photos Gallery (Clickable Lightbox) -->
+          <div>
+            <span class="text-[10px] font-black uppercase text-slate-400 tracking-wider block mb-1.5">Submitted Document Photos (Tap to Inspect)</span>
+            <div class="grid grid-cols-5 gap-1.5">
+              <!-- DL Front -->
+              <div class="relative group aspect-square rounded-xl bg-slate-100 border border-slate-200 overflow-hidden cursor-pointer" onclick="openImageLightbox('${sub.dl_front_photo || ''}', 'Driving License Front - ${sub.driver_name}')" title="DL Front">
+                ${sub.dl_front_photo ? `<img src="${sub.dl_front_photo}" alt="DL Front" class="w-full h-full object-cover group-hover:scale-105 transition" />` : `<div class="w-full h-full flex items-center justify-center text-[9px] text-slate-400">DL Front</div>`}
+                <span class="absolute bottom-0 inset-x-0 bg-slate-900/70 text-white text-[8px] font-bold text-center py-0.5">DL Front</span>
+              </div>
+
+              <!-- DL Back -->
+              <div class="relative group aspect-square rounded-xl bg-slate-100 border border-slate-200 overflow-hidden cursor-pointer" onclick="openImageLightbox('${sub.dl_back_photo || ''}', 'Driving License Back - ${sub.driver_name}')" title="DL Back">
+                ${sub.dl_back_photo ? `<img src="${sub.dl_back_photo}" alt="DL Back" class="w-full h-full object-cover group-hover:scale-105 transition" />` : `<div class="w-full h-full flex items-center justify-center text-[9px] text-slate-400">DL Back</div>`}
+                <span class="absolute bottom-0 inset-x-0 bg-slate-900/70 text-white text-[8px] font-bold text-center py-0.5">DL Back</span>
+              </div>
+
+              <!-- Aadhaar Front -->
+              <div class="relative group aspect-square rounded-xl bg-slate-100 border border-slate-200 overflow-hidden cursor-pointer" onclick="openImageLightbox('${sub.aadhaar_front_photo || ''}', 'Aadhaar Front - ${sub.driver_name}')" title="Aadhaar Front">
+                ${sub.aadhaar_front_photo ? `<img src="${sub.aadhaar_front_photo}" alt="Aadhaar Front" class="w-full h-full object-cover group-hover:scale-105 transition" />` : `<div class="w-full h-full flex items-center justify-center text-[9px] text-slate-400">Aadhaar F</div>`}
+                <span class="absolute bottom-0 inset-x-0 bg-slate-900/70 text-white text-[8px] font-bold text-center py-0.5">Aadhaar F</span>
+              </div>
+
+              <!-- Aadhaar Back -->
+              <div class="relative group aspect-square rounded-xl bg-slate-100 border border-slate-200 overflow-hidden cursor-pointer" onclick="openImageLightbox('${sub.aadhaar_back_photo || ''}', 'Aadhaar Back - ${sub.driver_name}')" title="Aadhaar Back">
+                ${sub.aadhaar_back_photo ? `<img src="${sub.aadhaar_back_photo}" alt="Aadhaar Back" class="w-full h-full object-cover group-hover:scale-105 transition" />` : `<div class="w-full h-full flex items-center justify-center text-[9px] text-slate-400">Aadhaar B</div>`}
+                <span class="absolute bottom-0 inset-x-0 bg-slate-900/70 text-white text-[8px] font-bold text-center py-0.5">Aadhaar B</span>
+              </div>
+
+              <!-- Vehicle RC -->
+              <div class="relative group aspect-square rounded-xl bg-slate-100 border border-slate-200 overflow-hidden cursor-pointer" onclick="openImageLightbox('${sub.rc_photo || ''}', 'Vehicle RC - ${sub.driver_name}')" title="RC Document">
+                ${sub.rc_photo ? `<img src="${sub.rc_photo}" alt="RC Photo" class="w-full h-full object-cover group-hover:scale-105 transition" />` : `<div class="w-full h-full flex items-center justify-center text-[9px] text-slate-400">RC Photo</div>`}
+                <span class="absolute bottom-0 inset-x-0 bg-slate-900/70 text-white text-[8px] font-bold text-center py-0.5">RC Doc</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Rejection Reason if any -->
+          ${sub.rejection_reason ? `
+            <div class="p-2.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-semibold">
+              Rejection Note: ${sub.rejection_reason}
+            </div>
+          ` : ''}
+
+          <!-- Admin Action Buttons -->
+          <div class="flex items-center gap-2 pt-2 border-t border-slate-100">
+            ${isApproved ? `
+              <button type="button" onclick="handleAdminKycDecision('${sub.id || sub.user_id}', 'rejected')" class="flex-1 py-2.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-bold transition border border-rose-200 cursor-pointer flex items-center justify-center gap-1.5">
+                <i data-lucide="x-circle" class="w-4 h-4"></i>
+                <span>Revoke / Reject</span>
+              </button>
+            ` : isRejected ? `
+              <button type="button" onclick="handleAdminKycDecision('${sub.id || sub.user_id}', 'approved')" class="flex-1 py-2.5 btn-pill-primary text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer">
+                <i data-lucide="check-circle" class="w-4 h-4"></i>
+                <span>Re-Approve Driver</span>
+              </button>
+            ` : `
+              <button type="button" onclick="handleAdminKycDecision('${sub.id || sub.user_id}', 'rejected')" class="w-1/3 py-2.5 rounded-xl bg-slate-100 hover:bg-rose-50 hover:text-rose-700 text-slate-700 text-xs font-bold transition cursor-pointer flex items-center justify-center gap-1">
+                <i data-lucide="x" class="w-3.5 h-3.5"></i>
+                <span>Reject</span>
+              </button>
+              <button type="button" onclick="handleAdminKycDecision('${sub.id || sub.user_id}', 'approved')" class="flex-1 py-2.5 btn-pill-primary text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer shadow-md">
+                <i data-lucide="check-circle" class="w-4 h-4 text-cyan-200"></i>
+                <span>Approve & Verify Driver</span>
+              </button>
+            `}
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    if (window.lucide) lucide.createIcons();
+  }
+
+  window.handleAdminKycDecision = async function (targetId, newStatus) {
+    const user = state.currentUser;
+    if (!user || user.email?.toLowerCase().trim() !== 'shanthankolupula123@gmail.com') {
+      showToast('Unauthorized: Super Admin access required.', 'danger');
+      return;
+    }
+
+    let reason = '';
+    if (newStatus === 'rejected') {
+      reason = prompt('Please specify rejection reason for the driver (e.g. Blurry DL photo, Invalid Aadhaar):');
+      if (reason === null) return; // Cancelled
+      reason = reason.trim() || 'Uploaded documents were invalid or unreadable.';
+    }
+
+    try {
+      showToast(`Processing decision: ${newStatus.toUpperCase()}...`, 'info');
+
+      if (window.db?.kyc?.reviewDriverKyc) {
+        await window.db.kyc.reviewDriverKyc({
+          id: targetId,
+          status: newStatus,
+          rejectionReason: reason,
+          adminEmail: user.email
+        });
+      }
+
+      showToast(`Driver successfully ${newStatus}!`, 'success');
+      await loadAdminKycSubmissions();
+    } catch (err) {
+      console.error('Admin decision error:', err);
+      showToast('Failed to update driver status: ' + err.message, 'danger');
+    }
+  };
+
+  // -------------------------------------------------------------------------
+  // IMAGE LIGHTBOX PREVIEW HELPER
+  // -------------------------------------------------------------------------
+  window.openImageLightbox = function (src, caption = 'Document Preview') {
+    if (!src) return;
+    const modal = document.getElementById('imageLightboxModal');
+    const img = document.getElementById('lightboxImage');
+    const cap = document.getElementById('lightboxCaption');
+    if (img) img.src = src;
+    if (cap) cap.textContent = caption;
+    if (modal) modal.classList.remove('hidden');
+  };
+
+  window.closeImageLightbox = function () {
+    const modal = document.getElementById('imageLightboxModal');
+    if (modal) modal.classList.add('hidden');
+  };
 
   // =========================================================================
   // BOOTSTRAP ON LOAD
