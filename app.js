@@ -625,7 +625,7 @@
   window.handleGoogleSignIn = async function () {
     const emailVal = document.getElementById('authEmailInput')?.value?.trim();
     try {
-      showToast('Checking Google sign-in...', 'info');
+      showToast('Connecting to Google...', 'info');
       await window.db.auth.signInWithGoogle();
     } catch (err) {
       console.warn('Google sign-in check notice:', err);

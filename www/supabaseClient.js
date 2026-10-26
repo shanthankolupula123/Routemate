@@ -283,8 +283,11 @@
       // Safe pre-probe: verify if the Google OAuth provider is actually enabled in the Supabase Dashboard.
       // This prevents dumping the user onto an unhandled 400 "provider is not enabled" raw JSON page.
       const probeUrl = `${SUPABASE_CONFIG.url}/auth/v1/authorize?provider=google&redirect_to=${encodeURIComponent(redirectUrl)}`;
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 1500);
       try {
-        const probeResp = await fetch(probeUrl, { method: 'GET' });
+        const probeResp = await fetch(probeUrl, { method: 'GET', signal: controller.signal });
+        clearTimeout(timeoutId);
         if (probeResp.status === 400) {
           const body = await probeResp.json().catch(() => ({}));
           if (body.error_code === 'validation_failed' || (body.msg && body.msg.includes('provider is not enabled'))) {
@@ -294,10 +297,11 @@
           }
         }
       } catch (probeErr) {
+        clearTimeout(timeoutId);
         if (probeErr.code === 'PROVIDER_NOT_ENABLED' || probeErr.message?.includes('provider is not enabled')) {
           throw probeErr;
         }
-        // If fetch threw a CORS/network error, that means it successfully redirected to accounts.google.com!
+        // If fetch redirected to accounts.google.com or timed out, proceed directly with OAuth!
         console.log('Google OAuth active, proceeding with redirect...');
       }
 
