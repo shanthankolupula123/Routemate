@@ -1,6 +1,6 @@
 /**
- * Routemate - Core Application Controller (v34 Production Grade)
- * Full Supabase Auth + Live GPS Leaflet Route Tracking + Realtime Matching
+ * Routemate - Core Application Controller (v35 Production Grade)
+ * Mandatory Supabase Auth + Free OpenStreetMap Route Engine + Realtime Matching
  */
 
 (function () {
@@ -12,7 +12,7 @@
   const state = {
     currentUser: null,
     mode: 'rider', // 'rider' | 'driver'
-    activeTab: 'book', // 'book' | 'drive' | 'map' | 'activity' | 'profile'
+    activeTab: 'book', // 'book' | 'drive' | 'activity' | 'profile'
     authTab: 'signin', // 'signin' | 'signup'
     pickup: 'Uppal Metro, Hyderabad',
     drop: 'Jangaon Bus Depot',
@@ -29,8 +29,7 @@
     declinedRideIds: new Set(),
     maps: {
       rider: null,
-      driver: null,
-      fullscreen: null
+      driver: null
     },
     mapMarkers: {
       userGPS: null,
@@ -44,31 +43,6 @@
     activities: []
   };
 
-  // Pre-configured Test Profiles for Seamless Cross-Device Testing
-  const TEST_PROFILES = {
-    alice: {
-      id: 'usr_alice_commuter',
-      name: 'Alice Commuter',
-      email: 'alice.rider@routemate.local',
-      phone: '+91 98480 23145',
-      role: 'Daily Commuter',
-      rating: 4.95,
-      avatar: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=120&h=120&q=80'
-    },
-    bob: {
-      id: 'usr_bob_driver',
-      name: 'Bob Driver',
-      email: 'bob.driver@routemate.local',
-      phone: '+91 94942 85249',
-      role: 'Verified Driver',
-      rating: 4.92,
-      vehicleName: 'Hero Splendor Plus',
-      vehicleNumber: 'TS 08 AB 1234',
-      vehicleType: 'bike',
-      avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=120&h=120&q=80'
-    }
-  };
-
   // Key Stops on Hyderabad ➔ Jangaon NH163 Corridor
   const CORRIDOR_STOPS = [
     { name: 'Uppal Metro, Hyderabad', lat: 17.4018, lng: 78.5602 },
@@ -79,68 +53,115 @@
   ];
 
   // =========================================================================
-  // SUPABASE AUTH & USER SESSION
+  // MANDATORY SUPABASE AUTHENTICATION
   // =========================================================================
-  async function initAuthAndSession() {
-    // 1. Check active Supabase JWT Session
+  async function checkAuthSession() {
+    let sessionUser = null;
+
+    // 1. Check Supabase Session via SDK
     if (window.db?.auth) {
       try {
         const session = await window.db.auth.getSession();
         if (session && session.user) {
-          applyAuthUser(session.user);
+          sessionUser = normalizeAuthUser(session.user);
         }
       } catch (e) {
-        console.warn('Session fetch note:', e);
+        console.warn('Auth session check note:', e);
       }
 
-      // Listen to real-time auth changes
+      // Supabase Auth State Change Listener (e.g. for Google OAuth redirect)
       window.db.auth.onAuthStateChange((event, session) => {
-        console.log('👤 [AUTH STATE CHANGE]:', event);
+        console.log('👤 [AUTH EVENT]:', event);
         if (session && session.user) {
-          applyAuthUser(session.user);
+          const userObj = normalizeAuthUser(session.user);
+          unlockAppWithUser(userObj);
         } else if (event === 'SIGNED_OUT') {
-          state.currentUser = TEST_PROFILES.alice;
-          updateHeaderProfileUI();
+          lockAppToAuthScreen();
         }
       });
     }
 
-    // 2. LocalStorage fallback
-    if (!state.currentUser) {
+    // 2. Check LocalStorage Cached User
+    if (!sessionUser) {
       try {
         const saved = localStorage.getItem('routemate_user');
-        if (saved) state.currentUser = JSON.parse(saved);
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (parsed && (parsed.id || parsed.email)) {
+            sessionUser = parsed;
+          }
+        }
       } catch (e) {}
     }
 
-    // Default to Alice if not logged in
-    if (!state.currentUser) {
-      state.currentUser = TEST_PROFILES.alice;
+    // 3. Enforce Strict Mandatory Flow
+    if (sessionUser) {
+      unlockAppWithUser(sessionUser);
+    } else {
+      lockAppToAuthScreen();
     }
-
-    updateHeaderProfileUI();
   }
 
-  function applyAuthUser(user) {
+  function normalizeAuthUser(user) {
     const meta = user.user_metadata || {};
-    state.currentUser = {
-      id: user.id,
-      email: user.email,
+    return {
+      id: user.id || ('usr_' + Date.now()),
+      email: user.email || 'user@routemate.local',
       name: meta.name || user.email?.split('@')[0] || 'Verified Commuter',
       phone: meta.phone || '+91 98480 23145',
-      role: meta.role || 'Daily Commuter',
+      role: meta.role || 'rider',
       rating: 4.95,
-      avatar: meta.avatar || 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=120&h=120&q=80'
+      avatar: meta.avatar || meta.avatar_url || meta.picture || 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=120&h=120&q=80'
     };
-    try { localStorage.setItem('routemate_user', JSON.stringify(state.currentUser)); } catch (e) {}
-    updateHeaderProfileUI();
   }
 
-  function updateHeaderProfileUI() {
+  function unlockAppWithUser(user) {
+    state.currentUser = user;
+    try { localStorage.setItem('routemate_user', JSON.stringify(user)); } catch (e) {}
+
+    // Hide Auth Screen
+    const authScreen = document.getElementById('authScreen');
+    if (authScreen) authScreen.classList.add('hidden');
+
+    // Show Main App Elements
+    const header = document.getElementById('appHeader');
+    const main = document.getElementById('appMain');
+    const nav = document.getElementById('appBottomNav');
+    if (header) header.classList.remove('hidden');
+    if (main) main.classList.remove('hidden');
+    if (nav) nav.classList.remove('hidden');
+
+    updateProfileUI();
+
+    // Initialize map if needed
+    if (!state.maps.rider) {
+      setTimeout(() => initMapWidget('riderInteractiveMap', 'rider'), 150);
+    }
+  }
+
+  function lockAppToAuthScreen() {
+    state.currentUser = null;
+    localStorage.removeItem('routemate_user');
+
+    // Show Auth Screen
+    const authScreen = document.getElementById('authScreen');
+    if (authScreen) authScreen.classList.remove('hidden');
+
+    // Hide Main App Elements
+    const header = document.getElementById('appHeader');
+    const main = document.getElementById('appMain');
+    const nav = document.getElementById('appBottomNav');
+    if (header) header.classList.add('hidden');
+    if (main) main.classList.add('hidden');
+    if (nav) nav.classList.add('hidden');
+  }
+
+  function updateProfileUI() {
     const nameEl = document.getElementById('headerUserName');
     const avatarEl = document.getElementById('headerUserAvatar');
     const pNameEl = document.getElementById('profileUserName');
     const pEmailEl = document.getElementById('profileUserEmail');
+    const pRoleEl = document.getElementById('profileUserRole');
     const pAvatarEl = document.getElementById('profileUserAvatar');
 
     if (state.currentUser) {
@@ -149,37 +170,34 @@
       if (avatarEl) avatarEl.src = state.currentUser.avatar;
       if (pNameEl) pNameEl.textContent = state.currentUser.name;
       if (pEmailEl) pEmailEl.textContent = state.currentUser.email;
+      if (pRoleEl) pRoleEl.textContent = `${state.currentUser.role === 'driver' ? 'Verified Driver' : 'Commuter'} • 4.95 ★`;
       if (pAvatarEl) pAvatarEl.src = state.currentUser.avatar;
     }
   }
-
-  window.openAuthModal = function () {
-    const modal = document.getElementById('authModal');
-    if (modal) modal.classList.remove('hidden');
-  };
-
-  window.closeAuthModal = function () {
-    const modal = document.getElementById('authModal');
-    if (modal) modal.classList.add('hidden');
-  };
 
   window.setAuthTab = function (tab) {
     state.authTab = tab;
     const btnIn = document.getElementById('authTabSignIn');
     const btnUp = document.getElementById('authTabSignUp');
     const nameField = document.getElementById('authNameField');
+    const roleField = document.getElementById('authRoleField');
     const submitBtn = document.getElementById('btnAuthSubmit');
+    const errBox = document.getElementById('authErrorMsg');
+
+    if (errBox) errBox.classList.add('hidden');
 
     if (tab === 'signup') {
-      btnUp.className = 'w-1/2 py-2 rounded-full bg-white text-blue-700 shadow-sm transition';
-      btnIn.className = 'w-1/2 py-2 rounded-full text-slate-500 hover:text-slate-700 transition';
-      nameField.classList.remove('hidden');
-      submitBtn.innerHTML = `<span>Create Account</span>`;
+      btnUp.className = 'w-1/2 py-2.5 rounded-full bg-white text-blue-700 shadow-sm transition cursor-pointer';
+      btnIn.className = 'w-1/2 py-2.5 rounded-full text-slate-500 hover:text-slate-700 transition cursor-pointer';
+      if (nameField) nameField.classList.remove('hidden');
+      if (roleField) roleField.classList.remove('hidden');
+      if (submitBtn) submitBtn.innerHTML = `<span>Create Account</span>`;
     } else {
-      btnIn.className = 'w-1/2 py-2 rounded-full bg-white text-blue-700 shadow-sm transition';
-      btnUp.className = 'w-1/2 py-2 rounded-full text-slate-500 hover:text-slate-700 transition';
-      nameField.classList.add('hidden');
-      submitBtn.innerHTML = `<span>Sign In</span>`;
+      btnIn.className = 'w-1/2 py-2.5 rounded-full bg-white text-blue-700 shadow-sm transition cursor-pointer';
+      btnUp.className = 'w-1/2 py-2.5 rounded-full text-slate-500 hover:text-slate-700 transition cursor-pointer';
+      if (nameField) nameField.classList.add('hidden');
+      if (roleField) roleField.classList.add('hidden');
+      if (submitBtn) submitBtn.innerHTML = `<span>Sign In</span>`;
     }
   };
 
@@ -188,27 +206,49 @@
     const email = document.getElementById('authEmailInput')?.value.trim();
     const password = document.getElementById('authPasswordInput')?.value.trim();
     const name = document.getElementById('authNameInput')?.value.trim();
+    const role = document.querySelector('input[name="authRole"]:checked')?.value || 'rider';
     const submitBtn = document.getElementById('btnAuthSubmit');
+    const errBox = document.getElementById('authErrorMsg');
 
     if (!email || !password) return;
+    if (errBox) errBox.classList.add('hidden');
 
     submitBtn.disabled = true;
-    submitBtn.innerHTML = `<span class="animate-spin mr-1">⚙️</span> Processing...`;
+    submitBtn.innerHTML = `<span class="animate-spin mr-1">⚙️</span> Connecting...`;
 
     try {
       if (state.authTab === 'signup') {
-        const data = await window.db.auth.signUp(email, password, { name: name || 'Verified Commuter', role: state.mode });
+        const data = await window.db.auth.signUp(email, password, { name: name || email.split('@')[0], role });
         showToast('Account created successfully!', 'success');
-        if (data?.user) applyAuthUser(data.user);
+        if (data?.user) {
+          const userObj = normalizeAuthUser(data.user);
+          userObj.name = name || userObj.name;
+          userObj.role = role;
+          unlockAppWithUser(userObj);
+        } else {
+          // If Supabase has email confirmation enabled
+          showToast('Account created! Please sign in with your password.', 'info');
+          setAuthTab('signin');
+        }
       } else {
         const data = await window.db.auth.signIn(email, password);
         showToast('Signed in successfully!', 'success');
-        if (data?.user) applyAuthUser(data.user);
+        if (data?.user) {
+          const userObj = normalizeAuthUser(data.user);
+          unlockAppWithUser(userObj);
+        }
       }
-      closeAuthModal();
     } catch (err) {
       console.error('Auth error:', err);
-      showToast(err.message || 'Authentication failed', 'danger');
+      let msg = err.message || 'Authentication failed. Please verify credentials.';
+      if (msg.toLowerCase().includes('invalid login credentials')) {
+        msg = 'Invalid email or password. Please try again or create an account.';
+      }
+      if (errBox) {
+        errBox.textContent = msg;
+        errBox.classList.remove('hidden');
+      }
+      showToast(msg, 'danger');
     } finally {
       submitBtn.disabled = false;
       submitBtn.innerHTML = `<span>${state.authTab === 'signup' ? 'Create Account' : 'Sign In'}</span>`;
@@ -224,28 +264,15 @@
   };
 
   window.handleSignOut = async function () {
-    await window.db.auth.signOut();
-    state.currentUser = TEST_PROFILES.alice;
-    updateHeaderProfileUI();
-    showToast('Signed out of Routemate', 'info');
-  };
-
-  window.setUserProfile = function (profileKey) {
-    if (TEST_PROFILES[profileKey]) {
-      state.currentUser = TEST_PROFILES[profileKey];
-      try { localStorage.setItem('routemate_user', JSON.stringify(state.currentUser)); } catch (e) {}
-      updateHeaderProfileUI();
-      closeAuthModal();
-      showToast(`Switched profile to: ${state.currentUser.name}`, 'info');
-
-      if (state.mode === 'driver' && state.driverOnline) {
-        startDriverRadar();
-      }
+    if (confirm('Are you sure you want to sign out?')) {
+      await window.db.auth.signOut();
+      lockAppToAuthScreen();
+      showToast('Signed out of Routemate', 'info');
     }
   };
 
   // =========================================================================
-  // REAL-TIME GPS TRACKING & INTERACTIVE LEAFLET MAP
+  // FREE OPENSTREETMAP INTERACTIVE MAP & GPS TRACKING (NO API KEY ERRORS)
   // =========================================================================
   function initLiveGPS() {
     if (!('geolocation' in navigator)) return;
@@ -313,25 +340,30 @@
     const el = document.getElementById(containerId);
     if (!el || state.maps[mapKey]) return;
 
-    const map = L.map(containerId, {
-      zoomControl: false,
-      attributionControl: false
-    }).setView([17.5500, 78.8500], 10);
+    try {
+      const map = L.map(containerId, {
+        zoomControl: false,
+        attributionControl: false
+      }).setView([17.5500, 78.8500], 10);
 
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
-      maxZoom: 19,
-      subdomains: 'abcd'
-    }).addTo(map);
+      // Clean, Free Standard OpenStreetMap Tiles (100% Free, No Watermark, No API Key Required)
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19,
+        subdomains: ['a', 'b', 'c']
+      }).addTo(map);
 
-    // Click handler for dynamic point selection on map
-    map.on('click', (e) => {
-      handleMapClick(e.latlng);
-    });
+      // Tap on map for dynamic point selection
+      map.on('click', (e) => {
+        handleMapClick(e.latlng);
+      });
 
-    state.maps[mapKey] = map;
-    renderCorridorOnMap(map);
+      state.maps[mapKey] = map;
+      renderCorridorOnMap(map);
 
-    setTimeout(() => map.invalidateSize(), 200);
+      setTimeout(() => map.invalidateSize(), 200);
+    } catch (e) {
+      console.warn('Map initialization note:', e);
+    }
   }
 
   function renderCorridorOnMap(map) {
@@ -339,7 +371,7 @@
 
     const coords = CORRIDOR_STOPS.map(s => [s.lat, s.lng]);
 
-    // Corridor polyline
+    // Corridor dashed polyline
     L.polyline(coords, {
       color: '#0052CC',
       weight: 4,
@@ -347,7 +379,7 @@
       dashArray: '8, 8'
     }).addTo(map);
 
-    // Corridor stops
+    // Stop markers
     CORRIDOR_STOPS.forEach(stop => {
       L.circleMarker([stop.lat, stop.lng], {
         radius: 5,
@@ -381,7 +413,6 @@
     const d = state.dropCoords;
 
     if (p && d) {
-      // Pickup Pin (Emerald)
       state.mapMarkers.pickup = L.circleMarker([p.lat, p.lng], {
         radius: 8,
         color: '#FFFFFF',
@@ -390,7 +421,6 @@
         weight: 3
       }).addTo(map).bindPopup(`<b>Pickup:</b> ${state.pickup}`);
 
-      // Drop Pin (Royal Blue)
       state.mapMarkers.drop = L.circleMarker([d.lat, d.lng], {
         radius: 8,
         color: '#FFFFFF',
@@ -399,7 +429,6 @@
         weight: 3
       }).addTo(map).bindPopup(`<b>Drop:</b> ${state.drop}`);
 
-      // Dynamic Route Line
       state.mapMarkers.routeLine = L.polyline([[p.lat, p.lng], [d.lat, d.lng]], {
         color: '#0A84FF',
         weight: 4,
@@ -418,7 +447,7 @@
         state.mapTapTarget = 'pickup';
         badge.classList.remove('hidden');
         document.getElementById('mapTapTargetName').textContent = 'Pickup Point';
-        showToast('Tap on the map to place Pickup pin', 'info');
+        showToast('Tap on map to set Pickup', 'info');
       } else {
         badge.classList.add('hidden');
       }
@@ -430,18 +459,18 @@
 
     if (state.mapTapTarget === 'pickup') {
       state.pickupCoords = { lat: latlng.lat, lng: latlng.lng };
-      state.pickup = `Location (${latlng.lat.toFixed(4)}, ${latlng.lng.toFixed(4)})`;
+      state.pickup = `Stop (${latlng.lat.toFixed(4)}, ${latlng.lng.toFixed(4)})`;
       document.getElementById('inputPickup').value = state.pickup;
       state.mapTapTarget = 'drop';
       document.getElementById('mapTapTargetName').textContent = 'Drop Point';
       showToast('Pickup set! Now tap destination drop point.', 'info');
     } else {
       state.dropCoords = { lat: latlng.lat, lng: latlng.lng };
-      state.drop = `Location (${latlng.lat.toFixed(4)}, ${latlng.lng.toFixed(4)})`;
+      state.drop = `Stop (${latlng.lat.toFixed(4)}, ${latlng.lng.toFixed(4)})`;
       document.getElementById('inputDrop').value = state.drop;
       state.mapTapMode = false;
       document.getElementById('mapTapModeBadge').classList.add('hidden');
-      showToast('Drop location set! Route updated.', 'success');
+      showToast('Destination set! Route updated.', 'success');
     }
 
     calculateDistanceAndFare();
@@ -452,7 +481,6 @@
     const p = state.pickupCoords;
     const d = state.dropCoords;
 
-    // Haversine formula
     const R = 6371;
     const dLat = (d.lat - p.lat) * Math.PI / 180;
     const dLng = (d.lng - p.lng) * Math.PI / 180;
@@ -460,7 +488,7 @@
               Math.cos(p.lat * Math.PI / 180) * Math.cos(d.lat * Math.PI / 180) *
               Math.sin(dLng/2) * Math.sin(dLng/2);
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-    state.distanceKm = Math.max(5, Math.round(R * c * 1.2)); // 1.2 road curve factor
+    state.distanceKm = Math.max(5, Math.round(R * c * 1.2));
 
     let rate = 1.3;
     if (state.vehicleType === 'car') rate = 2.6;
@@ -472,7 +500,7 @@
   }
 
   // =========================================================================
-  // MODE & NAVIGATION SWITCHING
+  // MODE & NAVIGATION SWITCHING (4 ESSENTIAL TABS ONLY)
   // =========================================================================
   window.switchMode = function (newMode) {
     state.mode = newMode;
@@ -519,11 +547,6 @@
       if (riderScreen) riderScreen.classList.add('hidden');
       if (driverScreen) driverScreen.classList.remove('hidden');
 
-      // Auto-switch to Bob if user is currently Alice for realistic driver testing
-      if (state.currentUser?.email === TEST_PROFILES.alice.email) {
-        setUserProfile('bob');
-      }
-
       initMapWidget('driverInteractiveMap', 'driver');
       setTimeout(() => state.maps.driver?.invalidateSize(), 150);
       startDriverRadar();
@@ -539,7 +562,6 @@
     const screens = {
       book: document.getElementById('riderScreen'),
       drive: document.getElementById('driverScreen'),
-      map: document.getElementById('mapScreen'),
       activity: document.getElementById('activityScreen'),
       profile: document.getElementById('profileScreen')
     };
@@ -552,10 +574,6 @@
       switchMode('driver');
     } else {
       if (screens[tabName]) screens[tabName].classList.remove('hidden');
-      if (tabName === 'map') {
-        initMapWidget('leafletMapContainer', 'fullscreen');
-        setTimeout(() => state.maps.fullscreen?.invalidateSize(), 150);
-      }
       if (tabName === 'activity') {
         renderActivityList();
       }
@@ -563,7 +581,7 @@
   };
 
   function setActiveNavPill(activeTab) {
-    const tabs = ['book', 'drive', 'map', 'activity', 'profile'];
+    const tabs = ['book', 'drive', 'activity', 'profile'];
     tabs.forEach(tab => {
       const btn = document.getElementById(`navTab-${tab}`);
       if (!btn) return;
@@ -669,7 +687,6 @@
         renderRiderActiveHUD(result.request);
         showToast('📡 Realtime Radar Active! Searching for nearby verified drivers...', 'info');
 
-        // Start Realtime + Polling listener for driver acceptance
         window.db.matching.startRiderPolling(result.request.id, (acceptedData) => {
           handleDriverAcceptedRiderRequest(acceptedData);
         });
@@ -801,7 +818,7 @@
   // DRIVER WORKFLOW (BROADCAST SCREEN & REALTIME MATCHING)
   // =========================================================================
   function startDriverRadar() {
-    if (!state.driverOnline) return;
+    if (!state.driverOnline || !state.currentUser) return;
     console.log('📡 [APP DRIVER] Starting Realtime Radar listener for user:', state.currentUser.name);
 
     window.db.matching.startDriverPolling(state.currentUser, (rides) => {
@@ -814,11 +831,9 @@
   function updateDriverMapIncomingMarkers(rides) {
     if (!state.maps.driver) return;
 
-    // Remove old commuter markers
     state.mapMarkers.commuters.forEach(m => state.maps.driver.removeLayer(m));
     state.mapMarkers.commuters = [];
 
-    // Add marker for each searching commuter
     rides.forEach(ride => {
       if (ride.pickupLat && ride.pickupLng) {
         const marker = L.circleMarker([ride.pickupLat, ride.pickupLng], {
@@ -1164,12 +1179,11 @@
   // BOOTSTRAP ON LOAD
   // =========================================================================
   document.addEventListener('DOMContentLoaded', async () => {
-    await initAuthAndSession();
     calculateDistanceAndFare();
     initLiveGPS();
-    initMapWidget('riderInteractiveMap', 'rider');
     if (window.lucide) lucide.createIcons();
-    console.log('✨ [ROUTEMATE] Production Grade v34 Realtime & Auth Initialized.');
+    await checkAuthSession();
+    console.log('✨ [ROUTEMATE] Production Grade v35 Initialized.');
   });
 
 })();

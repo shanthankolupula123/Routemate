@@ -1,5 +1,5 @@
 /**
- * Routemate - Supabase Realtime & Auth Client (v34 Production Grade)
+ * Routemate - Supabase Realtime & Auth Client (v35 Production Grade)
  * Full Supabase Auth (Email/Pass + Google OAuth) + Realtime Postgres Changes + Direct REST Fallback
  */
 
@@ -11,23 +11,29 @@
     publishableKey: 'sb_publishable_FD8-opedLq151SNuBbWp9g_bLI5hB_a'
   };
 
-  // Initialize official Supabase client instance with auto session persistence
+  // Lazy-loading client getter
   let supabase = null;
-  if (typeof window.supabase !== 'undefined' && typeof window.supabase.createClient === 'function') {
-    try {
-      supabase = window.supabase.createClient(SUPABASE_CONFIG.url, SUPABASE_CONFIG.publishableKey, {
-        auth: {
-          persistSession: true,
-          autoRefreshToken: true,
-          detectSessionInUrl: true,
-          storage: window.localStorage
-        }
-      });
-      console.log('✅ [SUPABASE CLIENT] Initialized with Realtime & Auth support.');
-    } catch (e) {
-      console.warn('⚠️ [SUPABASE CLIENT] Error initializing supabase client:', e);
+  function getSupabase() {
+    if (!supabase && typeof window !== 'undefined' && window.supabase && typeof window.supabase.createClient === 'function') {
+      try {
+        supabase = window.supabase.createClient(SUPABASE_CONFIG.url, SUPABASE_CONFIG.publishableKey, {
+          auth: {
+            persistSession: true,
+            autoRefreshToken: true,
+            detectSessionInUrl: true,
+            storage: window.localStorage
+          }
+        });
+        console.log('✅ [SUPABASE CLIENT] Initialized with Realtime & Auth support.');
+      } catch (e) {
+        console.warn('⚠️ [SUPABASE CLIENT] Init warning:', e);
+      }
     }
+    return supabase;
   }
+
+  // Pre-initialize
+  getSupabase();
 
   /**
    * Direct fetch helper to Supabase PostgREST
@@ -90,22 +96,29 @@
      * Email & Password Sign Up
      */
     async signUp(email, password, { name, role, phone } = {}) {
-      if (!supabase) throw new Error('Supabase SDK not loaded');
+      const client = getSupabase();
+      if (!client) throw new Error('Supabase service is initializing. Please try again.');
 
-      const { data, error } = await supabase.auth.signUp({
-        email,
-        password,
+      const cleanEmail = String(email || '').trim().toLowerCase();
+      const cleanPass = String(password || '').trim();
+
+      const { data, error } = await client.auth.signUp({
+        email: cleanEmail,
+        password: cleanPass,
         options: {
           data: {
-            name: name || 'Verified Commuter',
+            name: name || cleanEmail.split('@')[0] || 'Verified Commuter',
             role: role || 'rider',
-            phone: phone || '+91 98480 23145',
+            phone: phone || '',
             avatar: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=120&h=120&q=80'
           }
         }
       });
 
-      if (error) throw error;
+      if (error) {
+        console.error('Supabase Sign Up Error:', error);
+        throw error;
+      }
       return data;
     },
 
@@ -113,14 +126,21 @@
      * Email & Password Login
      */
     async signIn(email, password) {
-      if (!supabase) throw new Error('Supabase SDK not loaded');
+      const client = getSupabase();
+      if (!client) throw new Error('Supabase service is initializing. Please try again.');
 
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email,
-        password
+      const cleanEmail = String(email || '').trim().toLowerCase();
+      const cleanPass = String(password || '').trim();
+
+      const { data, error } = await client.auth.signInWithPassword({
+        email: cleanEmail,
+        password: cleanPass
       });
 
-      if (error) throw error;
+      if (error) {
+        console.error('Supabase Sign In Error:', error);
+        throw error;
+      }
       return data;
     },
 
@@ -128,12 +148,17 @@
      * Google OAuth Login
      */
     async signInWithGoogle() {
-      if (!supabase) throw new Error('Supabase SDK not loaded');
+      const client = getSupabase();
+      if (!client) throw new Error('Supabase service is initializing. Please try again.');
 
-      const { data, error } = await supabase.auth.signInWithOAuth({
+      const redirectUrl = (window.location.origin && !window.location.origin.includes('localhost') && !window.location.origin.includes('capacitor://'))
+        ? window.location.origin
+        : 'https://www.routemate.pro';
+
+      const { data, error } = await client.auth.signInWithOAuth({
         provider: 'google',
         options: {
-          redirectTo: window.location.origin
+          redirectTo: redirectUrl
         }
       });
 
@@ -145,8 +170,9 @@
      * Sign Out
      */
     async signOut() {
-      if (supabase) {
-        await supabase.auth.signOut().catch(() => {});
+      const client = getSupabase();
+      if (client) {
+        await client.auth.signOut().catch(() => {});
       }
       localStorage.removeItem('routemate_user');
       localStorage.removeItem('routemate_auth_token');
@@ -156,17 +182,23 @@
      * Get Current Active Session
      */
     async getSession() {
-      if (!supabase) return null;
-      const { data } = await supabase.auth.getSession();
-      return data?.session || null;
+      const client = getSupabase();
+      if (!client) return null;
+      try {
+        const { data } = await client.auth.getSession();
+        return data?.session || null;
+      } catch (e) {
+        return null;
+      }
     },
 
     /**
      * Listen to Auth state changes
      */
     onAuthStateChange(callback) {
-      if (!supabase) return;
-      return supabase.auth.onAuthStateChange((event, session) => {
+      const client = getSupabase();
+      if (!client) return { data: { subscription: { unsubscribe: () => {} } } };
+      return client.auth.onAuthStateChange((event, session) => {
         if (typeof callback === 'function') {
           callback(event, session);
         }
@@ -366,9 +398,10 @@
       console.log('📡 [ROUTEMATE RIDER] Subscribing to ride acceptance:', requestId);
 
       // 1. Supabase Realtime Channel
-      if (supabase) {
+      const client = getSupabase();
+      if (client) {
         try {
-          this._riderChannel = supabase
+          this._riderChannel = client
             .channel(`rider-ride-${requestId}`)
             .on(
               'postgres_changes',
@@ -440,8 +473,9 @@
         clearInterval(this._riderTimer);
         this._riderTimer = null;
       }
-      if (this._riderChannel && supabase) {
-        supabase.removeChannel(this._riderChannel);
+      const client = getSupabase();
+      if (this._riderChannel && client) {
+        client.removeChannel(this._riderChannel);
         this._riderChannel = null;
       }
     },
@@ -505,9 +539,10 @@
       };
 
       // 1. Supabase Realtime Channel for Instant 0ms Latency
-      if (supabase) {
+      const client = getSupabase();
+      if (client) {
         try {
-          this._realtimeChannel = supabase
+          this._realtimeChannel = client
             .channel('driver-rides-feed')
             .on(
               'postgres_changes',
@@ -535,8 +570,9 @@
         clearInterval(this._driverTimer);
         this._driverTimer = null;
       }
-      if (this._realtimeChannel && supabase) {
-        supabase.removeChannel(this._realtimeChannel);
+      const client = getSupabase();
+      if (this._realtimeChannel && client) {
+        client.removeChannel(this._realtimeChannel);
         this._realtimeChannel = null;
       }
     },
@@ -606,7 +642,7 @@
 
   // Export clean global database object
   window.db = {
-    supabase,
+    getSupabase,
     auth,
     supabaseRest,
     matching,
