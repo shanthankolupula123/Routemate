@@ -1910,8 +1910,12 @@
             </div>
           </div>
 
-          <div class="mt-4 flex gap-2">
-            <button type="button" onclick="cancelRiderActiveRequest()" class="w-full py-2.5 btn-pill-danger text-xs font-bold cursor-pointer">
+          <div class="mt-4 grid grid-cols-2 gap-2">
+            <button type="button" onclick="shareRideDetailsWhatsApp()" class="py-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer active:scale-95">
+              <svg class="w-3.5 h-3.5 fill-current text-emerald-400" viewBox="0 0 24 24"><path d="M.057 24l1.687-6.163c-1.041-1.804-1.588-3.849-1.587-5.946.003-6.556 5.338-11.891 11.893-11.891 3.181.001 6.167 1.24 8.413 3.488 2.245 2.248 3.481 5.236 3.48 8.414-.003 6.557-5.338 11.892-11.893 11.892-1.99-.001-3.951-.5-5.688-1.448l-6.305 1.654zm6.597-3.807c1.676.995 3.276 1.591 5.392 1.592 5.448 0 9.886-4.434 9.889-9.885.002-5.462-4.415-9.89-9.881-9.892-5.452 0-9.887 4.434-9.889 9.884-.001 2.225.651 3.891 1.746 5.634l-.999 3.648 3.742-.981zm11.387-5.464c-.074-.124-.272-.198-.57-.347-.297-.149-1.758-.868-2.031-.967-.272-.099-.47-.149-.669.149-.198.297-.768.967-.941 1.165-.173.198-.347.223-.644.074-.297-.149-1.255-.462-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.297-.347.446-.521.151-.172.2-.296.3-.495.099-.198.05-.372-.025-.521-.075-.148-.669-1.611-.916-2.206-.242-.579-.487-.501-.669-.51l-.57-.01c-.198 0-.52.074-.792.372s-1.04 1.016-1.04 2.479 1.065 2.876 1.213 3.074c.149.198 2.095 3.2 5.076 4.487.709.306 1.263.489 1.694.626.712.226 1.36.194 1.872.118.571-.085 1.758-.719 2.006-1.413.248-.695.248-1.29.173-1.414z"/></svg>
+              <span>Share Request</span>
+            </button>
+            <button type="button" onclick="cancelRiderActiveRequest()" class="py-2.5 rounded-xl btn-pill-danger text-xs font-bold cursor-pointer active:scale-95">
               Cancel Request
             </button>
           </div>
@@ -1937,12 +1941,12 @@
 
           <div class="mt-3.5 flex items-center gap-3">
             <img src="${driver.avatar && !driver.avatar.includes('unsplash') ? driver.avatar : getInitialsAvatarSvg(driver.name || 'Driver', 120, '#10B981')}" alt="Driver" class="w-12 h-12 rounded-full object-cover border-2 border-emerald-400 shadow-md" />
-            <div class="text-xs flex-1">
-              <h4 class="font-black text-white text-sm">${driver.name || 'Verified Driver'}</h4>
-              <p class="text-slate-300 font-mono text-[11px]">${driver.vehicleNumber || 'TG 08 AB 1234'} • ${driver.vehicleName || 'Hero Splendor'}</p>
+            <div class="text-xs flex-1 min-w-0">
+              <h4 class="font-black text-white text-sm truncate">${driver.name || 'Verified Driver'}</h4>
+              <p class="text-slate-300 font-mono text-[11px] truncate">${driver.vehicleNumber || 'TG 08 AB 1234'} • ${driver.vehicleName || 'Hero Splendor'}</p>
               <p class="text-emerald-300 text-[10px] font-bold mt-0.5">Rating: 4.9 ★ • Verified Commuter</p>
             </div>
-            <a href="tel:${driver.phone || '+919494285249'}" class="w-10 h-10 rounded-full bg-emerald-600 hover:bg-emerald-500 text-white flex items-center justify-center shadow-lg transition">
+            <a href="tel:${driver.phone || '+919494285249'}" class="w-10 h-10 rounded-full bg-emerald-600 hover:bg-emerald-500 text-white flex items-center justify-center shadow-lg transition flex-shrink-0">
               <i data-lucide="phone" class="w-4 h-4"></i>
             </a>
           </div>
@@ -1950,6 +1954,18 @@
           <div class="mt-4 pt-3 border-t border-white/10 flex items-center justify-between text-xs">
             <span class="text-slate-300">Fuel Share to Pay (UPI)</span>
             <span class="font-black text-emerald-300 text-base">₹${req.fare}</span>
+          </div>
+
+          <!-- Passenger Safety Action Bar (WhatsApp Share & Emergency SOS) -->
+          <div class="mt-3.5 pt-3 border-t border-white/10 grid grid-cols-2 gap-2">
+            <button type="button" onclick="shareRideDetailsWhatsApp()" class="py-2.5 px-3 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs flex items-center justify-center gap-1.5 transition shadow cursor-pointer active:scale-95">
+              <svg class="w-4 h-4 fill-current flex-shrink-0" viewBox="0 0 24 24"><path d="M.057 24l1.687-6.163c-1.041-1.804-1.588-3.849-1.587-5.946.003-6.556 5.338-11.891 11.893-11.891 3.181.001 6.167 1.24 8.413 3.488 2.245 2.248 3.481 5.236 3.48 8.414-.003 6.557-5.338 11.892-11.893 11.892-1.99-.001-3.951-.5-5.688-1.448l-6.305 1.654zm6.597-3.807c1.676.995 3.276 1.591 5.392 1.592 5.448 0 9.886-4.434 9.889-9.885.002-5.462-4.415-9.89-9.881-9.892-5.452 0-9.887 4.434-9.889 9.884-.001 2.225.651 3.891 1.746 5.634l-.999 3.648 3.742-.981zm11.387-5.464c-.074-.124-.272-.198-.57-.347-.297-.149-1.758-.868-2.031-.967-.272-.099-.47-.149-.669.149-.198.297-.768.967-.941 1.165-.173.198-.347.223-.644.074-.297-.149-1.255-.462-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.297-.347.446-.521.151-.172.2-.296.3-.495.099-.198.05-.372-.025-.521-.075-.148-.669-1.611-.916-2.206-.242-.579-.487-.501-.669-.51l-.57-.01c-.198 0-.52.074-.792.372s-1.04 1.016-1.04 2.479 1.065 2.876 1.213 3.074c.149.198 2.095 3.2 5.076 4.487.709.306 1.263.489 1.694.626.712.226 1.36.194 1.872.118.571-.085 1.758-.719 2.006-1.413.248-.695.248-1.29.173-1.414z"/></svg>
+              <span>Share Trip Details</span>
+            </button>
+            <button type="button" onclick="triggerEmergencySOS()" class="py-2.5 px-3 rounded-2xl bg-rose-600 hover:bg-rose-700 text-white font-black text-xs flex items-center justify-center gap-1.5 transition shadow cursor-pointer active:scale-95 animate-pulse">
+              <i data-lucide="shield-alert" class="w-4 h-4 text-white"></i>
+              <span>Emergency SOS</span>
+            </button>
           </div>
         </div>
       `;
@@ -2730,12 +2746,188 @@
   }
   window.renderActivityList = renderActivityList;
 
+  // =========================================================================
+  // PASSENGER SAFETY: EMERGENCY SOS & WHATSAPP RIDE SHARING
+  // =========================================================================
+
   window.triggerEmergencySOS = function () {
-    const lat = state.userGPS?.lat || state.pickupCoords.lat;
-    const lng = state.userGPS?.lng || state.pickupCoords.lng;
-    if (confirm(`🚨 Activate Emergency SOS?\n\nThis will trigger direct emergency assistance to 112 with current GPS coordinates (${lat.toFixed(4)}, ${lng.toFixed(4)}).`)) {
-      window.location.href = "tel:112";
+    const modal = document.getElementById('emergencySosModal');
+    const coordsDisplay = document.getElementById('sosGpsCoordinatesDisplay');
+    const tripDetails = document.getElementById('sosActiveTripDetails');
+
+    // Get freshest coordinates
+    let lat = state.userGPS?.lat || state.pickupCoords?.lat || 17.4018;
+    let lng = state.userGPS?.lng || state.pickupCoords?.lng || 78.5602;
+
+    if (coordsDisplay) {
+      coordsDisplay.textContent = `Lat: ${lat.toFixed(5)}, Lng: ${lng.toFixed(5)}\nhttps://maps.google.com/?q=${lat.toFixed(5)},${lng.toFixed(5)}`;
     }
+
+    // Try high-accuracy GPS update immediately
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(pos => {
+        lat = pos.coords.latitude;
+        lng = pos.coords.longitude;
+        state.userGPS = { lat, lng };
+        if (coordsDisplay) {
+          coordsDisplay.textContent = `Lat: ${lat.toFixed(5)}, Lng: ${lng.toFixed(5)}\nhttps://maps.google.com/?q=${lat.toFixed(5)},${lng.toFixed(5)}`;
+        }
+      }, () => {}, { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 });
+    }
+
+    // Populate active trip context if available
+    const activeRide = state.activeRiderRequest || state.activeDriverTrip;
+    if (tripDetails && activeRide) {
+      tripDetails.classList.remove('hidden');
+      const driver = activeRide.driver || {};
+      const driverName = driver.name || activeRide.driverName || 'Corridor Driver';
+      const driverPhone = driver.phone || '';
+      const vehNumber = driver.vehicleNumber || 'Verified Vehicle';
+      const routeText = `${activeRide.pickup || 'Pickup'} ➔ ${activeRide.drop || 'Drop'}`;
+
+      tripDetails.innerHTML = `
+        <div class="font-bold text-slate-800">Trip: <span class="font-semibold">${routeText}</span></div>
+        <div class="font-bold text-slate-800">Driver: <span class="font-semibold text-rose-700">${driverName}${driverPhone ? ` (${driverPhone})` : ''}</span></div>
+        <div class="font-bold text-slate-800">Vehicle Plate: <span class="font-mono font-bold text-slate-900">${vehNumber}</span></div>
+        ${activeRide.pin ? `<div class="font-bold text-slate-800">Security PIN: <span class="font-mono text-blue-700">${activeRide.pin}</span></div>` : ''}
+      `;
+    } else if (tripDetails) {
+      tripDetails.classList.add('hidden');
+      tripDetails.innerHTML = '';
+    }
+
+    if (modal) modal.classList.remove('hidden');
+    if (window.lucide) lucide.createIcons();
+
+    playNotificationSound();
+    showToast('🚨 Emergency SOS Activated! Direct call to 112 & live GPS ready.', 'danger');
+
+    // Trigger direct emergency call to 112
+    try {
+      window.location.href = 'tel:112';
+    } catch (e) {
+      console.warn('Direct dial 112 warning:', e);
+    }
+  };
+
+  window.closeEmergencySosModal = function () {
+    const modal = document.getElementById('emergencySosModal');
+    if (modal) modal.classList.add('hidden');
+    showToast('Emergency SOS dismissed. Stay safe!', 'info');
+  };
+
+  window.copySosGpsCoordinates = function () {
+    const lat = state.userGPS?.lat || state.pickupCoords?.lat || 17.4018;
+    const lng = state.userGPS?.lng || state.pickupCoords?.lng || 78.5602;
+    const mapsLink = `https://maps.google.com/?q=${lat.toFixed(5)},${lng.toFixed(5)}`;
+    const copyText = `Live GPS: ${lat.toFixed(5)}, ${lng.toFixed(5)} (${mapsLink})`;
+
+    navigator.clipboard?.writeText(copyText).then(() => {
+      const btn = document.getElementById('btnCopySosGps');
+      if (btn) {
+        btn.textContent = 'Copied! ✓';
+        setTimeout(() => { btn.textContent = 'Copy GPS'; }, 2000);
+      }
+      showToast('GPS coordinates copied to clipboard!', 'success');
+    }).catch(() => {
+      showToast(copyText, 'info');
+    });
+  };
+
+  window.sendEmergencySosWhatsApp = function () {
+    const lat = state.userGPS?.lat || state.pickupCoords?.lat || 17.4018;
+    const lng = state.userGPS?.lng || state.pickupCoords?.lng || 78.5602;
+    const mapsLink = `https://maps.google.com/?q=${lat.toFixed(5)},${lng.toFixed(5)}`;
+    const activeRide = state.activeRiderRequest || state.activeDriverTrip;
+    const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+    let sosText = `🚨 *EMERGENCY SOS ALERT!* 🚨\n\n` +
+      `I need immediate assistance! I am currently in a highway rideshare on Routemate.\n\n` +
+      `📍 *My Live GPS Location:*\n${mapsLink}\n(Coordinates: ${lat.toFixed(5)}, ${lng.toFixed(5)})\n\n`;
+
+    if (activeRide) {
+      const driver = activeRide.driver || {};
+      const driverName = driver.name || activeRide.driverName || 'Driver';
+      const driverPhone = driver.phone || '';
+      const vehNumber = driver.vehicleNumber || 'Vehicle';
+      const vehName = driver.vehicleName || activeRide.vehicleType || '';
+
+      sosText += `🚗 *Trip Info:*\n` +
+        `• Route: ${activeRide.pickup || 'Pickup'} ➔ ${activeRide.drop || 'Drop'}\n` +
+        `• Driver: ${driverName}${driverPhone ? ` (${driverPhone})` : ''}\n` +
+        `• Vehicle: ${vehName} (${vehNumber})\n` +
+        (activeRide.pin ? `• Security PIN: ${activeRide.pin}\n` : '') +
+        `\n`;
+    }
+
+    sosText += `⏰ *Alert Time:* ${timeStr}\n\n` +
+      `⚠️ *Please contact police (112) or track my location immediately!*`;
+
+    const waUrl = `https://api.whatsapp.com/send?text=${encodeURIComponent(sosText)}`;
+    window.open(waUrl, '_blank');
+    showToast('Opening WhatsApp to send Emergency SOS alert...', 'danger');
+  };
+
+  window.shareRideDetailsWhatsApp = function (specificRide = null) {
+    const req = specificRide || state.activeRiderRequest || state.activeDriverTrip;
+    const lat = state.userGPS?.lat || (req?.pickupLat || state.pickupCoords?.lat || 17.4018);
+    const lng = state.userGPS?.lng || (req?.pickupLng || state.pickupCoords?.lng || 78.5602);
+    const mapsLink = `https://maps.google.com/?q=${lat.toFixed(5)},${lng.toFixed(5)}`;
+    const routemateLink = 'https://www.routemate.pro/';
+
+    let shareText = '';
+    if (req && (req.driver || req.status === 'driver_accepted' || req.status === 'ride_started')) {
+      const driver = req.driver || {};
+      const driverName = driver.name || req.driverName || 'Verified Driver';
+      const driverPhone = driver.phone || '';
+      const vehNumber = driver.vehicleNumber || 'Verified Vehicle';
+      const vehName = driver.vehicleName || req.vehicleType || 'Corridor Commute';
+      const pickup = req.pickup || 'Pickup Location';
+      const drop = req.drop || 'Drop Location';
+      const pin = req.pin || '****';
+      const fare = req.fare || '110';
+
+      shareText = `🚗 *Routemate Ride Details & Live Tracking*\n\n` +
+        `Hey! I'm travelling via Routemate corridor rideshare. Here are my live ride details:\n\n` +
+        `📍 *Route:* ${pickup} ➔ ${drop}\n` +
+        `👤 *Driver:* ${driverName}${driverPhone ? ` (${driverPhone})` : ''}\n` +
+        `🛵 *Vehicle:* ${vehName} • ${vehNumber}\n` +
+        `🔑 *Commuter PIN:* ${pin}\n` +
+        `💰 *Fuel Share:* ₹${fare}\n\n` +
+        `🛰️ *My Live GPS Location:* ${mapsLink}\n\n` +
+        `🔗 *Track Highway Rides:* ${routemateLink}\n\n` +
+        `_Shared securely via Routemate Passenger Safety_`;
+    } else if (req && req.status === 'searching') {
+      const pickup = req.pickup || 'Pickup';
+      const drop = req.drop || 'Drop';
+      shareText = `📡 *Routemate Ride Request Active*\n\n` +
+        `I am booking a verified corridor rideshare on Routemate:\n\n` +
+        `📍 *From:* ${pickup}\n` +
+        `🏁 *To:* ${drop}\n` +
+        `🔑 *Security PIN:* ${req.pin || '****'}\n\n` +
+        `🛰️ *My Current Location:* ${mapsLink}\n` +
+        `🔗 ${routemateLink}`;
+    } else {
+      shareText = `📍 *Routemate Live Location Tracking*\n\n` +
+        `I am commuting on the highway corridor. Here is my live GPS location:\n` +
+        `🛰️ ${mapsLink}\n\n` +
+        `🔗 https://www.routemate.pro/`;
+    }
+
+    const waUrl = `https://api.whatsapp.com/send?text=${encodeURIComponent(shareText)}`;
+
+    if (navigator.share && /mobile|android|iphone|ipad/i.test(navigator.userAgent)) {
+      navigator.share({
+        title: 'Routemate Ride Details & Live Tracking',
+        text: shareText
+      }).catch(() => {
+        window.open(waUrl, '_blank');
+      });
+    } else {
+      window.open(waUrl, '_blank');
+    }
+
+    showToast('Opening WhatsApp to share live trip details...', 'success');
   };
 
   // =========================================================================
