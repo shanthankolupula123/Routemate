@@ -1,6 +1,6 @@
 /**
- * Routemate - Supabase Realtime & Auth Client (v35 Production Grade)
- * Full Supabase Auth (Email/Pass + Google OAuth) + Realtime Postgres Changes + Direct REST Fallback
+ * Routemate - Supabase Realtime & Auth Client (v36 OTP Verification Flow)
+ * Passwordless 6-Digit Email OTP + Google OAuth + Realtime Postgres Changes
  */
 
 (function (window) {
@@ -24,7 +24,7 @@
             storage: window.localStorage
           }
         });
-        console.log('✅ [SUPABASE CLIENT] Initialized with Realtime & Auth support.');
+        console.log('✅ [SUPABASE CLIENT] Initialized with Realtime & Passwordless OTP Auth support.');
       } catch (e) {
         console.warn('⚠️ [SUPABASE CLIENT] Init warning:', e);
       }
@@ -89,23 +89,26 @@
   }
 
   // =========================================================================
-  // SUPABASE AUTHENTICATION MODULE
+  // SUPABASE PASSWORDLESS OTP AUTHENTICATION MODULE
   // =========================================================================
   const auth = {
     /**
-     * Email & Password Sign Up
+     * Send 6-digit OTP code to user's email inbox
      */
-    async signUp(email, password, { name, role, phone } = {}) {
+    async sendOtp(email, { name, role, phone } = {}) {
       const client = getSupabase();
-      if (!client) throw new Error('Supabase service is initializing. Please try again.');
+      if (!client) throw new Error('Authentication service is initializing. Please try again.');
 
       const cleanEmail = String(email || '').trim().toLowerCase();
-      const cleanPass = String(password || '').trim();
+      if (!cleanEmail || !cleanEmail.includes('@')) {
+        throw new Error('Please enter a valid email address.');
+      }
 
-      const { data, error } = await client.auth.signUp({
+      console.log('📧 [SUPABASE AUTH] Sending 6-digit OTP to:', cleanEmail);
+      const { data, error } = await client.auth.signInWithOtp({
         email: cleanEmail,
-        password: cleanPass,
         options: {
+          shouldCreateUser: true,
           data: {
             name: name || cleanEmail.split('@')[0] || 'Verified Commuter',
             role: role || 'rider',
@@ -116,31 +119,54 @@
       });
 
       if (error) {
-        console.error('Supabase Sign Up Error:', error);
+        console.error('Supabase Send OTP Error:', error);
         throw error;
       }
-      return data;
+
+      return { success: true, email: cleanEmail, data };
     },
 
     /**
-     * Email & Password Login
+     * Verify 6-digit OTP code entered by the user
      */
-    async signIn(email, password) {
+    async verifyOtp(email, token, { name, role } = {}) {
       const client = getSupabase();
-      if (!client) throw new Error('Supabase service is initializing. Please try again.');
+      if (!client) throw new Error('Authentication service is initializing. Please try again.');
 
       const cleanEmail = String(email || '').trim().toLowerCase();
-      const cleanPass = String(password || '').trim();
+      const cleanToken = String(token || '').trim();
 
-      const { data, error } = await client.auth.signInWithPassword({
+      if (!cleanToken || cleanToken.length < 6) {
+        throw new Error('Please enter the complete 6-digit OTP code.');
+      }
+
+      console.log('🔑 [SUPABASE AUTH] Verifying OTP for:', cleanEmail);
+
+      // Attempt 1: Standard email OTP type
+      let { data, error } = await client.auth.verifyOtp({
         email: cleanEmail,
-        password: cleanPass
+        token: cleanToken,
+        type: 'email'
       });
 
+      // Attempt 2: Signup OTP type if new user registration
+      if (error && !error.message?.includes('expired')) {
+        const signupAttempt = await client.auth.verifyOtp({
+          email: cleanEmail,
+          token: cleanToken,
+          type: 'signup'
+        });
+        if (!signupAttempt.error) {
+          data = signupAttempt.data;
+          error = null;
+        }
+      }
+
       if (error) {
-        console.error('Supabase Sign In Error:', error);
+        console.error('Supabase Verify OTP Error:', error);
         throw error;
       }
+
       return data;
     },
 
@@ -149,7 +175,7 @@
      */
     async signInWithGoogle() {
       const client = getSupabase();
-      if (!client) throw new Error('Supabase service is initializing. Please try again.');
+      if (!client) throw new Error('Authentication service is initializing. Please try again.');
 
       const redirectUrl = (window.location.origin && !window.location.origin.includes('localhost') && !window.location.origin.includes('capacitor://'))
         ? window.location.origin
@@ -397,7 +423,6 @@
       this.stopRiderPolling();
       console.log('📡 [ROUTEMATE RIDER] Subscribing to ride acceptance:', requestId);
 
-      // 1. Supabase Realtime Channel
       const client = getSupabase();
       if (client) {
         try {
@@ -438,7 +463,6 @@
         }
       }
 
-      // 2. Failsafe 1-second Polling
       this._riderTimer = setInterval(async () => {
         try {
           const resp = await supabaseRest(`rides?vehicle_number=eq.${encodeURIComponent(requestId)}&select=*&limit=1`);
@@ -538,7 +562,6 @@
         }
       };
 
-      // 1. Supabase Realtime Channel for Instant 0ms Latency
       const client = getSupabase();
       if (client) {
         try {
@@ -560,7 +583,6 @@
         }
       }
 
-      // 2. Continuous 1-second Polling Failsafe
       fetchRides();
       this._driverTimer = setInterval(fetchRides, 1000);
     },
