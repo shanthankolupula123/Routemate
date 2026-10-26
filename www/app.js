@@ -1800,6 +1800,24 @@
         renderRiderActiveHUD(result.request);
         showToast('📡 Realtime Radar Active! Searching for nearby verified drivers...', 'info');
 
+        // Persist to user ride activity history
+        try {
+          const stored = JSON.parse(localStorage.getItem('routemate_user_rides') || '[]');
+          const item = {
+            id: result.request.id,
+            pickup: result.request.pickup,
+            drop: result.request.drop,
+            fare: result.request.fare,
+            vehicleType: result.request.vehicleType || 'bike',
+            status: 'searching',
+            userRole: 'commuter',
+            createdAt: new Date().toISOString()
+          };
+          const filtered = stored.filter(r => r.id !== result.request.id);
+          filtered.unshift(item);
+          localStorage.setItem('routemate_user_rides', JSON.stringify(filtered.slice(0, 30)));
+        } catch (e) {}
+
         window.db.matching.startRiderPolling(result.request.id, (acceptedData) => {
           handleDriverAcceptedRiderRequest(acceptedData);
         });
@@ -2098,6 +2116,26 @@
           ...target,
           status: 'driver_accepted'
         };
+
+        // Persist to user ride activity history as driver
+        try {
+          const stored = JSON.parse(localStorage.getItem('routemate_user_rides') || '[]');
+          const item = {
+            id: target.id,
+            pickup: target.pickup,
+            drop: target.drop,
+            fare: target.fare,
+            vehicleType: target.vehicleType || 'bike',
+            status: 'accepted',
+            userRole: 'driver',
+            riderName: target.riderName,
+            createdAt: new Date().toISOString()
+          };
+          const filtered = stored.filter(r => r.id !== target.id);
+          filtered.unshift(item);
+          localStorage.setItem('routemate_user_rides', JSON.stringify(filtered.slice(0, 30)));
+        } catch (e) {}
+
         renderDriverActiveTripCard();
         renderDriverIncomingCards([]);
         if (state.maps.driver) {
@@ -2362,7 +2400,30 @@
         seenIds.add(state.activeDriverTrip.id);
       }
 
-      // 3. Process database rows
+      // 3. Check locally cached user rides for instant offline & real-time sync
+      try {
+        const localList = JSON.parse(localStorage.getItem('routemate_user_rides') || '[]');
+        if (Array.isArray(localList)) {
+          for (const lr of localList) {
+            const lrId = String(lr.id || '').trim();
+            if (lrId && !seenIds.has(lrId)) {
+              seenIds.add(lrId);
+              userRides.push({
+                id: lrId,
+                pickup: lr.pickup || 'Uppal Metro, Hyderabad',
+                drop: lr.drop || 'Jangaon Bus Depot',
+                fare: Math.round(Number(lr.fare || 110)),
+                vehicleType: lr.vehicleType || 'bike',
+                status: lr.status || 'searching',
+                userRole: lr.userRole || 'commuter',
+                createdAt: lr.createdAt || new Date().toISOString()
+              });
+            }
+          }
+        }
+      } catch (e) {}
+
+      // 4. Process Supabase database rows
       for (const row of rides) {
         let notes = {};
         if (typeof row.notes === 'string') {
@@ -2384,9 +2445,19 @@
         const driverPhone = String(driverObj.phone || '').replace(/\D/g, '').slice(-10);
 
         let userRole = null;
-        if ((userId && riderId && riderId === userId) || (userEmail && riderEmail && riderEmail === userEmail) || (userPhoneDigits && riderPhone && riderPhone === userPhoneDigits)) {
+        if (
+          (userId && riderId && riderId === userId) ||
+          (userEmail && riderEmail && riderEmail === userEmail) ||
+          (userPhoneDigits && riderPhone && riderPhone === userPhoneDigits) ||
+          (user.name && notes.riderName && notes.riderName.toLowerCase().trim() === user.name.toLowerCase().trim())
+        ) {
           userRole = 'commuter';
-        } else if ((userId && driverId && driverId === userId) || (userEmail && driverEmail && driverEmail === userEmail) || (userPhoneDigits && driverPhone && driverPhone === userPhoneDigits)) {
+        } else if (
+          (userId && driverId && driverId === userId) ||
+          (userEmail && driverEmail && driverEmail === userEmail) ||
+          (userPhoneDigits && driverPhone && driverPhone === userPhoneDigits) ||
+          (userId && row.driver_id && row.driver_id === userId)
+        ) {
           userRole = 'driver';
         }
 
