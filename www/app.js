@@ -157,11 +157,11 @@
       }
 
       // Supabase Auth State Change Listener (e.g. for Google OAuth redirect / OTP verify)
-      window.db.auth.onAuthStateChange((event, session) => {
+      window.db.auth.onAuthStateChange(async (event, session) => {
         console.log('👤 [AUTH EVENT]:', event);
         if (session && session.user) {
           const userObj = normalizeAuthUser(session.user);
-          unlockAppWithUser(userObj, event === 'SIGNED_IN');
+          await handleAuthUserFlow(userObj, event === 'SIGNED_IN');
         } else if (event === 'SIGNED_OUT') {
           lockAppToAuthScreen();
         }
@@ -183,7 +183,7 @@
 
     // 3. Enforce Strict Mandatory Flow
     if (sessionUser) {
-      unlockAppWithUser(sessionUser);
+      await handleAuthUserFlow(sessionUser);
     } else {
       lockAppToAuthScreen();
     }
@@ -230,13 +230,194 @@
     };
   }
 
+  // Intercept new Google & incomplete accounts before entering the app
+  async function handleAuthUserFlow(user, isNewSignIn = false) {
+    if (!user) {
+      lockAppToAuthScreen();
+      return;
+    }
+
+    // Check memory phone number
+    const cleanUserPhone = String(user.phone || '').replace(/\D/g, '');
+    let hasCompleteProfile = cleanUserPhone.length >= 10 && user.name && user.name !== 'User' && !user.name.includes('@');
+
+    // Verify against Supabase `profiles` table
+    try {
+      if (window.db?.auth?.getUserProfile) {
+        const dbProfile = await window.db.auth.getUserProfile(user.id);
+        if (dbProfile) {
+          const dbPhoneDigits = String(dbProfile.phone || '').replace(/\D/g, '');
+          if (dbPhoneDigits.length >= 10 && !dbProfile.phone.includes('@')) {
+            user.phone = dbProfile.phone;
+            if (dbProfile.name && (!user.name || user.name === 'User' || user.name.includes('@'))) {
+              user.name = dbProfile.name;
+            }
+            hasCompleteProfile = true;
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('Profile DB check notice:', e);
+    }
+
+    // If phone number is missing (e.g. brand new Google user), intercept with profile completion popup!
+    if (!hasCompleteProfile) {
+      console.log('📋 [PROFILE INTERCEPT] Incomplete profile detected for:', user.email);
+      state.pendingCompletionUser = user;
+      openProfileCompletionModal(user);
+      return;
+    }
+
+    // Profile is 100% complete -> proceed seamlessly into app
+    unlockAppWithUser(user, isNewSignIn);
+  }
+
+  window.openProfileCompletionModal = function (user) {
+    const modal = document.getElementById('googleProfileCompletionModal');
+    if (!modal) return;
+
+    modal.classList.remove('hidden');
+    if (typeof lucide !== 'undefined' && lucide.createIcons) lucide.createIcons();
+
+    const emailEl = document.getElementById('completionGoogleEmail');
+    if (emailEl) emailEl.textContent = user.email || 'Google User';
+
+    const nameInput = document.getElementById('completionNameInput');
+    if (nameInput) {
+      nameInput.value = (user.name && user.name !== 'User' && !user.name.includes('@')) ? user.name : '';
+    }
+
+    const phoneInput = document.getElementById('completionPhoneInput');
+    if (phoneInput) {
+      const existingDigits = String(user.phone || '').replace(/\D/g, '');
+      phoneInput.value = (existingDigits.length === 10) ? existingDigits : '';
+    }
+
+    const genderInput = document.getElementById('completionGenderInput');
+    if (genderInput && user.gender) genderInput.value = user.gender;
+
+    const dobInput = document.getElementById('completionDobInput');
+    if (dobInput && user.dob) dobInput.value = user.dob;
+
+    const errEl = document.getElementById('completionErrorMsg');
+    if (errEl) {
+      errEl.classList.add('hidden');
+      errEl.textContent = '';
+    }
+
+    setTimeout(() => {
+      if (nameInput && nameInput.value.trim()) {
+        phoneInput?.focus();
+      } else {
+        nameInput?.focus();
+      }
+    }, 200);
+  };
+
+  window.closeProfileCompletionModal = function () {
+    const modal = document.getElementById('googleProfileCompletionModal');
+    if (modal) modal.classList.add('hidden');
+  };
+
+  window.handleProfileCompletionSubmit = async function (e) {
+    if (e && e.preventDefault) e.preventDefault();
+    const user = state.pendingCompletionUser || state.currentUser;
+    if (!user) {
+      showToast('Session error. Please sign in again.', 'danger');
+      lockAppToAuthScreen();
+      return;
+    }
+
+    const nameInput = document.getElementById('completionNameInput');
+    const phoneInput = document.getElementById('completionPhoneInput');
+    const genderInput = document.getElementById('completionGenderInput');
+    const dobInput = document.getElementById('completionDobInput');
+    const errEl = document.getElementById('completionErrorMsg');
+    const btn = document.getElementById('btnSubmitCompletion');
+    const btnText = document.getElementById('btnSubmitCompletionText');
+
+    const fullName = String(nameInput?.value || '').trim();
+    const rawPhone = String(phoneInput?.value || '').replace(/\D/g, '');
+    const gender = String(genderInput?.value || '').trim();
+    const dob = String(dobInput?.value || '').trim();
+
+    // Validation
+    if (!fullName || fullName.length < 2) {
+      if (errEl) {
+        errEl.textContent = 'Please enter your full name.';
+        errEl.classList.remove('hidden');
+      }
+      nameInput?.focus();
+      return;
+    }
+
+    if (rawPhone.length !== 10) {
+      if (errEl) {
+        errEl.textContent = 'Please enter a valid 10-digit mobile number.';
+        errEl.classList.remove('hidden');
+      }
+      phoneInput?.focus();
+      return;
+    }
+
+    if (errEl) errEl.classList.add('hidden');
+    if (btn) btn.disabled = true;
+    if (btnText) btnText.textContent = 'Saving details...';
+
+    const formattedPhone = '+91' + rawPhone;
+
+    try {
+      showToast('Saving profile details...', 'info');
+
+      // 1. Save to Supabase profiles table & Auth Metadata
+      if (window.db?.auth?.saveUserProfile) {
+        await window.db.auth.saveUserProfile(user.id, {
+          name: fullName,
+          phone: formattedPhone,
+          gender,
+          dob
+        });
+      }
+
+      // 2. Update user object
+      user.name = fullName;
+      user.phone = formattedPhone;
+      user.gender = gender;
+      user.dob = dob;
+      user.avatar = getInitialsAvatarSvg(fullName, 120);
+
+      // 3. Cache in localStorage
+      try {
+        localStorage.setItem('routemate_user', JSON.stringify(user));
+      } catch (err) {}
+
+      // 4. Close modal and unlock app
+      closeProfileCompletionModal();
+      state.pendingCompletionUser = null;
+      unlockAppWithUser(user, true);
+
+      showToast(`Welcome to Routemate, ${fullName}! Profile completed.`, 'success');
+    } catch (saveErr) {
+      console.warn('Profile save error:', saveErr);
+      if (errEl) {
+        errEl.textContent = saveErr.message || 'Failed to save profile. Please try again.';
+        errEl.classList.remove('hidden');
+      }
+      showToast('Error saving details: ' + saveErr.message, 'danger');
+    } finally {
+      if (btn) btn.disabled = false;
+      if (btnText) btnText.textContent = 'Save & Continue';
+    }
+  };
+
   function unlockAppWithUser(user) {
     state.currentUser = user;
     try { localStorage.setItem('routemate_user', JSON.stringify(user)); } catch (e) {}
 
-    // Hide Auth Screen
+    // Hide Auth Screen & Completion Modal
     const authScreen = document.getElementById('authScreen');
     if (authScreen) authScreen.classList.add('hidden');
+    closeProfileCompletionModal();
 
     // Show Main App Elements
     const header = document.getElementById('appHeader');
@@ -263,7 +444,9 @@
 
   function lockAppToAuthScreen() {
     state.currentUser = null;
+    state.pendingCompletionUser = null;
     localStorage.removeItem('routemate_user');
+    closeProfileCompletionModal();
 
     // Show Auth Screen & reset to Step 1
     const authScreen = document.getElementById('authScreen');
@@ -498,7 +681,7 @@
         };
       }
 
-      unlockAppWithUser(finalUser);
+      await handleAuthUserFlow(finalUser, true);
       showToast('🎉 Successfully verified! Welcome to Routemate.', 'success');
     } catch (err) {
       console.error('Verify OTP error:', err);

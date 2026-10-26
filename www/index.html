@@ -39,7 +39,7 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
   <!-- Official Brand Stylesheet -->
-  <link rel="stylesheet" href="styles.css?v=20261026_google_oauth_enabled_v44" />
+  <link rel="stylesheet" href="styles.css?v=20261026_mandatory_profile_completion_v45" />
 </head>
 <body class="bg-slate-50 min-h-screen text-slate-800 pb-28 select-none">
 
@@ -628,6 +628,85 @@
   </div>
 
   <!-- ========================================================================= -->
+  <!-- MODAL: MANDATORY PROFILE COMPLETION FOR GOOGLE USERS -->
+  <!-- ========================================================================= -->
+  <div id="googleProfileCompletionModal" class="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm hidden flex items-center justify-center p-4">
+    <div class="bg-white rounded-3xl max-w-sm w-full p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto animate-in fade-in zoom-in-95 duration-200">
+      
+      <!-- Modal Header -->
+      <div class="text-center space-y-2">
+        <div class="w-14 h-14 rounded-2xl bg-gradient-to-tr from-blue-700 to-cyan-500 text-white mx-auto flex items-center justify-center shadow-lg shadow-blue-500/30">
+          <i data-lucide="user-check" class="w-7 h-7"></i>
+        </div>
+        <div>
+          <h3 class="text-base font-black text-slate-900">Complete Your Profile</h3>
+          <p class="text-xs text-slate-500 mt-0.5">Please confirm your details before starting rides on Routemate.</p>
+        </div>
+        <!-- Google Connected Email Badge -->
+        <div class="inline-flex items-center gap-1.5 px-3 py-1 bg-slate-100 rounded-full text-[11px] font-semibold text-slate-600">
+          <svg class="w-3.5 h-3.5" viewBox="0 0 24 24">
+            <path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.8-2.4 3.65v3.03h3.88c2.27-2.09 3.665-5.17 3.665-9.12z"/>
+            <path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.03c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.25v3.13C3.27 21.44 7.33 24 12 24z"/>
+            <path fill="#FBBC05" d="M5.28 14.29c-.25-.72-.38-1.49-.38-2.29s.13-1.57.38-2.29V6.58H1.25C.45 8.18 0 10.03 0 12s.45 3.82 1.25 5.42l4.03-3.13z"/>
+            <path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.33 0 3.27 2.56 1.25 6.58l4.03 3.13c.95-2.83 3.6-4.96 6.72-4.96z"/>
+          </svg>
+          <span id="completionGoogleEmail">google-user@example.com</span>
+        </div>
+      </div>
+
+      <!-- Completion Form -->
+      <form id="googleProfileCompletionForm" onsubmit="handleProfileCompletionSubmit(event)" class="space-y-3 pt-1">
+        <!-- FULL NAME (MANDATORY) -->
+        <div>
+          <label class="block text-[11px] font-bold text-slate-700 mb-1">Full Name <span class="text-rose-500">*</span></label>
+          <input type="text" id="completionNameInput" required placeholder="Enter your full name" class="w-full px-3.5 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-semibold focus:outline-none focus:border-blue-600 focus:bg-white transition" />
+        </div>
+
+        <!-- PHONE NUMBER (MANDATORY) -->
+        <div>
+          <label class="block text-[11px] font-bold text-slate-700 mb-1">Mobile Phone Number <span class="text-rose-500">*</span></label>
+          <div class="relative flex items-center">
+            <span class="absolute left-3.5 text-xs font-bold text-slate-500">+91</span>
+            <input type="tel" id="completionPhoneInput" required maxlength="10" placeholder="98480 12345" class="w-full pl-12 pr-3.5 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-semibold focus:outline-none focus:border-blue-600 focus:bg-white transition" />
+          </div>
+          <p class="text-[10px] text-slate-400 mt-1">Required for driver/rider contact and OTP ride security.</p>
+        </div>
+
+        <!-- OPTIONAL GENDER & DOB -->
+        <div class="grid grid-cols-2 gap-2">
+          <div>
+            <label class="block text-[11px] font-bold text-slate-700 mb-1">Gender <span class="text-[10px] text-slate-400 font-normal">(Optional)</span></label>
+            <select id="completionGenderInput" class="w-full px-3 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-semibold text-slate-700 focus:outline-none focus:border-blue-600 focus:bg-white transition">
+              <option value="">Select...</option>
+              <option value="male">Male</option>
+              <option value="female">Female</option>
+              <option value="other">Other</option>
+              <option value="prefer_not_to_say">Prefer not to say</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-[11px] font-bold text-slate-700 mb-1">Date of Birth <span class="text-[10px] text-slate-400 font-normal">(Optional)</span></label>
+            <input type="date" id="completionDobInput" class="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-semibold text-slate-700 focus:outline-none focus:border-blue-600 focus:bg-white transition">
+          </div>
+        </div>
+
+        <div id="completionErrorMsg" class="hidden p-2.5 bg-rose-50 border border-rose-200 rounded-xl text-xs font-semibold text-rose-600"></div>
+
+        <button type="submit" id="btnSubmitCompletion" class="w-full py-4 btn-pill-primary text-xs flex items-center justify-center gap-2 cursor-pointer shadow-lg mt-2">
+          <i data-lucide="check-circle" class="w-4 h-4 text-cyan-200"></i>
+          <span id="btnSubmitCompletionText">Save & Continue</span>
+        </button>
+
+        <div class="text-center pt-2">
+          <button type="button" onclick="handleSignOut()" class="text-xs text-slate-400 hover:text-rose-600 font-semibold transition cursor-pointer">
+            Wrong Google account? <span class="underline">Sign Out</span>
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ========================================================================= -->
   <!-- MODAL: DRIVER PIN VERIFICATION -->
   <!-- ========================================================================= -->
   <div id="pinModal" class="fixed inset-0 z-50 glass-modal hidden flex items-center justify-center p-4">
@@ -665,7 +744,7 @@
   </audio>
 
   <!-- Core Scripts -->
-  <script src="supabaseClient.js?v=20261026_google_oauth_enabled_v44"></script>
-  <script src="app.js?v=20261026_google_oauth_enabled_v44"></script>
+  <script src="supabaseClient.js?v=20261026_mandatory_profile_completion_v45"></script>
+  <script src="app.js?v=20261026_mandatory_profile_completion_v45"></script>
 </body>
 </html>

@@ -353,6 +353,95 @@
           callback(event, session);
         }
       });
+    },
+
+    /**
+     * Fetch user profile from Supabase profiles table
+     */
+    async getUserProfile(userId) {
+      if (!userId) return null;
+      try {
+        const url = `${SUPABASE_CONFIG.url}/rest/v1/profiles?id=eq.${encodeURIComponent(userId)}&select=id,name,phone,role,rating,total_rides,avatar_url,is_verified`;
+        const resp = await fetch(url, {
+          method: 'GET',
+          headers: {
+            'apikey': SUPABASE_CONFIG.publishableKey,
+            'Authorization': `Bearer ${SUPABASE_CONFIG.publishableKey}`
+          }
+        });
+        if (resp.ok) {
+          const rows = await resp.json();
+          if (rows && rows.length > 0) return rows[0];
+        }
+      } catch (e) {
+        console.warn('⚠️ [SUPABASE PROFILES] Fetch error:', e);
+      }
+      return null;
+    },
+
+    /**
+     * Upsert user profile to Supabase profiles table & Auth metadata
+     */
+    async saveUserProfile(userId, { name, phone, gender, dob }) {
+      if (!userId) throw new Error('User ID is required');
+      const cleanName = String(name || '').trim();
+      const cleanPhone = String(phone || '').trim();
+
+      // 1. Upsert into Supabase `profiles` table
+      try {
+        const url = `${SUPABASE_CONFIG.url}/rest/v1/profiles`;
+        const resp = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'apikey': SUPABASE_CONFIG.publishableKey,
+            'Authorization': `Bearer ${SUPABASE_CONFIG.publishableKey}`,
+            'Content-Type': 'application/json',
+            'Prefer': 'resolution=merge-duplicates,return=representation'
+          },
+          body: JSON.stringify({
+            id: userId,
+            name: cleanName,
+            phone: cleanPhone,
+            role: 'Daily Commuter',
+            is_verified: true
+          })
+        });
+
+        if (!resp.ok) {
+          const errData = await resp.json().catch(() => ({}));
+          console.warn('⚠️ [SUPABASE PROFILES] Upsert warning:', errData);
+        } else {
+          console.log('✅ [SUPABASE PROFILES] Successfully updated profile for user:', userId);
+        }
+      } catch (upsertErr) {
+        console.warn('⚠️ [SUPABASE PROFILES] Upsert exception:', upsertErr);
+      }
+
+      // 2. Also persist in Supabase Auth user metadata
+      const client = getSupabase();
+      if (client) {
+        try {
+          await client.auth.updateUser({
+            data: {
+              name: cleanName,
+              full_name: cleanName,
+              phone: cleanPhone,
+              gender: gender || '',
+              dob: dob || ''
+            }
+          });
+        } catch (metaErr) {
+          console.warn('⚠️ [SUPABASE AUTH] updateUser metadata note:', metaErr.message);
+        }
+      }
+
+      return {
+        id: userId,
+        name: cleanName,
+        phone: cleanPhone,
+        gender: gender || '',
+        dob: dob || ''
+      };
     }
   };
 
