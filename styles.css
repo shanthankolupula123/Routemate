@@ -266,3 +266,21 @@ body {
 .suggestion-item:active {
   background-color: #DBEAFE;
 }
+
+/* Interactive Map Container Styles */
+#riderInteractiveMap,
+#driverInteractiveMap {
+  width: 100% !important;
+  min-height: 180px !important;
+  height: 180px !important;
+  position: relative;
+  z-index: 1;
+  border-radius: 1rem;
+  overflow: hidden;
+}
+
+.leaflet-container {
+  font-family: inherit;
+  width: 100% !important;
+  height: 100% !important;
+}

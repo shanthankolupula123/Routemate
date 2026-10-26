@@ -224,6 +224,15 @@
     const preferredMode = state.pendingAuth?.role || user.role || 'rider';
     switchMode(preferredMode);
 
+    // Ensure Leaflet maps compute accurate dimensions once DOM is visible
+    setTimeout(() => {
+      initMapWidget('riderInteractiveMap', 'rider');
+      if (state.maps.rider) {
+        state.maps.rider.invalidateSize();
+        updateRouteLine(state.maps.rider, 'rider');
+      }
+    }, 250);
+
     // Prompt user to pick their travel mode whenever they log in or on fresh session
     if (isExplicitLogin || !sessionStorage.getItem('mode_prompted')) {
       setTimeout(() => {
@@ -605,9 +614,25 @@
 
   function initMapWidget(containerId, mapKey) {
     const el = document.getElementById(containerId);
-    if (!el || state.maps[mapKey]) return;
+    if (!el) return;
+
+    if (state.maps[mapKey]) {
+      setTimeout(() => {
+        try {
+          state.maps[mapKey].invalidateSize();
+          if (mapKey === 'rider') {
+            updateRouteLine(state.maps.rider, 'rider');
+          }
+        } catch (e) {}
+      }, 100);
+      return;
+    }
 
     try {
+      if (el._leaflet_id) {
+        delete el._leaflet_id;
+      }
+
       const map = L.map(containerId, {
         zoomControl: false,
         attributionControl: false
@@ -636,7 +661,12 @@
         updateDriverMapIncomingMarkers(state.incomingRides);
       }
 
-      setTimeout(() => map.invalidateSize(), 200);
+      setTimeout(() => {
+        map.invalidateSize();
+        if (mapKey === 'rider') {
+          updateRouteLine(map, 'rider');
+        }
+      }, 200);
     } catch (e) {
       console.warn('Map initialization note:', e);
     }
@@ -1106,7 +1136,17 @@
 
       if (window.db?.matching) window.db.matching.stopDriverPolling();
       setActiveNavPill('book');
-      setTimeout(() => state.maps.rider?.invalidateSize(), 150);
+
+      initMapWidget('riderInteractiveMap', 'rider');
+      setTimeout(() => {
+        if (state.maps.rider) {
+          state.maps.rider.invalidateSize();
+          updateRouteLine(state.maps.rider, 'rider');
+          if (state.userGPS) {
+            updateUserGPSMarker(state.userGPS.lat, state.userGPS.lng);
+          }
+        }
+      }, 150);
       showToast('Switched to Commuter Mode', 'info');
     } else {
       if (pill) {
@@ -1811,8 +1851,9 @@
     initLiveGPS();
     setupLocationAutocomplete();
     if (window.lucide) lucide.createIcons();
+    initMapWidget('riderInteractiveMap', 'rider');
     await checkAuthSession();
-    console.log('✨ [ROUTEMATE] Mirrored Drive Map & Statewide Telangana Autocomplete v38 Bootstrapped.');
+    console.log('✨ [ROUTEMATE] Commuter & Driver Maps Live.');
   });
 
 })();
