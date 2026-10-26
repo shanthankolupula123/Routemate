@@ -569,19 +569,95 @@
     }, 1000);
   }
 
-  window.handleGoogleSignIn = async function () {
+  window.openGoogleSignInModal = function (prefillEmail = '') {
+    const modal = document.getElementById('googleSignInModal');
+    const input = document.getElementById('googleModalEmailInput');
+    if (modal) {
+      modal.classList.remove('hidden');
+      if (typeof lucide !== 'undefined' && lucide.createIcons) lucide.createIcons();
+      if (input) {
+        input.value = prefillEmail || document.getElementById('authEmailInput')?.value || '';
+        setTimeout(() => input.focus(), 150);
+      }
+    }
+  };
+
+  window.closeGoogleSignInModal = function () {
+    const modal = document.getElementById('googleSignInModal');
+    if (modal) modal.classList.add('hidden');
+  };
+
+  window.handleGoogleGmailOtpSubmit = async function (e) {
+    if (e && e.preventDefault) e.preventDefault();
+    const input = document.getElementById('googleModalEmailInput');
+    const email = String(input?.value || '').trim().toLowerCase();
+    if (!email || !email.includes('@')) {
+      showToast('Please enter a valid Gmail address', 'warning');
+      return;
+    }
+
+    closeGoogleSignInModal();
+
+    // Populate main email input
+    const mainEmailInput = document.getElementById('authEmailInput');
+    if (mainEmailInput) mainEmailInput.value = email;
+
+    const btn = document.getElementById('btnGoogleModalSend');
+    if (btn) btn.disabled = true;
+
     try {
-      showToast('Connecting to Google...', 'info');
+      showToast('Sending 6-digit verification code to ' + email + '...', 'info');
+      await window.db.auth.sendOtp(email, {
+        name: email.split('@')[0],
+        role: 'rider'
+      });
+      state.otpEmail = email;
+      showToast('6-digit code sent to your Google inbox!', 'success');
+      showOtpStep(email);
+    } catch (err) {
+      console.warn('Google OTP dispatch error:', err);
+      showToast(err.message || 'Failed to send OTP to Gmail.', 'danger');
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  };
+
+  window.handleGoogleSignIn = async function () {
+    const emailVal = document.getElementById('authEmailInput')?.value?.trim();
+    try {
+      showToast('Checking Google sign-in...', 'info');
       await window.db.auth.signInWithGoogle();
     } catch (err) {
-      console.warn('Google sign-in notice:', err);
-      let errMsg = err.message || '';
-      if (errMsg.includes('provider') || errMsg.includes('not supported') || errMsg.includes('disabled') || errMsg.includes('Unsupported')) {
-        showToast('Google OAuth is not configured on this Supabase project. Please use the instant 6-Digit Email OTP below.', 'warning');
+      console.warn('Google sign-in check notice:', err);
+      const isProviderDisabled = err.code === 'PROVIDER_NOT_ENABLED' ||
+        err.message?.includes('provider is not enabled') ||
+        err.message?.includes('Unsupported provider') ||
+        err.message?.includes('not configured');
+
+      if (isProviderDisabled) {
+        // If user already typed an email into the input, auto-dispatch OTP to their Google inbox
+        if (emailVal && emailVal.includes('@')) {
+          showToast('Sending 6-digit verification code to ' + emailVal + '...', 'info');
+          try {
+            await window.db.auth.sendOtp(emailVal, {
+              name: emailVal.split('@')[0],
+              role: 'rider'
+            });
+            state.otpEmail = emailVal;
+            showToast('6-digit code sent to your Google inbox!', 'success');
+            showOtpStep(emailVal);
+          } catch (sendErr) {
+            showToast(sendErr.message || 'Failed to send OTP code.', 'danger');
+          }
+          return;
+        }
+
+        // Otherwise open the Google Sign-in Assistant modal
+        openGoogleSignInModal(emailVal);
       } else {
-        showToast('Google Sign In: ' + errMsg, 'danger');
+        showToast('Google Sign In: ' + err.message, 'danger');
+        openGoogleSignInModal(emailVal);
       }
-      document.getElementById('authEmailInput')?.focus();
     }
   };
 
