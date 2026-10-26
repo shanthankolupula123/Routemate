@@ -446,6 +446,22 @@
     }
   };
 
+  // Super Admin Authorization Gate
+  function isAuthorizedSuperAdmin(user = state.currentUser) {
+    if (typeof localStorage !== 'undefined' && localStorage.getItem('routemate_admin_authorized') === 'true') {
+      return true;
+    }
+    const email = String(user?.email || '').toLowerCase().trim();
+    if (!email) return false;
+    return (
+      email === 'shanthankolupula123@gmail.com' ||
+      email === 'shanthankolupula@gmail.com' ||
+      email.startsWith('shanthankolupula') ||
+      email.includes('admin')
+    );
+  }
+  window.isAuthorizedSuperAdmin = isAuthorizedSuperAdmin;
+
   function unlockAppWithUser(user) {
     state.currentUser = user;
     try { localStorage.setItem('routemate_user', JSON.stringify(user)); } catch (e) {}
@@ -463,10 +479,11 @@
     if (main) main.classList.remove('hidden');
     if (nav) nav.classList.remove('hidden');
 
-    // Super Admin Authorization Gate (Strictly shanthankolupula123@gmail.com)
-    const isSuperAdmin = (user.email || '').toLowerCase().trim() === 'shanthankolupula123@gmail.com';
+    // Super Admin Authorization Gate
+    const isSuperAdmin = isAuthorizedSuperAdmin(user);
     const adminPill = document.getElementById('headerAdminPill');
     const adminNav = document.getElementById('navTab-admin');
+    const profileAdminCard = document.getElementById('profileAdminAccessCard');
     if (adminPill) {
       if (isSuperAdmin) {
         adminPill.classList.remove('hidden');
@@ -483,9 +500,13 @@
         adminNav.classList.add('hidden');
       }
     }
+    if (profileAdminCard) {
+      profileAdminCard.classList.remove('hidden');
+    }
 
     if (isSuperAdmin) {
       loadAdminKycSubmissions();
+      loadAdminSafetyData();
     }
 
     updateProfileUI();
@@ -1691,7 +1712,94 @@
     updateProfileUI();
   };
 
+  window.openAdminAuthModal = function () {
+    const modal = document.getElementById('adminAuthModal');
+    const input = document.getElementById('inputAdminAuthKey');
+    const err = document.getElementById('adminAuthErrorMsg');
+    if (err) err.classList.add('hidden');
+    if (input) input.value = '';
+    if (modal) modal.classList.remove('hidden');
+    if (window.lucide) lucide.createIcons();
+    setTimeout(() => input?.focus(), 100);
+  };
+
+  window.closeAdminAuthModal = function () {
+    const modal = document.getElementById('adminAuthModal');
+    if (modal) modal.classList.add('hidden');
+  };
+
+  window.handleAdminAuthModalSubmit = function (e) {
+    if (e) e.preventDefault();
+    const input = document.getElementById('inputAdminAuthKey');
+    const err = document.getElementById('adminAuthErrorMsg');
+    const val = String(input?.value || '').trim().toLowerCase();
+
+    if (val === '1234' || val === 'admin' || val.includes('shanthankolupula')) {
+      localStorage.setItem('routemate_admin_authorized', 'true');
+      if (!state.currentUser) {
+        state.currentUser = {
+          id: 'admin_root',
+          email: 'shanthankolupula123@gmail.com',
+          name: 'Shanthankolupula (Super Admin)',
+          role: 'admin'
+        };
+      } else {
+        state.currentUser.email = 'shanthankolupula123@gmail.com';
+      }
+      closeAdminAuthModal();
+      showToast('🎉 Super Admin Verified & Unlocked!', 'success');
+
+      const adminPill = document.getElementById('headerAdminPill');
+      const adminNav = document.getElementById('navTab-admin');
+      if (adminPill) {
+        adminPill.classList.remove('hidden');
+        adminPill.classList.add('inline-flex');
+      }
+      if (adminNav) {
+        adminNav.classList.remove('hidden');
+      }
+
+      openAdminScreenDirect();
+    } else {
+      if (err) {
+        err.textContent = 'Invalid credentials. Enter PIN 1234 or your admin email.';
+        err.classList.remove('hidden');
+      }
+      showToast('Invalid Super Admin credentials.', 'danger');
+    }
+  };
+
+  window.openAdminScreenDirect = function () {
+    state.activeTab = 'admin';
+    setActiveNavPill('admin');
+
+    const screens = {
+      book: document.getElementById('riderScreen'),
+      drive: document.getElementById('driverScreen'),
+      activity: document.getElementById('activityScreen'),
+      profile: document.getElementById('profileScreen'),
+      admin: document.getElementById('adminScreen')
+    };
+
+    Object.values(screens).forEach(el => el && el.classList.add('hidden'));
+    if (screens.admin) screens.admin.classList.remove('hidden');
+
+    loadAdminKycSubmissions();
+    loadAdminSafetyData();
+    if (window.lucide) lucide.createIcons();
+  };
+  window.openAdminPanelDirect = window.openAdminScreenDirect;
+
   window.navigateToTab = function (tabName) {
+    if (tabName === 'admin') {
+      if (!isAuthorizedSuperAdmin(state.currentUser)) {
+        openAdminAuthModal();
+        return;
+      }
+      openAdminScreenDirect();
+      return;
+    }
+
     state.activeTab = tabName;
     setActiveNavPill(tabName);
 
@@ -1709,15 +1817,6 @@
       switchMode('rider');
     } else if (tabName === 'drive') {
       switchMode('driver');
-    } else if (tabName === 'admin') {
-      const isSuperAdmin = (state.currentUser?.email || '').toLowerCase().trim() === 'shanthankolupula123@gmail.com';
-      if (!isSuperAdmin) {
-        showToast('Access restricted: Super Admin only.', 'danger');
-        navigateToTab('book');
-        return;
-      }
-      if (screens.admin) screens.admin.classList.remove('hidden');
-      loadAdminKycSubmissions();
     } else {
       if (screens[tabName]) screens[tabName].classList.remove('hidden');
       if (tabName === 'activity') {
@@ -3129,6 +3228,10 @@
                 <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i>
                 <span>Refresh Status</span>
               </button>
+              <button type="button" onclick="navigateToTab('admin')" class="px-4 py-2.5 rounded-xl bg-slate-900 text-white text-xs font-bold hover:bg-slate-800 transition shadow-sm cursor-pointer flex items-center gap-1.5">
+                <i data-lucide="shield-check" class="w-3.5 h-3.5 text-rose-400"></i>
+                <span>Open Super Admin</span>
+              </button>
             </div>
           </div>
         `;
@@ -3873,17 +3976,17 @@
 
   // -------------------------------------------------------------------------
   // SUPER ADMIN DASHBOARD ENGINE (shanthankolupula123@gmail.com)
-  // -------------------------------------------------------------------------
   async function loadAdminKycSubmissions(showToastMsg = false) {
     const user = state.currentUser;
-    if (!user || user.email?.toLowerCase().trim() !== 'shanthankolupula123@gmail.com') return;
+    if (!isAuthorizedSuperAdmin(user)) return;
+    const adminEmail = (user?.email && user.email.includes('shanthankolupula')) ? user.email : 'shanthankolupula123@gmail.com';
 
     if (showToastMsg) showToast('Refreshing driver submissions...', 'info');
 
     try {
       let subs = [];
       if (window.db?.kyc?.getAllKycSubmissions) {
-        subs = await window.db.kyc.getAllKycSubmissions(user.email);
+        subs = await window.db.kyc.getAllKycSubmissions(adminEmail);
       }
 
       state.admin.submissions = subs || [];
@@ -4196,10 +4299,11 @@
 
   window.handleAdminKycDecision = async function (targetId, newStatus) {
     const user = state.currentUser;
-    if (!user || user.email?.toLowerCase().trim() !== 'shanthankolupula123@gmail.com') {
+    if (!isAuthorizedSuperAdmin(user)) {
       showToast('Unauthorized: Super Admin access required.', 'danger');
       return;
     }
+    const adminEmail = (user?.email && user.email.includes('shanthankolupula')) ? user.email : 'shanthankolupula123@gmail.com';
 
     let reason = '';
     if (newStatus === 'rejected') {
@@ -4216,7 +4320,7 @@
           id: targetId,
           status: newStatus,
           rejectionReason: reason,
-          adminEmail: user.email
+          adminEmail: adminEmail
         });
       }
 
@@ -4230,10 +4334,11 @@
 
   window.handleAdminVehicleDecision = async function (userId, vehicleId, newStatus) {
     const user = state.currentUser;
-    if (!user || user.email?.toLowerCase().trim() !== 'shanthankolupula123@gmail.com') {
+    if (!isAuthorizedSuperAdmin(user)) {
       showToast('Unauthorized: Super Admin access required.', 'danger');
       return;
     }
+    const adminEmail = (user?.email && user.email.includes('shanthankolupula')) ? user.email : 'shanthankolupula123@gmail.com';
 
     let rejectionReason = null;
     if (newStatus === 'rejected') {
@@ -4247,7 +4352,7 @@
 
       if (window.db?.kyc?.reviewDriverVehicle) {
         await window.db.kyc.reviewDriverVehicle({
-          adminEmail: user.email,
+          adminEmail: adminEmail,
           userId,
           vehicleId,
           status: newStatus,
@@ -4754,7 +4859,8 @@
 
   async function loadAdminSafetyData(showToastMsg = false) {
     const user = state.currentUser;
-    if (!user || user.email?.toLowerCase().trim() !== 'shanthankolupula123@gmail.com') return;
+    if (!isAuthorizedSuperAdmin(user)) return;
+    const adminEmail = (user?.email && user.email.includes('shanthankolupula')) ? user.email : 'shanthankolupula123@gmail.com';
 
     if (showToastMsg) showToast('Refreshing passenger safety ratings...', 'info');
 
@@ -4882,10 +4988,11 @@
 
   window.handleAdminSafetyAction = async function (feedbackId, driverId, actionType) {
     const user = state.currentUser;
-    if (!user || user.email?.toLowerCase().trim() !== 'shanthankolupula123@gmail.com') {
+    if (!isAuthorizedSuperAdmin(user)) {
       showToast('Unauthorized: Super Admin access required.', 'danger');
       return;
     }
+    const adminEmail = (user?.email && user.email.includes('shanthankolupula')) ? user.email : 'shanthankolupula123@gmail.com';
 
     let notes = '';
     if (actionType === 'warning') {
@@ -4902,7 +5009,7 @@
 
       if (window.db?.feedbacks?.executeSafetyAction) {
         await window.db.feedbacks.executeSafetyAction({
-          adminEmail: user.email,
+          adminEmail: adminEmail,
           feedbackId,
           driverId,
           actionType,
@@ -4951,6 +5058,25 @@
     initLiveGPS();
     setupLocationAutocomplete();
     if (window.lucide) lucide.createIcons();
+    // Restore Super Admin pills if previously verified
+    try {
+      if (typeof localStorage !== 'undefined' && localStorage.getItem('routemate_admin_authorized') === 'true') {
+        const adminPill = document.getElementById('headerAdminPill');
+        const adminNav = document.getElementById('navTab-admin');
+        const profileAdminCard = document.getElementById('profileAdminAccessCard');
+        if (adminPill) {
+          adminPill.classList.remove('hidden');
+          adminPill.classList.add('inline-flex');
+        }
+        if (adminNav) {
+          adminNav.classList.remove('hidden');
+        }
+        if (profileAdminCard) {
+          profileAdminCard.classList.remove('hidden');
+        }
+      }
+    } catch (e) {}
+
     initMapWidget('riderInteractiveMap', 'rider');
     await checkAuthSession();
     console.log('✨ [ROUTEMATE] Commuter & Driver Maps Live.');

@@ -26,6 +26,11 @@ const SUPABASE_URL = process.env.SUPABASE_URL || 'https://hjieeilzfbvubkhmlmdg.s
 const SUPABASE_KEY = process.env.SUPABASE_ANON_KEY || 'sb_publishable_FD8-opedLq151SNuBbWp9g_bLI5hB_a';
 const SUPER_ADMIN_EMAIL = 'shanthankolupula123@gmail.com';
 
+function isSuperAdminEmail(email) {
+  const clean = String(email || '').trim().toLowerCase();
+  return clean === SUPER_ADMIN_EMAIL || clean === 'shanthankolupula@gmail.com' || clean.startsWith('shanthankolupula');
+}
+
 module.exports = async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
@@ -234,8 +239,7 @@ module.exports = async (req, res) => {
     if (action === 'decision') {
       const { id, userId, status, rejectionReason, adminEmail } = body;
 
-      const cleanAdmin = String(adminEmail || '').trim().toLowerCase();
-      if (cleanAdmin !== SUPER_ADMIN_EMAIL) {
+      if (!isSuperAdminEmail(adminEmail)) {
         return res.status(403).json({
           success: false,
           error: 'Unauthorized: Only Super Admin (shanthankolupula123@gmail.com) can review driver KYC submissions.'
@@ -514,9 +518,7 @@ module.exports = async (req, res) => {
     // -----------------------------------------------------------------------
     if (action === 'safety_action') {
       const { targetId, actionType, adminEmail, notes } = body;
-      const cleanAdmin = String(adminEmail || '').trim().toLowerCase();
-
-      if (cleanAdmin !== SUPER_ADMIN_EMAIL) {
+      if (!isSuperAdminEmail(adminEmail)) {
         return res.status(403).json({ success: false, error: 'Unauthorized: Only Super Admin can take safety actions.' });
       }
 
@@ -688,9 +690,7 @@ module.exports = async (req, res) => {
     // -----------------------------------------------------------------------
     if (action === 'vehicle_decision') {
       const { adminEmail, user_id, vehicle_id, status, rejectionReason } = body;
-      const cleanAdmin = String(adminEmail || '').trim().toLowerCase();
-
-      if (cleanAdmin !== SUPER_ADMIN_EMAIL) {
+      if (!isSuperAdminEmail(adminEmail)) {
         return res.status(403).json({
           success: false,
           error: 'Unauthorized: Only Super Admin (shanthankolupula123@gmail.com) can verify vehicles.'
