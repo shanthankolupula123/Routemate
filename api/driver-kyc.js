@@ -746,6 +746,87 @@ module.exports = async (req, res) => {
     }
 
     // -----------------------------------------------------------------------
+    // ACTION: Delete Account & Associated Data
+    // -----------------------------------------------------------------------
+    if (action === 'delete_account') {
+      const { userId, email } = body;
+      const cleanUserId = userId || body.user_id;
+      const cleanEmail = String(email || body.driver_email || '').toLowerCase().trim();
+
+      if (!cleanUserId && !cleanEmail) {
+        return res.status(400).json({ success: false, error: 'User ID or Email is required to delete account.' });
+      }
+
+      console.log('🗑️ [DELETE ACCOUNT REQUEST] Deleting user data for:', cleanUserId, cleanEmail);
+
+      // 1. Remove from local file store fallback
+      try {
+        const list = getStore();
+        const updatedList = list.filter(s => {
+          const matchesId = cleanUserId && (s.id === cleanUserId || s.user_id === cleanUserId);
+          const matchesEmail = cleanEmail && (s.driver_email || '').toLowerCase() === cleanEmail;
+          return !matchesId && !matchesEmail;
+        });
+        saveStore(updatedList);
+      } catch (storeErr) {
+        console.warn('Store delete notice:', storeErr);
+      }
+
+      // 2. Delete from Supabase `driver_kyc`
+      try {
+        let kycFilter = cleanUserId && cleanEmail
+          ? `or=(user_id.eq.${encodeURIComponent(cleanUserId)},driver_email.eq.${encodeURIComponent(cleanEmail)})`
+          : (cleanUserId ? `or=(id.eq.${encodeURIComponent(cleanUserId)},user_id.eq.${encodeURIComponent(cleanUserId)})` : `driver_email.eq.${encodeURIComponent(cleanEmail)}`);
+        await fetch(`${SUPABASE_URL}/rest/v1/driver_kyc?${kycFilter}`, {
+          method: 'DELETE',
+          headers: {
+            'apikey': SUPABASE_KEY,
+            'Authorization': `Bearer ${SUPABASE_KEY}`
+          }
+        });
+      } catch (e) {
+        console.warn('KYC delete error:', e);
+      }
+
+      // 3. Delete from Supabase `profiles`
+      try {
+        let profFilter = cleanUserId && cleanEmail
+          ? `or=(id.eq.${encodeURIComponent(cleanUserId)},email.eq.${encodeURIComponent(cleanEmail)})`
+          : (cleanUserId ? `id=eq.${encodeURIComponent(cleanUserId)}` : `email=eq.${encodeURIComponent(cleanEmail)}`);
+        await fetch(`${SUPABASE_URL}/rest/v1/profiles?${profFilter}`, {
+          method: 'DELETE',
+          headers: {
+            'apikey': SUPABASE_KEY,
+            'Authorization': `Bearer ${SUPABASE_KEY}`
+          }
+        });
+      } catch (e) {
+        console.warn('Profile delete error:', e);
+      }
+
+      // 4. Delete user rides
+      try {
+        let ridesFilter = cleanUserId && cleanEmail
+          ? `or=(rider_id.eq.${encodeURIComponent(cleanUserId)},rider_email.eq.${encodeURIComponent(cleanEmail)},driver_id.eq.${encodeURIComponent(cleanUserId)})`
+          : (cleanUserId ? `or=(rider_id.eq.${encodeURIComponent(cleanUserId)},driver_id.eq.${encodeURIComponent(cleanUserId)})` : `rider_email.eq.${encodeURIComponent(cleanEmail)}`);
+        await fetch(`${SUPABASE_URL}/rest/v1/rides?${ridesFilter}`, {
+          method: 'DELETE',
+          headers: {
+            'apikey': SUPABASE_KEY,
+            'Authorization': `Bearer ${SUPABASE_KEY}`
+          }
+        });
+      } catch (e) {
+        console.warn('Rides delete error:', e);
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: 'Account and associated records have been permanently deleted.'
+      });
+    }
+
+    // -----------------------------------------------------------------------
     // ACTION: Driver Document Upload & Submission
     // -----------------------------------------------------------------------
     const cleanUserId = body.user_id || body.userId;

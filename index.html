@@ -315,6 +315,21 @@
             <!-- Drop Suggestions Dropdown -->
             <div id="dropSuggestions" class="absolute left-0 right-0 top-full mt-1.5 z-50 bg-white border border-slate-200/90 rounded-2xl shadow-2xl overflow-hidden max-h-60 overflow-y-auto divide-y divide-slate-100 hidden"></div>
           </div>
+
+          <!-- Quick Saved Location Chips -->
+          <div id="quickLocationPillsContainer" class="flex items-center gap-1.5 flex-wrap pt-0.5">
+            <span class="text-[10px] font-bold text-slate-400 uppercase">Quick:</span>
+            <button type="button" onclick="applyQuickLocation('home')" id="pillQuickHome" class="px-2.5 py-1 rounded-full bg-slate-100 hover:bg-blue-50 hover:text-blue-700 text-slate-600 text-[11px] font-bold border border-slate-200 transition cursor-pointer flex items-center gap-1">
+              <span>🏠 Home</span>
+            </button>
+            <button type="button" onclick="applyQuickLocation('work')" id="pillQuickWork" class="px-2.5 py-1 rounded-full bg-slate-100 hover:bg-blue-50 hover:text-blue-700 text-slate-600 text-[11px] font-bold border border-slate-200 transition cursor-pointer flex items-center gap-1">
+              <span>🏢 Work</span>
+            </button>
+            <button type="button" onclick="openLocationPreferencesModal()" title="Configure location preferences" class="px-2 py-1 rounded-full bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-[10px] font-bold border border-indigo-200 transition cursor-pointer flex items-center gap-1 ml-auto">
+              <i data-lucide="map-pin" class="w-3 h-3"></i>
+              <span>Preferences</span>
+            </button>
+          </div>
         </div>
 
         <!-- Real-Time Interactive Route Map Widget (Pure OpenStreetMap) -->
@@ -666,6 +681,41 @@
           </div>
         </div>
 
+        <!-- LOCATION PREFERENCES (HOME, WORK & COMMUTE DEFAULTS) -->
+        <div id="profileLocationPreferencesSection" class="mt-4 p-4 rounded-2xl bg-slate-50 border border-slate-200/80 space-y-3">
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-2">
+              <div class="w-7 h-7 rounded-lg bg-indigo-100 text-indigo-700 flex items-center justify-center font-black text-xs">
+                <i data-lucide="map-pin" class="w-4 h-4"></i>
+              </div>
+              <div>
+                <h4 class="text-xs font-black text-slate-900">Location Preferences</h4>
+                <p class="text-[10px] text-slate-400">Save Home, Work & commute defaults for 1-tap booking</p>
+              </div>
+            </div>
+            <button type="button" onclick="openLocationPreferencesModal()" class="px-3 py-1.5 rounded-full bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 text-[11px] font-black transition cursor-pointer flex items-center gap-1 active:scale-95">
+              <i data-lucide="sliders" class="w-3.5 h-3.5"></i>
+              <span>Preferences</span>
+            </button>
+          </div>
+
+          <!-- Summary Pills -->
+          <div class="grid grid-cols-2 gap-2 text-xs">
+            <div class="p-2.5 bg-white rounded-xl border border-slate-200 flex flex-col justify-between">
+              <span class="text-[10px] font-bold text-slate-400 uppercase flex items-center gap-1">
+                <span>🏠 Home</span>
+              </span>
+              <span id="profileHomeLocationDisplay" class="text-[11px] font-bold text-slate-400 italic truncate mt-1">Not configured</span>
+            </div>
+            <div class="p-2.5 bg-white rounded-xl border border-slate-200 flex flex-col justify-between">
+              <span class="text-[10px] font-bold text-slate-400 uppercase flex items-center gap-1">
+                <span>🏢 Work / College</span>
+              </span>
+              <span id="profileWorkLocationDisplay" class="text-[11px] font-bold text-slate-400 italic truncate mt-1">Not configured</span>
+            </div>
+          </div>
+        </div>
+
         <!-- SUPER ADMIN PANEL DIRECT ACCESS CARD -->
         <div id="profileAdminAccessCard" class="mt-4 p-4 rounded-2xl bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 text-white shadow-md flex items-center justify-between border border-slate-800">
           <div class="flex items-center gap-3">
@@ -694,6 +744,12 @@
 
           <button type="button" onclick="handleSignOut()" id="btnSignOut" class="w-full py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-2xl text-xs font-bold transition cursor-pointer">
             Sign Out
+          </button>
+
+          <!-- DELETE ACCOUNT ACTION -->
+          <button type="button" onclick="openDeleteAccountModal()" id="btnDeleteAccount" class="w-full py-3 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200/90 rounded-2xl text-xs font-bold transition cursor-pointer flex items-center justify-center gap-2">
+            <i data-lucide="trash-2" class="w-4 h-4 text-rose-600"></i>
+            <span>Delete Account & Data</span>
           </button>
         </div>
       </div>
@@ -1758,6 +1814,147 @@
   </div>
 
   <!-- ========================================================================= -->
+  <!-- MODAL: LOCATION PREFERENCES -->
+  <!-- ========================================================================= -->
+  <div id="locationPreferencesModal" class="fixed inset-0 z-50 glass-modal hidden flex items-center justify-center p-4">
+    <div class="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl relative space-y-4 max-h-[90vh] overflow-y-auto">
+      <div class="flex items-center justify-between border-b border-slate-100 pb-3">
+        <div class="flex items-center gap-2">
+          <div class="w-9 h-9 rounded-xl bg-indigo-100 text-indigo-700 flex items-center justify-center">
+            <i data-lucide="map-pin" class="w-5 h-5"></i>
+          </div>
+          <div>
+            <h3 class="text-sm font-black text-slate-900">Location Preferences</h3>
+            <p class="text-[11px] text-slate-500">Fast 1-tap route autofill & defaults</p>
+          </div>
+        </div>
+        <button type="button" onclick="closeLocationPreferencesModal()" class="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-500 flex items-center justify-center font-bold text-sm cursor-pointer transition">✕</button>
+      </div>
+
+      <form id="locationPreferencesForm" onsubmit="saveLocationPreferences(event)" class="space-y-3.5">
+        <!-- HOME ADDRESS -->
+        <div>
+          <label class="block text-[11px] font-bold text-slate-700 mb-1 flex items-center gap-1">
+            <span>🏠 Home Address / Area</span>
+          </label>
+          <div class="relative">
+            <input type="text" id="prefHomeInput" placeholder="e.g. Hanamkonda Bus Station, Warangal or Uppal Metro" autocomplete="off" class="w-full px-3.5 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-semibold focus:outline-none focus:border-indigo-600 focus:bg-white transition" />
+            <button type="button" onclick="useCurrentGpsForPref('home')" title="Use live GPS for Home" class="absolute right-2.5 top-1/2 -translate-y-1/2 px-2 py-1 rounded-lg bg-white border border-slate-200 text-[10px] font-bold text-slate-600 hover:text-indigo-600 transition flex items-center gap-1">
+              <i data-lucide="crosshair" class="w-3 h-3"></i> GPS
+            </button>
+          </div>
+        </div>
+
+        <!-- WORK / COLLEGE ADDRESS -->
+        <div>
+          <label class="block text-[11px] font-bold text-slate-700 mb-1 flex items-center gap-1">
+            <span>🏢 Work / College / Office</span>
+          </label>
+          <div class="relative">
+            <input type="text" id="prefWorkInput" placeholder="e.g. Hitech City Cyber Towers or JNTU Kukatpally" autocomplete="off" class="w-full px-3.5 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-semibold focus:outline-none focus:border-indigo-600 focus:bg-white transition" />
+            <button type="button" onclick="useCurrentGpsForPref('work')" title="Use live GPS for Work" class="absolute right-2.5 top-1/2 -translate-y-1/2 px-2 py-1 rounded-lg bg-white border border-slate-200 text-[10px] font-bold text-slate-600 hover:text-indigo-600 transition flex items-center gap-1">
+              <i data-lucide="crosshair" class="w-3 h-3"></i> GPS
+            </button>
+          </div>
+        </div>
+
+        <!-- FREQUENT COMMUTE CORRIDOR / DEFAULT ROUTE -->
+        <div>
+          <label class="block text-[11px] font-bold text-slate-700 mb-1">
+            Frequent Commute Corridor
+          </label>
+          <select id="prefDefaultRouteInput" class="w-full px-3 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-semibold text-slate-800 focus:outline-none focus:border-indigo-600 focus:bg-white transition">
+            <option value="">None / Custom</option>
+            <option value="Warangal <-> Hyderabad">Warangal ⇄ Hyderabad (NH 163)</option>
+            <option value="Nizamabad <-> Hyderabad">Nizamabad ⇄ Hyderabad (NH 44)</option>
+            <option value="Karimnagar <-> Hyderabad">Karimnagar ⇄ Hyderabad (SH 1)</option>
+            <option value="Khammam <-> Hyderabad">Khammam ⇄ Hyderabad (Suryapet route)</option>
+            <option value="Mahabubnagar <-> Hyderabad">Mahabubnagar ⇄ Hyderabad (NH 44)</option>
+            <option value="Nalgonda <-> Hyderabad">Nalgonda ⇄ Hyderabad</option>
+            <option value="Siddipet <-> Hyderabad">Siddipet ⇄ Hyderabad</option>
+          </select>
+        </div>
+
+        <!-- AUTO-GPS DEFAULT TOGGLE -->
+        <div class="p-3 bg-indigo-50/50 rounded-2xl border border-indigo-100 flex items-center justify-between">
+          <div class="pr-2">
+            <span class="text-xs font-bold text-slate-800 block">Auto-Detect GPS as Default Pickup</span>
+            <span class="text-[10px] text-slate-500 block">Automatically fill your live GPS position when starting a new booking</span>
+          </div>
+          <label class="relative inline-flex items-center cursor-pointer flex-shrink-0">
+            <input type="checkbox" id="prefAutoGpsToggle" class="sr-only peer" checked />
+            <div class="w-9 h-5 bg-slate-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-600"></div>
+          </label>
+        </div>
+
+        <div class="pt-2 flex items-center gap-2">
+          <button type="button" onclick="closeLocationPreferencesModal()" class="flex-1 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-2xl text-xs font-bold transition cursor-pointer">
+            Cancel
+          </button>
+          <button type="submit" id="btnSaveLocationPreferences" class="flex-1 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl text-xs font-bold transition cursor-pointer shadow-md flex items-center justify-center gap-1.5">
+            <i data-lucide="check" class="w-4 h-4"></i>
+            <span>Save Preferences</span>
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ========================================================================= -->
+  <!-- MODAL: DELETE ACCOUNT CONFIRMATION -->
+  <!-- ========================================================================= -->
+  <div id="deleteAccountModal" class="fixed inset-0 z-50 glass-modal hidden flex items-center justify-center p-4">
+    <div class="bg-white rounded-3xl max-w-sm w-full p-6 shadow-2xl text-center space-y-4 relative">
+      <div class="w-14 h-14 rounded-full bg-rose-100 text-rose-600 mx-auto flex items-center justify-center border-4 border-rose-50 shadow-inner">
+        <i data-lucide="alert-octagon" class="w-7 h-7"></i>
+      </div>
+
+      <div>
+        <h3 class="text-base font-black text-slate-900">Permanently Delete Account?</h3>
+        <p class="text-xs text-slate-500 mt-1 leading-relaxed">
+          This action cannot be undone. All your personal data will be completely wiped:
+        </p>
+      </div>
+
+      <div class="p-3 bg-rose-50/60 rounded-2xl border border-rose-100 text-left space-y-1.5 text-[11px] text-rose-800 font-medium">
+        <div class="flex items-start gap-1.5">
+          <i data-lucide="x-circle" class="w-3.5 h-3.5 text-rose-600 flex-shrink-0 mt-0.5"></i>
+          <span>User profile, phone number & contact details</span>
+        </div>
+        <div class="flex items-start gap-1.5">
+          <i data-lucide="x-circle" class="w-3.5 h-3.5 text-rose-600 flex-shrink-0 mt-0.5"></i>
+          <span>All past & active ride history logs</span>
+        </div>
+        <div class="flex items-start gap-1.5">
+          <i data-lucide="x-circle" class="w-3.5 h-3.5 text-rose-600 flex-shrink-0 mt-0.5"></i>
+          <span>Driver KYC documents, approved status & vehicles</span>
+        </div>
+        <div class="flex items-start gap-1.5">
+          <i data-lucide="x-circle" class="w-3.5 h-3.5 text-rose-600 flex-shrink-0 mt-0.5"></i>
+          <span>Driver wallet balance & transaction ledger</span>
+        </div>
+      </div>
+
+      <div class="space-y-2">
+        <p class="text-[11px] text-slate-500 font-bold">Type <span class="text-rose-600 font-mono font-black select-all">DELETE</span> below to confirm:</p>
+        <input type="text" id="inputConfirmDeleteAccount" placeholder="DELETE" class="w-full text-center px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono font-bold uppercase tracking-wider focus:outline-none focus:border-rose-600 focus:bg-white transition" />
+      </div>
+
+      <div id="deleteAccountErrorMsg" class="hidden p-2 bg-rose-50 border border-rose-200 rounded-xl text-xs font-semibold text-rose-600"></div>
+
+      <div class="grid grid-cols-2 gap-2 pt-1">
+        <button type="button" onclick="closeDeleteAccountModal()" class="py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-2xl text-xs font-bold transition cursor-pointer">
+          Cancel
+        </button>
+        <button type="button" id="btnConfirmDeleteAccount" onclick="confirmDeleteAccount()" class="py-3 bg-rose-600 hover:bg-rose-700 text-white rounded-2xl text-xs font-bold transition cursor-pointer shadow-md flex items-center justify-center gap-1.5 disabled:opacity-50">
+          <i data-lucide="trash-2" class="w-4 h-4"></i>
+          <span>Delete Account</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========================================================================= -->
   <!-- MODAL: IMAGE LIGHTBOX (FULL-RESOLUTION DOCUMENT INSPECTION) -->
   <!-- ========================================================================= -->
   <div id="imageLightboxModal" class="fixed inset-0 z-50 bg-black/90 hidden flex flex-col items-center justify-center p-4">
@@ -1787,7 +1984,7 @@
 
   <!-- Core Scripts -->
   <script src="payment.js?v=20261026_admin_fix_v55"></script>
-  <script src="supabaseClient.js?v=20261028_persistent_session_v56"></script>
-  <script src="app.js?v=20261028_persistent_session_v56"></script>
+  <script src="supabaseClient.js?v=20261028_delete_pref_v57"></script>
+  <script src="app.js?v=20261028_delete_pref_v57"></script>
 </body>
 </html>

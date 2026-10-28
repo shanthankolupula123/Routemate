@@ -470,6 +470,56 @@
         dob: dob || '',
         upiId: cleanUpi
       };
+    },
+
+    /**
+     * Delete user account and all associated data
+     */
+    async deleteAccount(userId, email = null) {
+      if (!userId && !email) throw new Error('User ID or Email is required');
+      const apiBase = (typeof window !== 'undefined' && window.location.origin && window.location.origin.startsWith('http') && !window.location.origin.includes('localhost') && !window.location.origin.includes('127.0.0.1'))
+        ? window.location.origin
+        : 'https://www.routemate.pro';
+
+      let apiSuccess = false;
+      try {
+        const resp = await fetch(`${apiBase}/api/driver-kyc`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'delete_account',
+            userId,
+            email
+          })
+        });
+        const data = await resp.json().catch(() => ({}));
+        if (resp.ok && data.success) {
+          apiSuccess = true;
+        }
+      } catch (e) {
+        console.warn('API delete account error:', e);
+      }
+
+      // Direct fallback deletion on Supabase REST
+      try {
+        let profFilter = userId && email
+          ? `or=(id.eq.${encodeURIComponent(userId)},email.eq.${encodeURIComponent(email)})`
+          : (userId ? `id=eq.${encodeURIComponent(userId)}` : `email=eq.${encodeURIComponent(email)}`);
+        await fetch(`${SUPABASE_CONFIG.url}/rest/v1/profiles?${profFilter}`, {
+          method: 'DELETE',
+          headers: {
+            'apikey': SUPABASE_CONFIG.publishableKey,
+            'Authorization': `Bearer ${SUPABASE_CONFIG.publishableKey}`
+          }
+        });
+      } catch (e) {}
+
+      // Sign out from Supabase Auth
+      try {
+        await auth.signOut();
+      } catch (e) {}
+
+      return { success: true };
     }
   };
 

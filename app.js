@@ -65,6 +65,12 @@
       upiId: '',
       upiQr: ''
     },
+    locationPreferences: {
+      home: '',
+      work: '',
+      defaultRoute: '',
+      autoGps: true
+    },
     ratingState: {
       activeRide: null,
       selectedStars: 5,
@@ -601,6 +607,8 @@
     state.pendingCompletionUser = null;
     localStorage.removeItem('routemate_user');
     closeProfileCompletionModal();
+    closeDeleteAccountModal();
+    closeLocationPreferencesModal();
 
     // Hide Super Admin controls
     const adminPill = document.getElementById('headerAdminPill');
@@ -681,6 +689,11 @@
     const profileUpiEl = document.getElementById('profileDriverUpiDisplay');
     if (profileUpiEl) {
       profileUpiEl.textContent = state.driverUpi?.upiId || (state.kyc?.submission?.upi_id || 'Not Set (Tap "Set UPI ID")');
+    }
+
+    // Update Location Preferences display in profile & quick chips
+    if (typeof updateLocationPreferencesUI === 'function') {
+      updateLocationPreferencesUI();
     }
 
     if (typeof updateWalletDisplays === 'function') {
@@ -1120,6 +1133,307 @@
       await window.db.auth.signOut();
       lockAppToAuthScreen();
       showToast('Signed out of Routemate', 'info');
+    }
+  };
+
+  // =========================================================================
+  // LOCATION PREFERENCES & COMMUTE DEFAULTS MODULE
+  // =========================================================================
+  function loadLocationPreferences() {
+    try {
+      const saved = localStorage.getItem('routemate_location_preferences');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed && typeof parsed === 'object') {
+          state.locationPreferences = {
+            home: parsed.home || '',
+            work: parsed.work || '',
+            defaultRoute: parsed.defaultRoute || '',
+            autoGps: parsed.autoGps !== false
+          };
+        }
+      }
+    } catch (e) {}
+    updateLocationPreferencesUI();
+  }
+
+  function updateLocationPreferencesUI() {
+    const prefs = state.locationPreferences || {};
+    const homeEl = document.getElementById('profileHomeLocationDisplay');
+    const workEl = document.getElementById('profileWorkLocationDisplay');
+
+    if (homeEl) {
+      if (prefs.home) {
+        homeEl.textContent = prefs.home;
+        homeEl.className = 'text-[11px] font-bold text-slate-800 truncate mt-1';
+      } else {
+        homeEl.textContent = 'Not configured';
+        homeEl.className = 'text-[11px] font-bold text-slate-400 italic truncate mt-1';
+      }
+    }
+
+    if (workEl) {
+      if (prefs.work) {
+        workEl.textContent = prefs.work;
+        workEl.className = 'text-[11px] font-bold text-slate-800 truncate mt-1';
+      } else {
+        workEl.textContent = 'Not configured';
+        workEl.className = 'text-[11px] font-bold text-slate-400 italic truncate mt-1';
+      }
+    }
+
+    // Update quick chips in Rider card
+    const homeChip = document.getElementById('pillQuickHome');
+    const workChip = document.getElementById('pillQuickWork');
+    if (homeChip) {
+      if (prefs.home) {
+        const shortHome = prefs.home.split(',')[0].trim();
+        homeChip.innerHTML = `<span>🏠 ${shortHome}</span>`;
+        homeChip.title = prefs.home;
+        homeChip.classList.remove('opacity-60');
+      } else {
+        homeChip.innerHTML = `<span>🏠 Home</span>`;
+        homeChip.title = 'Configure Home address';
+        homeChip.classList.add('opacity-60');
+      }
+    }
+    if (workChip) {
+      if (prefs.work) {
+        const shortWork = prefs.work.split(',')[0].trim();
+        workChip.innerHTML = `<span>🏢 ${shortWork}</span>`;
+        workChip.title = prefs.work;
+        workChip.classList.remove('opacity-60');
+      } else {
+        workChip.innerHTML = `<span>🏢 Work</span>`;
+        workChip.title = 'Configure Work address';
+        workChip.classList.add('opacity-60');
+      }
+    }
+  }
+
+  window.openLocationPreferencesModal = function () {
+    const modal = document.getElementById('locationPreferencesModal');
+    if (!modal) return;
+
+    const prefs = state.locationPreferences || {};
+    const homeInput = document.getElementById('prefHomeInput');
+    const workInput = document.getElementById('prefWorkInput');
+    const routeInput = document.getElementById('prefDefaultRouteInput');
+    const autoGpsToggle = document.getElementById('prefAutoGpsToggle');
+
+    if (homeInput) homeInput.value = prefs.home || '';
+    if (workInput) workInput.value = prefs.work || '';
+    if (routeInput) routeInput.value = prefs.defaultRoute || '';
+    if (autoGpsToggle) autoGpsToggle.checked = prefs.autoGps !== false;
+
+    modal.classList.remove('hidden');
+    if (window.lucide) lucide.createIcons();
+  };
+
+  window.closeLocationPreferencesModal = function () {
+    const modal = document.getElementById('locationPreferencesModal');
+    if (modal) modal.classList.add('hidden');
+  };
+
+  window.saveLocationPreferences = function (e) {
+    if (e && e.preventDefault) e.preventDefault();
+
+    const homeInput = document.getElementById('prefHomeInput');
+    const workInput = document.getElementById('prefWorkInput');
+    const defaultRouteInput = document.getElementById('prefDefaultRouteInput');
+    const autoGpsToggle = document.getElementById('prefAutoGpsToggle');
+
+    const homeVal = String(homeInput?.value || '').trim();
+    const workVal = String(workInput?.value || '').trim();
+    const routeVal = String(defaultRouteInput?.value || '').trim();
+    const autoGpsVal = !!autoGpsToggle?.checked;
+
+    state.locationPreferences = {
+      home: homeVal,
+      work: workVal,
+      defaultRoute: routeVal,
+      autoGps: autoGpsVal
+    };
+
+    try {
+      localStorage.setItem('routemate_location_preferences', JSON.stringify(state.locationPreferences));
+    } catch (err) {}
+
+    updateLocationPreferencesUI();
+    closeLocationPreferencesModal();
+    showToast('Location preferences saved successfully!', 'success');
+  };
+
+  window.useCurrentGpsForPref = function (type) {
+    if (!('geolocation' in navigator)) {
+      showToast('Geolocation is not supported by your browser.', 'danger');
+      return;
+    }
+    showToast('Acquiring current GPS position...', 'info');
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const { latitude, longitude } = pos.coords;
+        let nearest = null;
+        let minDist = Infinity;
+        if (Array.isArray(TELANGANA_LOCATIONS)) {
+          TELANGANA_LOCATIONS.forEach(loc => {
+            const d = Math.hypot(loc.lat - latitude, loc.lng - longitude);
+            if (d < minDist) {
+              minDist = d;
+              nearest = loc;
+            }
+          });
+        }
+
+        const inputId = type === 'home' ? 'prefHomeInput' : 'prefWorkInput';
+        const input = document.getElementById(inputId);
+        const resolvedName = nearest ? `${nearest.title}, ${nearest.subtitle}` : `Location (${latitude.toFixed(4)}, ${longitude.toFixed(4)})`;
+        if (input) {
+          input.value = resolvedName;
+          input.focus();
+        }
+        showToast(`📍 GPS position applied for ${type === 'home' ? 'Home' : 'Work'}!`, 'success');
+      },
+      (err) => {
+        showToast('Unable to get GPS location: ' + err.message, 'warning');
+      },
+      { enableHighAccuracy: true, timeout: 8000 }
+    );
+  };
+
+  window.applyQuickLocation = function (type) {
+    const prefs = state.locationPreferences || {};
+    const target = type === 'home' ? prefs.home : prefs.work;
+    const label = type === 'home' ? 'Home' : 'Work / College';
+
+    if (!target) {
+      showToast(`${label} address is not configured yet. Set it in Location Preferences.`, 'info');
+      openLocationPreferencesModal();
+      return;
+    }
+
+    const dInput = document.getElementById('inputDrop');
+    if (dInput) dInput.value = target;
+    state.drop = target;
+
+    // Resolve coordinates if matched with known hubs
+    if (Array.isArray(TELANGANA_LOCATIONS)) {
+      const cleanTarget = target.toLowerCase();
+      const matched = TELANGANA_LOCATIONS.find(l => cleanTarget.includes(l.title.toLowerCase()) || l.title.toLowerCase().includes(cleanTarget));
+      if (matched) {
+        state.dropCoords = { lat: matched.lat, lng: matched.lng };
+      }
+    }
+
+    calculateDistanceAndFare();
+    updateRouteLine(state.maps.rider, 'rider');
+    showToast(`📍 Set Destination to ${label}: ${target}`, 'success');
+  };
+
+  // =========================================================================
+  // PERMANENT ACCOUNT DELETION MODULE
+  // =========================================================================
+  window.openDeleteAccountModal = function () {
+    const modal = document.getElementById('deleteAccountModal');
+    const input = document.getElementById('inputConfirmDeleteAccount');
+    const errEl = document.getElementById('deleteAccountErrorMsg');
+    const btn = document.getElementById('btnConfirmDeleteAccount');
+
+    if (input) input.value = '';
+    if (errEl) {
+      errEl.classList.add('hidden');
+      errEl.textContent = '';
+    }
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = `<i data-lucide="trash-2" class="w-4 h-4"></i><span>Delete Account</span>`;
+    }
+    if (modal) modal.classList.remove('hidden');
+    if (window.lucide) lucide.createIcons();
+
+    setTimeout(() => input?.focus(), 200);
+  };
+
+  window.closeDeleteAccountModal = function () {
+    const modal = document.getElementById('deleteAccountModal');
+    if (modal) modal.classList.add('hidden');
+  };
+
+  window.confirmDeleteAccount = async function () {
+    const user = state.currentUser;
+    if (!user) {
+      showToast('No active user session.', 'warning');
+      closeDeleteAccountModal();
+      lockAppToAuthScreen();
+      return;
+    }
+
+    const input = document.getElementById('inputConfirmDeleteAccount');
+    const errEl = document.getElementById('deleteAccountErrorMsg');
+    const btn = document.getElementById('btnConfirmDeleteAccount');
+
+    const typed = String(input?.value || '').trim().toUpperCase();
+    if (typed !== 'DELETE') {
+      if (errEl) {
+        errEl.textContent = 'Please type "DELETE" in capital letters to confirm.';
+        errEl.classList.remove('hidden');
+      }
+      input?.focus();
+      return;
+    }
+
+    if (errEl) errEl.classList.add('hidden');
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = `<i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i><span>Deleting...</span>`;
+      if (window.lucide) lucide.createIcons();
+    }
+
+    showToast('Permanently deleting your Routemate account and records...', 'warning');
+
+    try {
+      // 1. Delete user from Supabase and backend stores via API
+      if (window.db?.auth?.deleteAccount) {
+        await window.db.auth.deleteAccount(user.id, user.email);
+      }
+
+      // 2. Clear all local storage records
+      const keysToRemove = [
+        'routemate_user',
+        'routemate_location_preferences',
+        'routemate_driver_kyc',
+        'routemate_admin_authorized',
+        'routemate_active_ride',
+        'routemate_rides'
+      ];
+      keysToRemove.forEach(k => {
+        try { localStorage.removeItem(k); } catch (e) {}
+      });
+
+      // 3. Reset application state
+      state.currentUser = null;
+      state.pendingCompletionUser = null;
+      state.locationPreferences = { home: '', work: '', defaultRoute: '', autoGps: true };
+      state.wallet = { balance: 0, transactions: [], welcomeBonusCredited: false };
+      state.driverUpi = { upiId: '', upiQr: '' };
+      state.kyc = { status: 'not_submitted', submission: null, currentStep: 1, formData: {} };
+
+      // 4. Close modal and lock app to auth screen
+      closeDeleteAccountModal();
+      lockAppToAuthScreen();
+
+      showToast('Your Routemate account and all associated data have been permanently deleted.', 'info');
+    } catch (delErr) {
+      console.warn('Account deletion error:', delErr);
+      if (errEl) {
+        errEl.textContent = 'Error deleting account: ' + (delErr.message || 'Server error');
+        errEl.classList.remove('hidden');
+      }
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = `<i data-lucide="trash-2" class="w-4 h-4"></i><span>Delete Account</span>`;
+        if (window.lucide) lucide.createIcons();
+      }
     }
   };
 
@@ -5156,6 +5470,7 @@
   // =========================================================================
   document.addEventListener('DOMContentLoaded', async () => {
     initGoogleIdentityServices();
+    loadLocationPreferences();
     calculateDistanceAndFare();
     initLiveGPS();
     setupLocationAutocomplete();
