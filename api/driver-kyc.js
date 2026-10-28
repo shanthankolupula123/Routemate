@@ -51,8 +51,12 @@ module.exports = async (req, res) => {
     // 1. Try fetching directly from Supabase `driver_kyc` table
     try {
       let queryUrl = `${SUPABASE_URL}/rest/v1/driver_kyc?select=*&order=submitted_at.desc`;
-      if (userId) {
+      if (userId && email) {
+        queryUrl = `${SUPABASE_URL}/rest/v1/driver_kyc?or=(user_id.eq.${encodeURIComponent(userId)},driver_email.eq.${encodeURIComponent(email)})&select=*&order=submitted_at.desc&limit=1`;
+      } else if (userId) {
         queryUrl = `${SUPABASE_URL}/rest/v1/driver_kyc?user_id=eq.${encodeURIComponent(userId)}&select=*&order=submitted_at.desc&limit=1`;
+      } else if (email) {
+        queryUrl = `${SUPABASE_URL}/rest/v1/driver_kyc?driver_email=eq.${encodeURIComponent(email)}&select=*&order=submitted_at.desc&limit=1`;
       }
       const supaRes = await fetch(queryUrl, {
         headers: {
@@ -196,8 +200,12 @@ module.exports = async (req, res) => {
       }
     });
 
-    if (userId) {
-      const userSub = allSubmissions.find(s => s.user_id === userId || s.id === userId);
+    if (userId || email) {
+      const cleanEmail = email ? String(email).trim().toLowerCase() : '';
+      const userSub = allSubmissions.find(s => 
+        (userId && (s.user_id === userId || s.id === userId)) ||
+        (cleanEmail && s.driver_email && s.driver_email.trim().toLowerCase() === cleanEmail)
+      );
       return res.status(200).json({
         success: true,
         submission: userSub || null,
@@ -352,13 +360,14 @@ module.exports = async (req, res) => {
       const { userId, upiId, upiQr } = body;
       const cleanUserId = userId || body.user_id;
       const cleanUpi = String(upiId || body.upi_id || '').trim();
+      const cleanEmail = String(body.email || body.driver_email || '').toLowerCase().trim();
 
-      if (!cleanUserId || !cleanUpi) {
-        return res.status(400).json({ success: false, error: 'User ID and UPI ID are required.' });
+      if ((!cleanUserId && !cleanEmail) || !cleanUpi) {
+        return res.status(400).json({ success: false, error: 'User ID or Email, and UPI ID are required.' });
       }
 
       const list = getStore();
-      const idx = list.findIndex(s => s.id === cleanUserId || s.user_id === cleanUserId);
+      const idx = list.findIndex(s => (cleanUserId && (s.id === cleanUserId || s.user_id === cleanUserId)) || (cleanEmail && (s.driver_email || '').toLowerCase() === cleanEmail));
       if (idx !== -1) {
         list[idx].upi_id = cleanUpi;
         if (upiQr || body.upi_qr) list[idx].upi_qr = upiQr || body.upi_qr;
@@ -367,7 +376,10 @@ module.exports = async (req, res) => {
 
       // Update Supabase `driver_kyc` & `profiles`
       try {
-        await fetch(`${SUPABASE_URL}/rest/v1/driver_kyc?or=(id.eq.${encodeURIComponent(cleanUserId)},user_id.eq.${encodeURIComponent(cleanUserId)})`, {
+        let kycFilter = cleanUserId && cleanEmail
+          ? `or=(user_id.eq.${encodeURIComponent(cleanUserId)},driver_email.eq.${encodeURIComponent(cleanEmail)})`
+          : (cleanUserId ? `or=(id.eq.${encodeURIComponent(cleanUserId)},user_id.eq.${encodeURIComponent(cleanUserId)})` : `driver_email.eq.${encodeURIComponent(cleanEmail)}`);
+        await fetch(`${SUPABASE_URL}/rest/v1/driver_kyc?${kycFilter}`, {
           method: 'PATCH',
           headers: {
             'apikey': SUPABASE_KEY,
@@ -382,7 +394,10 @@ module.exports = async (req, res) => {
       } catch (e) {}
 
       try {
-        await fetch(`${SUPABASE_URL}/rest/v1/profiles?id=eq.${encodeURIComponent(cleanUserId)}`, {
+        let profFilter = cleanUserId && cleanEmail
+          ? `or=(id.eq.${encodeURIComponent(cleanUserId)},email.eq.${encodeURIComponent(cleanEmail)})`
+          : (cleanUserId ? `id=eq.${encodeURIComponent(cleanUserId)}` : `email=eq.${encodeURIComponent(cleanEmail)}`);
+        await fetch(`${SUPABASE_URL}/rest/v1/profiles?${profFilter}`, {
           method: 'PATCH',
           headers: {
             'apikey': SUPABASE_KEY,

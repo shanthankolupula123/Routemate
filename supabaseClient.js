@@ -358,10 +358,17 @@
     /**
      * Fetch user profile from Supabase profiles table
      */
-    async getUserProfile(userId) {
-      if (!userId) return null;
+    async getUserProfile(userId, email = null) {
+      if (!userId && !email) return null;
       try {
-        const url = `${SUPABASE_CONFIG.url}/rest/v1/profiles?id=eq.${encodeURIComponent(userId)}&select=id,name,phone,role,rating,total_rides,avatar_url,is_verified`;
+        let url = `${SUPABASE_CONFIG.url}/rest/v1/profiles?`;
+        if (userId && email) {
+          url += `or=(id.eq.${encodeURIComponent(userId)},email.eq.${encodeURIComponent(email)})&select=*&limit=1`;
+        } else if (userId) {
+          url += `id=eq.${encodeURIComponent(userId)}&select=*&limit=1`;
+        } else {
+          url += `email=eq.${encodeURIComponent(email)}&select=*&limit=1`;
+        }
         const resp = await fetch(url, {
           method: 'GET',
           headers: {
@@ -382,14 +389,28 @@
     /**
      * Upsert user profile to Supabase profiles table & Auth metadata
      */
-    async saveUserProfile(userId, { name, phone, gender, dob }) {
+    async saveUserProfile(userId, { name, phone, email, gender, dob, upiId }) {
       if (!userId) throw new Error('User ID is required');
       const cleanName = String(name || '').trim();
       const cleanPhone = String(phone || '').trim();
+      const cleanEmail = String(email || '').trim().toLowerCase();
+      const cleanUpi = String(upiId || '').trim();
 
       // 1. Upsert into Supabase `profiles` table
       try {
         const url = `${SUPABASE_CONFIG.url}/rest/v1/profiles`;
+        const profilePayload = {
+          id: userId,
+          name: cleanName,
+          phone: cleanPhone,
+          role: 'Daily Commuter',
+          is_verified: true
+        };
+        if (cleanEmail) profilePayload.email = cleanEmail;
+        if (gender) profilePayload.gender = gender;
+        if (dob) profilePayload.dob = dob;
+        if (cleanUpi) profilePayload.upi_id = cleanUpi;
+
         const resp = await fetch(url, {
           method: 'POST',
           headers: {
@@ -398,13 +419,7 @@
             'Content-Type': 'application/json',
             'Prefer': 'resolution=merge-duplicates,return=representation'
           },
-          body: JSON.stringify({
-            id: userId,
-            name: cleanName,
-            phone: cleanPhone,
-            role: 'Daily Commuter',
-            is_verified: true
-          })
+          body: JSON.stringify(profilePayload)
         });
 
         if (!resp.ok) {
@@ -421,17 +436,28 @@
       const client = getSupabase();
       if (client) {
         try {
+          const metaPayload = {
+            name: cleanName,
+            full_name: cleanName,
+            phone: cleanPhone,
+            gender: gender || '',
+            dob: dob || ''
+          };
+          if (cleanUpi) metaPayload.upi_id = cleanUpi;
           await client.auth.updateUser({
-            data: {
-              name: cleanName,
-              full_name: cleanName,
-              phone: cleanPhone,
-              gender: gender || '',
-              dob: dob || ''
-            }
+            data: metaPayload
           });
         } catch (metaErr) {
           console.warn('⚠️ [SUPABASE AUTH] updateUser metadata note:', metaErr.message);
+        }
+      }
+
+      // 3. If UPI ID provided, update driver KYC / UPI
+      if (cleanUpi && kyc.updateDriverUpi) {
+        try {
+          await kyc.updateDriverUpi(userId, cleanUpi);
+        } catch (upiErr) {
+          console.warn('⚠️ [DRIVER UPI] Note saving UPI ID:', upiErr.message);
         }
       }
 
@@ -439,8 +465,10 @@
         id: userId,
         name: cleanName,
         phone: cleanPhone,
+        email: cleanEmail,
         gender: gender || '',
-        dob: dob || ''
+        dob: dob || '',
+        upiId: cleanUpi
       };
     }
   };
@@ -452,15 +480,17 @@
     /**
      * Get Driver KYC status for a user
      */
-    async getDriverKyc(userId) {
-      if (!userId) return { status: 'not_submitted' };
+    async getDriverKyc(userId, email = null) {
+      if (!userId && !email) return { status: 'not_submitted' };
       const apiBase = (typeof window !== 'undefined' && window.location.origin && window.location.origin.startsWith('http') && !window.location.origin.includes('localhost') && !window.location.origin.includes('127.0.0.1'))
         ? window.location.origin
         : 'https://www.routemate.pro';
 
       // 1. Check API Gateway
       try {
-        const resp = await fetch(`${apiBase}/api/driver-kyc?userId=${encodeURIComponent(userId)}`);
+        let q = `?userId=${encodeURIComponent(userId || '')}`;
+        if (email) q += `&email=${encodeURIComponent(email)}`;
+        const resp = await fetch(`${apiBase}/api/driver-kyc${q}`);
         if (resp.ok) {
           const data = await resp.json();
           if (data && data.success) {
@@ -473,7 +503,15 @@
 
       // 2. Direct Supabase Fallback
       try {
-        const resp = await fetch(`${SUPABASE_CONFIG.url}/rest/v1/driver_kyc?user_id=eq.${encodeURIComponent(userId)}&select=*&order=submitted_at.desc&limit=1`, {
+        let directUrl = `${SUPABASE_CONFIG.url}/rest/v1/driver_kyc?`;
+        if (userId && email) {
+          directUrl += `or=(user_id.eq.${encodeURIComponent(userId)},driver_email.eq.${encodeURIComponent(email)})&select=*&order=submitted_at.desc&limit=1`;
+        } else if (userId) {
+          directUrl += `user_id=eq.${encodeURIComponent(userId)}&select=*&order=submitted_at.desc&limit=1`;
+        } else {
+          directUrl += `driver_email=eq.${encodeURIComponent(email)}&select=*&order=submitted_at.desc&limit=1`;
+        }
+        const resp = await fetch(directUrl, {
           headers: {
             'apikey': SUPABASE_CONFIG.publishableKey,
             'Authorization': `Bearer ${SUPABASE_CONFIG.publishableKey}`

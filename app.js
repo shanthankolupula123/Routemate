@@ -187,6 +187,20 @@
         const session = await window.db.auth.getSession();
         if (session && session.user) {
           sessionUser = normalizeAuthUser(session.user);
+          // Merge from localStorage cached user if matching account
+          try {
+            const saved = localStorage.getItem('routemate_user');
+            if (saved) {
+              const parsed = JSON.parse(saved);
+              if (parsed && (parsed.id === sessionUser.id || (parsed.email && parsed.email.toLowerCase() === (sessionUser.email || '').toLowerCase()))) {
+                if (parsed.phone && !sessionUser.phone) sessionUser.phone = parsed.phone;
+                if (parsed.name && (!sessionUser.name || sessionUser.name === 'User')) sessionUser.name = parsed.name;
+                if (parsed.gender && !sessionUser.gender) sessionUser.gender = parsed.gender;
+                if (parsed.dob && !sessionUser.dob) sessionUser.dob = parsed.dob;
+                if (parsed.role && !sessionUser.role) sessionUser.role = parsed.role;
+              }
+            }
+          } catch (e) {}
         }
       } catch (e) {
         console.warn('Auth session check note:', e);
@@ -197,6 +211,19 @@
         console.log('👤 [AUTH EVENT]:', event);
         if (session && session.user) {
           const userObj = normalizeAuthUser(session.user);
+          try {
+            const saved = localStorage.getItem('routemate_user');
+            if (saved) {
+              const parsed = JSON.parse(saved);
+              if (parsed && (parsed.id === userObj.id || (parsed.email && parsed.email.toLowerCase() === (userObj.email || '').toLowerCase()))) {
+                if (parsed.phone && !userObj.phone) userObj.phone = parsed.phone;
+                if (parsed.name && (!userObj.name || userObj.name === 'User')) userObj.name = parsed.name;
+                if (parsed.gender && !userObj.gender) userObj.gender = parsed.gender;
+                if (parsed.dob && !userObj.dob) userObj.dob = parsed.dob;
+                if (parsed.role && !userObj.role) userObj.role = parsed.role;
+              }
+            }
+          } catch (e) {}
           await handleAuthUserFlow(userObj, event === 'SIGNED_IN');
         } else if (event === 'SIGNED_OUT') {
           lockAppToAuthScreen();
@@ -273,22 +300,41 @@
       return;
     }
 
-    // Check memory phone number
-    const cleanUserPhone = String(user.phone || '').replace(/\D/g, '');
-    let hasCompleteProfile = cleanUserPhone.length >= 10 && user.name && user.name !== 'User' && !user.name.includes('@');
+    // 1. Check LocalStorage cache to prefill existing fields if any
+    try {
+      const saved = localStorage.getItem('routemate_user');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed && (parsed.id === user.id || (parsed.email && parsed.email.toLowerCase() === (user.email || '').toLowerCase()))) {
+          if (parsed.phone && !user.phone) user.phone = parsed.phone;
+          if (parsed.name && (!user.name || user.name === 'User' || user.name.includes('@'))) user.name = parsed.name;
+          if (parsed.gender && !user.gender) user.gender = parsed.gender;
+          if (parsed.dob && !user.dob) user.dob = parsed.dob;
+          if (parsed.role && !user.role) user.role = parsed.role;
+          if (parsed.upi_id) state.driverUpi.upiId = parsed.upi_id;
+        }
+      }
+    } catch (e) {}
 
-    // Verify against Supabase `profiles` table
+    // 2. Query Supabase `profiles` table using User ID or Email
     try {
       if (window.db?.auth?.getUserProfile) {
-        const dbProfile = await window.db.auth.getUserProfile(user.id);
+        const dbProfile = await window.db.auth.getUserProfile(user.id, user.email);
         if (dbProfile) {
           const dbPhoneDigits = String(dbProfile.phone || '').replace(/\D/g, '');
           if (dbPhoneDigits.length >= 10 && !dbProfile.phone.includes('@')) {
             user.phone = dbProfile.phone;
-            if (dbProfile.name && (!user.name || user.name === 'User' || user.name.includes('@'))) {
-              user.name = dbProfile.name;
-            }
-            hasCompleteProfile = true;
+          }
+          if (dbProfile.name && (!user.name || user.name === 'User' || user.name.includes('@'))) {
+            user.name = dbProfile.name;
+          }
+          if (dbProfile.gender && !user.gender) user.gender = dbProfile.gender;
+          if (dbProfile.dob && !user.dob) user.dob = dbProfile.dob;
+          if (dbProfile.role) user.role = dbProfile.role;
+          if (dbProfile.avatar_url && (!user.avatar || user.avatar.includes('routemate.local'))) user.avatar = dbProfile.avatar_url;
+          if (dbProfile.upi_id) {
+            user.upi_id = dbProfile.upi_id;
+            state.driverUpi.upiId = dbProfile.upi_id;
           }
         }
       }
@@ -296,7 +342,11 @@
       console.warn('Profile DB check notice:', e);
     }
 
-    // If phone number is missing (e.g. brand new Google user), intercept with profile completion popup!
+    // 3. Conditional Routing Check: Name & Phone Number (10 digits)
+    const cleanUserPhone = String(user.phone || '').replace(/\D/g, '');
+    const hasCompleteProfile = cleanUserPhone.length >= 10 && user.name && user.name !== 'User' && !user.name.includes('@');
+
+    // If Profile is Missing / First-Time User: Intercept them and display mandatory profile completion form
     if (!hasCompleteProfile) {
       console.log('📋 [PROFILE INTERCEPT] Incomplete profile detected for:', user.email);
       state.pendingCompletionUser = user;
@@ -304,7 +354,13 @@
       return;
     }
 
-    // Profile is 100% complete -> proceed seamlessly into app
+    // If Profile Exists (Name & Phone Number are already saved):
+    // Permanently store in localStorage, close modal, and route directly to main app dashboard
+    try {
+      localStorage.setItem('routemate_user', JSON.stringify(user));
+    } catch (e) {}
+
+    closeProfileCompletionModal();
     unlockAppWithUser(user, isNewSignIn);
   }
 
@@ -334,6 +390,11 @@
 
     const dobInput = document.getElementById('completionDobInput');
     if (dobInput && user.dob) dobInput.value = user.dob;
+
+    const upiInput = document.getElementById('completionUpiInput');
+    if (upiInput) {
+      upiInput.value = user.upi_id || user.upiId || state.driverUpi.upiId || '';
+    }
 
     const errEl = document.getElementById('completionErrorMsg');
     if (errEl) {
@@ -368,6 +429,7 @@
     const phoneInput = document.getElementById('completionPhoneInput');
     const genderInput = document.getElementById('completionGenderInput');
     const dobInput = document.getElementById('completionDobInput');
+    const upiInput = document.getElementById('completionUpiInput');
     const errEl = document.getElementById('completionErrorMsg');
     const btn = document.getElementById('btnSubmitCompletion');
     const btnText = document.getElementById('btnSubmitCompletionText');
@@ -376,6 +438,7 @@
     const rawPhone = String(phoneInput?.value || '').replace(/\D/g, '');
     const gender = String(genderInput?.value || '').trim();
     const dob = String(dobInput?.value || '').trim();
+    const rawUpi = String(upiInput?.value || '').trim();
 
     // Validation
     if (!fullName || fullName.length < 2) {
@@ -410,8 +473,10 @@
         await window.db.auth.saveUserProfile(user.id, {
           name: fullName,
           phone: formattedPhone,
+          email: user.email,
           gender,
-          dob
+          dob,
+          upiId: rawUpi
         });
       }
 
@@ -420,9 +485,13 @@
       user.phone = formattedPhone;
       user.gender = gender;
       user.dob = dob;
+      if (rawUpi) {
+        user.upi_id = rawUpi;
+        state.driverUpi.upiId = rawUpi;
+      }
       user.avatar = getInitialsAvatarSvg(fullName, 120);
 
-      // 3. Cache in localStorage
+      // 3. Cache in localStorage permanently
       try {
         localStorage.setItem('routemate_user', JSON.stringify(user));
       } catch (err) {}
@@ -510,6 +579,9 @@
     }
 
     updateProfileUI();
+
+    // Load Driver KYC, wallet balance, and vehicle registrations immediately
+    checkDriverKycStatus(false);
 
     // Default to commuter mode (user can freely toggle rider/driver anytime via header slider or bottom nav)
     switchMode('rider');
