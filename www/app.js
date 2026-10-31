@@ -465,6 +465,15 @@
       return;
     }
 
+    const completionTermsCheckbox = document.getElementById('completionTermsCheckbox');
+    if (completionTermsCheckbox && !completionTermsCheckbox.checked) {
+      if (errEl) {
+        errEl.textContent = 'Please accept the Terms & Conditions and Privacy Policy to continue.';
+        errEl.classList.remove('hidden');
+      }
+      return;
+    }
+
     if (errEl) errEl.classList.add('hidden');
     if (btn) btn.disabled = true;
     if (btnText) btnText.textContent = 'Saving details...';
@@ -476,7 +485,7 @@
 
       // 1. Save to Supabase profiles table & Auth Metadata
       if (window.db?.auth?.saveUserProfile) {
-        await window.db.auth.saveUserProfile(user.id, {
+        const saved = await window.db.auth.saveUserProfile(user.id, {
           name: fullName,
           phone: formattedPhone,
           email: user.email,
@@ -484,6 +493,9 @@
           dob,
           upiId: rawUpi
         });
+        if (saved && saved.id) {
+          user.id = saved.id;
+        }
       }
 
       // 2. Update user object
@@ -522,18 +534,12 @@
   };
 
   // Super Admin Authorization Gate
+  const SUPER_ADMIN_EMAIL = 'shanthankolupula123@gmail.com';
+
   function isAuthorizedSuperAdmin(user = state.currentUser) {
-    if (typeof localStorage !== 'undefined' && localStorage.getItem('routemate_admin_authorized') === 'true') {
-      return true;
-    }
-    const email = String(user?.email || '').toLowerCase().trim();
-    if (!email) return false;
-    return (
-      email === 'shanthankolupula123@gmail.com' ||
-      email === 'shanthankolupula@gmail.com' ||
-      email.startsWith('shanthankolupula') ||
-      email.includes('admin')
-    );
+    if (!user) return false;
+    const email = String(user.email || '').toLowerCase().trim();
+    return email === SUPER_ADMIN_EMAIL;
   }
   window.isAuthorizedSuperAdmin = isAuthorizedSuperAdmin;
 
@@ -554,7 +560,7 @@
     if (main) main.classList.remove('hidden');
     if (nav) nav.classList.remove('hidden');
 
-    // Super Admin Authorization Gate
+    // Super Admin Authorization Gate: Strictly shanthankolupula123@gmail.com
     const isSuperAdmin = isAuthorizedSuperAdmin(user);
     const adminPill = document.getElementById('headerAdminPill');
     const adminNav = document.getElementById('navTab-admin');
@@ -576,7 +582,11 @@
       }
     }
     if (profileAdminCard) {
-      profileAdminCard.classList.remove('hidden');
+      if (isSuperAdmin) {
+        profileAdminCard.classList.remove('hidden');
+      } else {
+        profileAdminCard.classList.add('hidden');
+      }
     }
 
     if (isSuperAdmin) {
@@ -609,15 +619,19 @@
     closeProfileCompletionModal();
     closeDeleteAccountModal();
     closeLocationPreferencesModal();
+    if (typeof closeTermsModal === 'function') closeTermsModal();
+    if (typeof closePrivacyModal === 'function') closePrivacyModal();
 
     // Hide Super Admin controls
     const adminPill = document.getElementById('headerAdminPill');
     const adminNav = document.getElementById('navTab-admin');
+    const profileAdminCard = document.getElementById('profileAdminAccessCard');
     if (adminPill) {
       adminPill.classList.add('hidden');
       adminPill.classList.remove('inline-flex');
     }
     if (adminNav) adminNav.classList.add('hidden');
+    if (profileAdminCard) profileAdminCard.classList.add('hidden');
 
     // Show Auth Screen & reset to Step 1
     const authScreen = document.getElementById('authScreen');
@@ -696,6 +710,29 @@
       updateLocationPreferencesUI();
     }
 
+    // Super Admin Authorization Gate in Profile & Header
+    const isSuperAdmin = isAuthorizedSuperAdmin(state.currentUser);
+    const profileAdminCard = document.getElementById('profileAdminAccessCard');
+    if (profileAdminCard) {
+      if (isSuperAdmin) profileAdminCard.classList.remove('hidden');
+      else profileAdminCard.classList.add('hidden');
+    }
+    const adminPill = document.getElementById('headerAdminPill');
+    const adminNav = document.getElementById('navTab-admin');
+    if (adminPill) {
+      if (isSuperAdmin) {
+        adminPill.classList.remove('hidden');
+        adminPill.classList.add('inline-flex');
+      } else {
+        adminPill.classList.add('hidden');
+        adminPill.classList.remove('inline-flex');
+      }
+    }
+    if (adminNav) {
+      if (isSuperAdmin) adminNav.classList.remove('hidden');
+      else adminNav.classList.add('hidden');
+    }
+
     if (typeof updateWalletDisplays === 'function') {
       updateWalletDisplays();
     }
@@ -741,6 +778,16 @@
 
     if (!email) {
       showToast('Please enter your email address.', 'warning');
+      return;
+    }
+
+    const termsCheck = document.getElementById('authTermsCheckbox');
+    if (termsCheck && !termsCheck.checked) {
+      if (errBox) {
+        errBox.textContent = 'Please agree to the Terms & Conditions and Privacy Policy to continue.';
+        errBox.classList.remove('hidden');
+      }
+      showToast('Please agree to the Terms & Conditions and Privacy Policy.', 'warning');
       return;
     }
 
@@ -1072,6 +1119,17 @@
   };
 
   window.handleGoogleSignIn = async function () {
+    const termsCheck = document.getElementById('authTermsCheckbox');
+    if (termsCheck && !termsCheck.checked) {
+      showToast('Please agree to the Terms & Conditions and Privacy Policy to continue with Google.', 'warning');
+      const errBox = document.getElementById('authEmailErrorMsg');
+      if (errBox) {
+        errBox.textContent = 'Please agree to the Terms & Conditions and Privacy Policy to continue.';
+        errBox.classList.remove('hidden');
+      }
+      return;
+    }
+
     const emailVal = document.getElementById('authEmailInput')?.value?.trim();
 
     // 1. Try Google Identity Services One Tap prompt first (in-page popup, never redirects to localhost)
@@ -2098,15 +2156,45 @@
     updateProfileUI();
   };
 
-  window.openAdminAuthModal = function () {
-    const modal = document.getElementById('adminAuthModal');
-    const input = document.getElementById('inputAdminAuthKey');
-    const err = document.getElementById('adminAuthErrorMsg');
-    if (err) err.classList.add('hidden');
-    if (input) input.value = '';
+  // =========================================================================
+  // TERMS & CONDITIONS AND PRIVACY POLICY MODAL HANDLERS
+  // =========================================================================
+  window.openTermsModal = function (e) {
+    if (e && e.preventDefault) e.preventDefault();
+    if (e && e.stopPropagation) e.stopPropagation();
+    const modal = document.getElementById('termsModal');
     if (modal) modal.classList.remove('hidden');
     if (window.lucide) lucide.createIcons();
-    setTimeout(() => input?.focus(), 100);
+  };
+
+  window.closeTermsModal = function () {
+    const modal = document.getElementById('termsModal');
+    if (modal) modal.classList.add('hidden');
+  };
+
+  window.openPrivacyModal = function (e) {
+    if (e && e.preventDefault) e.preventDefault();
+    if (e && e.stopPropagation) e.stopPropagation();
+    const modal = document.getElementById('privacyModal');
+    if (modal) modal.classList.remove('hidden');
+    if (window.lucide) lucide.createIcons();
+  };
+
+  window.closePrivacyModal = function () {
+    const modal = document.getElementById('privacyModal');
+    if (modal) modal.classList.add('hidden');
+  };
+
+  // =========================================================================
+  // SUPER ADMIN ROUTE GUARD & DASHBOARD CONTROLLER (shanthankolupula123@gmail.com)
+  // =========================================================================
+  window.openAdminAuthModal = function () {
+    if (!isAuthorizedSuperAdmin(state.currentUser)) {
+      showToast('Access Denied: Super Admin (shanthankolupula123@gmail.com) only.', 'danger');
+      window.navigateToTab('book');
+      return;
+    }
+    openAdminScreenDirect();
   };
 
   window.closeAdminAuthModal = function () {
@@ -2116,46 +2204,21 @@
 
   window.handleAdminAuthModalSubmit = function (e) {
     if (e) e.preventDefault();
-    const input = document.getElementById('inputAdminAuthKey');
-    const err = document.getElementById('adminAuthErrorMsg');
-    const val = String(input?.value || '').trim().toLowerCase();
-
-    if (val === '1234' || val === 'admin' || val.includes('shanthankolupula')) {
-      localStorage.setItem('routemate_admin_authorized', 'true');
-      if (!state.currentUser) {
-        state.currentUser = {
-          id: 'admin_root',
-          email: 'shanthankolupula123@gmail.com',
-          name: 'Shanthankolupula (Super Admin)',
-          role: 'admin'
-        };
-      } else {
-        state.currentUser.email = 'shanthankolupula123@gmail.com';
-      }
-      closeAdminAuthModal();
-      showToast('🎉 Super Admin Verified & Unlocked!', 'success');
-
-      const adminPill = document.getElementById('headerAdminPill');
-      const adminNav = document.getElementById('navTab-admin');
-      if (adminPill) {
-        adminPill.classList.remove('hidden');
-        adminPill.classList.add('inline-flex');
-      }
-      if (adminNav) {
-        adminNav.classList.remove('hidden');
-      }
-
-      openAdminScreenDirect();
-    } else {
-      if (err) {
-        err.textContent = 'Invalid credentials. Enter PIN 1234 or your admin email.';
-        err.classList.remove('hidden');
-      }
-      showToast('Invalid Super Admin credentials.', 'danger');
+    if (!isAuthorizedSuperAdmin(state.currentUser)) {
+      showToast('Access Denied: Super Admin (shanthankolupula123@gmail.com) only.', 'danger');
+      window.navigateToTab('book');
+      return;
     }
+    openAdminScreenDirect();
   };
 
   window.openAdminScreenDirect = function () {
+    if (!isAuthorizedSuperAdmin(state.currentUser)) {
+      showToast('Access Denied: Super Admin (shanthankolupula123@gmail.com) only.', 'danger');
+      window.navigateToTab('book');
+      return;
+    }
+
     state.activeTab = 'admin';
     setActiveNavPill('admin');
 
@@ -2192,7 +2255,8 @@
   window.navigateToTab = function (tabName) {
     if (tabName === 'admin') {
       if (!isAuthorizedSuperAdmin(state.currentUser)) {
-        openAdminAuthModal();
+        showToast('Access Denied: Super Admin (shanthankolupula123@gmail.com) only.', 'danger');
+        window.navigateToTab('book');
         return;
       }
       openAdminScreenDirect();
@@ -5475,24 +5539,6 @@
     initLiveGPS();
     setupLocationAutocomplete();
     if (window.lucide) lucide.createIcons();
-    // Restore Super Admin pills if previously verified
-    try {
-      if (typeof localStorage !== 'undefined' && localStorage.getItem('routemate_admin_authorized') === 'true') {
-        const adminPill = document.getElementById('headerAdminPill');
-        const adminNav = document.getElementById('navTab-admin');
-        const profileAdminCard = document.getElementById('profileAdminAccessCard');
-        if (adminPill) {
-          adminPill.classList.remove('hidden');
-          adminPill.classList.add('inline-flex');
-        }
-        if (adminNav) {
-          adminNav.classList.remove('hidden');
-        }
-        if (profileAdminCard) {
-          profileAdminCard.classList.remove('hidden');
-        }
-      }
-    } catch (e) {}
 
     initMapWidget('riderInteractiveMap', 'rider');
     await checkAuthSession();

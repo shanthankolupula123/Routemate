@@ -28,7 +28,7 @@ const SUPER_ADMIN_EMAIL = 'shanthankolupula123@gmail.com';
 
 function isSuperAdminEmail(email) {
   const clean = String(email || '').trim().toLowerCase();
-  return clean === SUPER_ADMIN_EMAIL || clean === 'shanthankolupula@gmail.com' || clean.startsWith('shanthankolupula');
+  return clean === SUPER_ADMIN_EMAIL;
 }
 
 module.exports = async (req, res) => {
@@ -44,7 +44,18 @@ module.exports = async (req, res) => {
   // GET: Retrieve Driver KYC Submissions or User Status
   // -------------------------------------------------------------------------
   if (req.method === 'GET') {
-    const { userId, email } = req.query || {};
+    const { userId, email, adminEmail } = req.query || {};
+
+    // Strict route guard: Listing all submissions requires Super Admin authorization
+    if (!userId && !email) {
+      const cleanAdmin = String(adminEmail || req.headers['x-admin-email'] || '').trim().toLowerCase();
+      if (!isSuperAdminEmail(cleanAdmin)) {
+        return res.status(403).json({
+          success: false,
+          error: 'Unauthorized: Only Super Admin (shanthankolupula123@gmail.com) can access all driver submissions.'
+        });
+      }
+    }
 
     let allSubmissions = [];
 

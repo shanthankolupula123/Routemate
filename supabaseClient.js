@@ -276,7 +276,7 @@
       const client = getSupabase();
       if (!client) throw new Error('Authentication service is initializing. Please try again.');
 
-      const redirectUrl = (window.location.origin && !window.location.origin.includes('localhost') && !window.location.origin.includes('capacitor://'))
+      const redirectUrl = (typeof window !== 'undefined' && window.location && window.location.origin && !window.location.origin.includes('localhost') && !window.location.origin.includes('capacitor://'))
         ? window.location.origin
         : 'https://www.routemate.pro';
 
@@ -360,25 +360,81 @@
      */
     async getUserProfile(userId, email = null) {
       if (!userId && !email) return null;
-      try {
-        let url = `${SUPABASE_CONFIG.url}/rest/v1/profiles?`;
-        if (userId && email) {
-          url += `or=(id.eq.${encodeURIComponent(userId)},email.eq.${encodeURIComponent(email)})&select=*&limit=1`;
-        } else if (userId) {
-          url += `id=eq.${encodeURIComponent(userId)}&select=*&limit=1`;
-        } else {
-          url += `email=eq.${encodeURIComponent(email)}&select=*&limit=1`;
-        }
-        const resp = await fetch(url, {
-          method: 'GET',
-          headers: {
-            'apikey': SUPABASE_CONFIG.publishableKey,
-            'Authorization': `Bearer ${SUPABASE_CONFIG.publishableKey}`
+      const cleanEmail = email ? String(email).trim().toLowerCase() : '';
+      const isUUID = (str) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(str || ''));
+
+      const unpackProfile = (row) => {
+        if (!row) return null;
+        let extra = {};
+        try {
+          if (row.role && typeof row.role === 'string' && (row.role.trim().startsWith('{') || row.role.includes('{'))) {
+            extra = JSON.parse(row.role);
           }
-        });
-        if (resp.ok) {
-          const rows = await resp.json();
-          if (rows && rows.length > 0) return rows[0];
+        } catch (e) {}
+
+        const parsedEmail = extra.email || (row.phone && row.phone.includes('@') ? row.phone : cleanEmail);
+        const parsedPhone = extra.phone || (!row.phone || row.phone.includes('@') ? '' : row.phone);
+        const parsedName = row.name && row.name !== 'User' ? row.name : (extra.name || '');
+        const parsedRole = extra.role || (row.role && !row.role.startsWith('{') ? row.role : 'Daily Commuter');
+
+        return {
+          id: row.id,
+          name: parsedName,
+          phone: parsedPhone,
+          email: parsedEmail,
+          gender: extra.gender || '',
+          dob: extra.dob || '',
+          role: parsedRole,
+          rating: row.rating || 5.0,
+          total_rides: row.total_rides || 0,
+          avatar_url: row.avatar_url || null,
+          is_verified: row.is_verified !== false,
+          upi_id: extra.upi_id || ''
+        };
+      };
+
+      try {
+        // 1. Query by UUID if valid
+        if (userId && isUUID(userId)) {
+          const resp = await fetch(`${SUPABASE_CONFIG.url}/rest/v1/profiles?id=eq.${encodeURIComponent(userId)}&select=*&limit=1`, {
+            method: 'GET',
+            headers: {
+              'apikey': SUPABASE_CONFIG.publishableKey,
+              'Authorization': `Bearer ${SUPABASE_CONFIG.publishableKey}`
+            }
+          });
+          if (resp.ok) {
+            const rows = await resp.json();
+            if (rows && rows.length > 0) return unpackProfile(rows[0]);
+          }
+        }
+
+        // 2. Query by email in phone column (legacy records store email in phone)
+        if (cleanEmail) {
+          const resp = await fetch(`${SUPABASE_CONFIG.url}/rest/v1/profiles?phone=eq.${encodeURIComponent(cleanEmail)}&select=*&limit=1`, {
+            method: 'GET',
+            headers: {
+              'apikey': SUPABASE_CONFIG.publishableKey,
+              'Authorization': `Bearer ${SUPABASE_CONFIG.publishableKey}`
+            }
+          });
+          if (resp.ok) {
+            const rows = await resp.json();
+            if (rows && rows.length > 0) return unpackProfile(rows[0]);
+          }
+
+          // 3. Query by email inside role JSON
+          const respRole = await fetch(`${SUPABASE_CONFIG.url}/rest/v1/profiles?role=ilike.*${encodeURIComponent(cleanEmail)}*&select=*&limit=1`, {
+            method: 'GET',
+            headers: {
+              'apikey': SUPABASE_CONFIG.publishableKey,
+              'Authorization': `Bearer ${SUPABASE_CONFIG.publishableKey}`
+            }
+          });
+          if (respRole.ok) {
+            const rows = await respRole.json();
+            if (rows && rows.length > 0) return unpackProfile(rows[0]);
+          }
         }
       } catch (e) {
         console.warn('⚠️ [SUPABASE PROFILES] Fetch error:', e);
@@ -390,43 +446,73 @@
      * Upsert user profile to Supabase profiles table & Auth metadata
      */
     async saveUserProfile(userId, { name, phone, email, gender, dob, upiId }) {
-      if (!userId) throw new Error('User ID is required');
+      if (!userId && !email) throw new Error('User ID or Email is required');
       const cleanName = String(name || '').trim();
       const cleanPhone = String(phone || '').trim();
       const cleanEmail = String(email || '').trim().toLowerCase();
       const cleanUpi = String(upiId || '').trim();
+      const isUUID = (str) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(str || ''));
 
-      // 1. Upsert into Supabase `profiles` table
+      // Check if user already has an existing row in Supabase
+      let existingProfile = null;
       try {
-        const url = `${SUPABASE_CONFIG.url}/rest/v1/profiles`;
-        const profilePayload = {
-          id: userId,
-          name: cleanName,
-          phone: cleanPhone,
-          role: 'Daily Commuter',
-          is_verified: true
-        };
-        if (cleanEmail) profilePayload.email = cleanEmail;
-        if (gender) profilePayload.gender = gender;
-        if (dob) profilePayload.dob = dob;
-        if (cleanUpi) profilePayload.upi_id = cleanUpi;
+        existingProfile = await this.getUserProfile(userId, cleanEmail);
+      } catch (e) {}
 
-        const resp = await fetch(url, {
-          method: 'POST',
-          headers: {
-            'apikey': SUPABASE_CONFIG.publishableKey,
-            'Authorization': `Bearer ${SUPABASE_CONFIG.publishableKey}`,
-            'Content-Type': 'application/json',
-            'Prefer': 'resolution=merge-duplicates,return=representation'
-          },
-          body: JSON.stringify(profilePayload)
-        });
+      const metaObj = {
+        role: 'Daily Commuter',
+        email: cleanEmail,
+        phone: cleanPhone,
+        gender: gender || '',
+        dob: dob || '',
+        upi_id: cleanUpi || ''
+      };
 
-        if (!resp.ok) {
-          const errData = await resp.json().catch(() => ({}));
-          console.warn('⚠️ [SUPABASE PROFILES] Upsert warning:', errData);
+      const payload = {
+        name: cleanName,
+        phone: cleanPhone,
+        role: JSON.stringify(metaObj),
+        is_verified: true
+      };
+
+      let finalId = (existingProfile && existingProfile.id) || (userId && isUUID(userId) ? userId : null);
+
+      // 1. Update existing row or Insert new row in Supabase
+      try {
+        if (existingProfile && existingProfile.id) {
+          const resp = await fetch(`${SUPABASE_CONFIG.url}/rest/v1/profiles?id=eq.${encodeURIComponent(existingProfile.id)}`, {
+            method: 'PATCH',
+            headers: {
+              'apikey': SUPABASE_CONFIG.publishableKey,
+              'Authorization': `Bearer ${SUPABASE_CONFIG.publishableKey}`,
+              'Content-Type': 'application/json',
+              'Prefer': 'return=representation'
+            },
+            body: JSON.stringify(payload)
+          });
+          if (resp.ok) {
+            console.log('✅ [SUPABASE PROFILES] Successfully updated profile row:', existingProfile.id);
+          }
         } else {
-          console.log('✅ [SUPABASE PROFILES] Successfully updated profile for user:', userId);
+          const insertPayload = { ...payload };
+          if (finalId) insertPayload.id = finalId;
+          const resp = await fetch(`${SUPABASE_CONFIG.url}/rest/v1/profiles`, {
+            method: 'POST',
+            headers: {
+              'apikey': SUPABASE_CONFIG.publishableKey,
+              'Authorization': `Bearer ${SUPABASE_CONFIG.publishableKey}`,
+              'Content-Type': 'application/json',
+              'Prefer': 'return=representation'
+            },
+            body: JSON.stringify(insertPayload)
+          });
+          if (resp.ok) {
+            const created = await resp.json().catch(() => []);
+            if (created && created[0] && created[0].id) {
+              finalId = created[0].id;
+              console.log('✅ [SUPABASE PROFILES] Successfully created profile row:', finalId);
+            }
+          }
         }
       } catch (upsertErr) {
         console.warn('⚠️ [SUPABASE PROFILES] Upsert exception:', upsertErr);
@@ -455,14 +541,14 @@
       // 3. If UPI ID provided, update driver KYC / UPI
       if (cleanUpi && kyc.updateDriverUpi) {
         try {
-          await kyc.updateDriverUpi(userId, cleanUpi);
+          await kyc.updateDriverUpi(finalId || userId, cleanUpi);
         } catch (upiErr) {
           console.warn('⚠️ [DRIVER UPI] Note saving UPI ID:', upiErr.message);
         }
       }
 
       return {
-        id: userId,
+        id: finalId || userId,
         name: cleanName,
         phone: cleanPhone,
         email: cleanEmail,
@@ -600,12 +686,13 @@
     /**
      * Get All KYC submissions for Super Admin review
      */
-    async getAllKycSubmissions() {
+    async getAllKycSubmissions(adminEmail = null) {
       const apiBase = (typeof window !== 'undefined' && window.location.origin && window.location.origin.startsWith('http') && !window.location.origin.includes('localhost') && !window.location.origin.includes('127.0.0.1'))
         ? window.location.origin
         : 'https://www.routemate.pro';
 
-      const resp = await fetch(`${apiBase}/api/driver-kyc`);
+      const emailParam = encodeURIComponent(adminEmail || '');
+      const resp = await fetch(`${apiBase}/api/driver-kyc?adminEmail=${emailParam}`);
       if (resp.ok) {
         const data = await resp.json();
         if (data && data.success) return data.submissions || [];
