@@ -2190,7 +2190,7 @@
   // =========================================================================
   window.openAdminAuthModal = function () {
     if (!isAuthorizedSuperAdmin(state.currentUser)) {
-      showToast('Access Denied: Super Admin (shanthankolupula123@gmail.com) only.', 'danger');
+      showToast('Access Denied: Authorized Admin access only.', 'danger');
       window.navigateToTab('book');
       return;
     }
@@ -2205,7 +2205,7 @@
   window.handleAdminAuthModalSubmit = function (e) {
     if (e) e.preventDefault();
     if (!isAuthorizedSuperAdmin(state.currentUser)) {
-      showToast('Access Denied: Super Admin (shanthankolupula123@gmail.com) only.', 'danger');
+      showToast('Access Denied: Authorized Admin access only.', 'danger');
       window.navigateToTab('book');
       return;
     }
@@ -2214,7 +2214,7 @@
 
   window.openAdminScreenDirect = function () {
     if (!isAuthorizedSuperAdmin(state.currentUser)) {
-      showToast('Access Denied: Super Admin (shanthankolupula123@gmail.com) only.', 'danger');
+      showToast('Access Denied: Authorized Admin access only.', 'danger');
       window.navigateToTab('book');
       return;
     }
@@ -2255,7 +2255,7 @@
   window.navigateToTab = function (tabName) {
     if (tabName === 'admin') {
       if (!isAuthorizedSuperAdmin(state.currentUser)) {
-        showToast('Access Denied: Super Admin (shanthankolupula123@gmail.com) only.', 'danger');
+        showToast('Access Denied: Authorized Admin access only.', 'danger');
         window.navigateToTab('book');
         return;
       }
@@ -3677,7 +3677,7 @@
               </span>
               <h3 class="text-base font-black text-slate-900 mt-1">Your account will be verified and approved within 24 to 48 hours.</h3>
               <p class="text-xs text-slate-600 leading-relaxed max-w-sm mx-auto mt-1">
-                Your driving license, identity proof, vehicle details, and RC document have been securely pushed to Super Admin review (<span class="font-mono text-blue-700 font-bold">shanthankolupula123@gmail.com</span>).
+                Your driving license, identity proof, vehicle details, and RC document have been securely pushed for review by the Routemate Compliance & Verification Team.
               </p>
             </div>
             <div class="p-3.5 bg-white/95 rounded-2xl border border-amber-200 text-left text-xs space-y-2 max-w-xs mx-auto shadow-sm">
@@ -3699,8 +3699,8 @@
                 <span class="font-bold text-emerald-700">Within 24 to 48 Hours</span>
               </div>
               <div class="flex items-center justify-between text-[11px]">
-                <span class="text-slate-500 font-semibold">Reviewer:</span>
-                <span class="font-mono text-[10px] text-blue-700">shanthankolupula123@gmail.com</span>
+                <span class="text-slate-500 font-semibold">Review:</span>
+                <span class="text-[11px] text-blue-700 font-bold">Managed by Team</span>
               </div>
             </div>
             <div class="pt-1 flex items-center justify-center gap-2">

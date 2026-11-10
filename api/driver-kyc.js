@@ -52,7 +52,7 @@ module.exports = async (req, res) => {
       if (!isSuperAdminEmail(cleanAdmin)) {
         return res.status(403).json({
           success: false,
-          error: 'Unauthorized: Only Super Admin (shanthankolupula123@gmail.com) can access all driver submissions.'
+          error: 'Unauthorized: Only authorized admin can access all driver submissions.'
         });
       }
     }
@@ -261,7 +261,7 @@ module.exports = async (req, res) => {
       if (!isSuperAdminEmail(adminEmail)) {
         return res.status(403).json({
           success: false,
-          error: 'Unauthorized: Only Super Admin (shanthankolupula123@gmail.com) can review driver KYC submissions.'
+          error: 'Unauthorized: Only authorized admin can review driver KYC submissions.'
         });
       }
 
@@ -719,7 +719,7 @@ module.exports = async (req, res) => {
       if (!isSuperAdminEmail(adminEmail)) {
         return res.status(403).json({
           success: false,
-          error: 'Unauthorized: Only Super Admin (shanthankolupula123@gmail.com) can verify vehicles.'
+          error: 'Unauthorized: Only authorized admin can verify vehicles.'
         });
       }
 
