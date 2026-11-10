@@ -769,6 +769,29 @@
           </div>
         </div>
 
+        <!-- OFFICIAL CUSTOMER SUPPORT & CONTACT CARD -->
+        <div class="mt-4 p-4 rounded-2xl bg-gradient-to-br from-blue-50 to-indigo-50 border border-blue-100 shadow-sm space-y-2.5">
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-2.5">
+              <div class="w-8 h-8 rounded-xl bg-blue-600 text-white flex items-center justify-center font-bold shadow-sm">
+                <i data-lucide="headphones" class="w-4 h-4"></i>
+              </div>
+              <div>
+                <h4 class="text-xs font-black text-slate-900">Need Help or Support?</h4>
+                <p class="text-[10px] text-slate-500">Official Routemate Assistance & Safety</p>
+              </div>
+            </div>
+            <a href="mailto:routmatesupport@gmail.com" class="px-3 py-1.5 rounded-full bg-blue-600 hover:bg-blue-700 text-white text-[11px] font-bold transition flex items-center gap-1 shadow-sm active:scale-95">
+              <i data-lucide="mail" class="w-3.5 h-3.5"></i>
+              <span>Email Support</span>
+            </a>
+          </div>
+          <div class="flex items-center justify-between text-xs bg-white p-2.5 rounded-xl border border-blue-100/80">
+            <span class="text-[11px] text-slate-500 font-medium">Support Email:</span>
+            <a href="mailto:routmatesupport@gmail.com" class="text-xs font-bold font-mono text-blue-600 hover:underline">routmatesupport@gmail.com</a>
+          </div>
+        </div>
+
         <!-- SUPER ADMIN PANEL DIRECT ACCESS CARD (STRICTLY HIDDEN FOR NON-ADMINS) -->
         <div id="profileAdminAccessCard" class="hidden mt-4 p-4 rounded-2xl bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 text-white shadow-md flex items-center justify-between border border-slate-800">
           <div class="flex items-center gap-3">
@@ -1387,11 +1410,29 @@
             </div>
           </div>
 
-          <!-- Driver Personal UPI ID (Direct P2P Payment) -->
-          <div class="pt-2 border-t border-slate-100">
-            <label class="block text-[11px] font-bold text-slate-700 mb-1">Personal UPI ID (GPay / PhonePe / Paytm) <span class="text-rose-500">*</span></label>
-            <input type="text" id="kycInputUpiId" required placeholder="e.g. yourname@oksbi or 9848012345@paytm" class="w-full px-3.5 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-semibold focus:outline-none focus:border-blue-600 focus:bg-white transition" />
-            <p class="text-[10px] text-emerald-600 font-bold mt-1">✓ 100% of rider payments go directly to this UPI ID via Direct P2P (Zero platform fee deducted from your fare).</p>
+          <!-- Driver Personal UPI ID & QR Code (Direct P2P Payment) -->
+          <div class="pt-2 border-t border-slate-100 space-y-3">
+            <div>
+              <label class="block text-[11px] font-bold text-slate-700 mb-1">Personal UPI ID (GPay / PhonePe / Paytm) <span class="text-rose-500">*</span></label>
+              <input type="text" id="kycInputUpiId" required placeholder="e.g. yourname@oksbi or 9848012345@paytm" class="w-full px-3.5 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-semibold focus:outline-none focus:border-blue-600 focus:bg-white transition" />
+              <p class="text-[10px] text-emerald-600 font-bold mt-1">✓ 100% of rider payments go directly to this UPI ID via Direct P2P (Zero platform fee deducted from your fare).</p>
+            </div>
+            <div>
+              <label class="block text-[11px] font-bold text-slate-700 mb-1">Personal UPI QR Code Image (Optional)</label>
+              <div class="flex items-center gap-3">
+                <div id="kycPreviewUpiQr" class="w-14 h-14 rounded-xl border-2 border-dashed border-slate-300 bg-slate-50 flex items-center justify-center overflow-hidden flex-shrink-0 text-slate-400">
+                  <i data-lucide="qr-code" class="w-5 h-5"></i>
+                </div>
+                <div class="flex-1">
+                  <label class="cursor-pointer inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition">
+                    <i data-lucide="upload" class="w-3.5 h-3.5"></i>
+                    <span>Upload UPI QR</span>
+                    <input type="file" accept="image/*" onchange="handleKycFileSelect(event, 'upi_qr')" class="hidden" />
+                  </label>
+                  <p class="text-[10px] text-slate-400 mt-1">Upload your GPay/PhonePe scanner QR code for riders to scan & pay directly.</p>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -2071,6 +2112,13 @@
             While Routemate implements document verification and ratings, users engage in carpooling voluntarily. Routemate does not assume liability for highway delays, mechanical breakdowns, or unforeseen road occurrences.
           </p>
         </div>
+
+        <div class="p-3 bg-blue-50/60 rounded-2xl border border-blue-100">
+          <h4 class="font-bold text-slate-900 mb-1">6. Official Grievances & Support</h4>
+          <p class="text-[11px] text-slate-600">
+            For customer grievances, ride inquiries, or driver assistance, reach out directly to our official support team at <a href="mailto:routmatesupport@gmail.com" class="font-mono font-bold text-blue-600 hover:underline">routmatesupport@gmail.com</a>.
+          </p>
+        </div>
       </div>
 
       <div class="pt-2 border-t border-slate-100 flex items-center justify-end">
@@ -2137,6 +2185,13 @@
             In compliance with India's Digital Personal Data Protection Act, you have full authority to delete your account at any time using the "Delete Account & Data" option in your Profile. All documents, phone records, and ride histories are erased permanently.
           </p>
         </div>
+
+        <div class="p-3 bg-emerald-50/60 rounded-2xl border border-emerald-100">
+          <h4 class="font-bold text-slate-900 mb-1">6. Grievance Officer & Contact Details</h4>
+          <p class="text-[11px] text-slate-600">
+            For privacy inquiries, data subject access requests, or grievance redressal, contact our official support desk at <a href="mailto:routmatesupport@gmail.com" class="font-mono font-bold text-emerald-700 hover:underline">routmatesupport@gmail.com</a>.
+          </p>
+        </div>
       </div>
 
       <div class="pt-2 border-t border-slate-100 flex items-center justify-end">
@@ -2176,8 +2231,8 @@
   </audio>
 
   <!-- Core Scripts -->
-  <script src="payment.js?v=20261110_favicon_v59"></script>
-  <script src="supabaseClient.js?v=20261110_favicon_v59"></script>
-  <script src="app.js?v=20261110_favicon_v59"></script>
+  <script src="payment.js?v=20261110_prod_v60"></script>
+  <script src="supabaseClient.js?v=20261110_prod_v60"></script>
+  <script src="app.js?v=20261110_prod_v60"></script>
 </body>
 </html>

@@ -3799,7 +3799,8 @@
       dl_back: 'kycPreviewDlBack',
       aadhaar_front: 'kycPreviewAadhaarFront',
       aadhaar_back: 'kycPreviewAadhaarBack',
-      rc_photo: 'kycPreviewRcPhoto'
+      rc_photo: 'kycPreviewRcPhoto',
+      upi_qr: 'kycPreviewUpiQr'
     };
 
     Object.entries(previewMap).forEach(([fieldKey, elId]) => {
@@ -4083,6 +4084,8 @@
         driver_email: user.email,
         upiId,
         upi_id: upiId,
+        upiQr: state.kyc.formData.upi_qr || '',
+        upi_qr: state.kyc.formData.upi_qr || '',
         driverPhoto: state.kyc.formData.driver_photo,
         driver_photo: state.kyc.formData.driver_photo,
         dlNumber,
@@ -5086,7 +5089,7 @@
     const fare = ride.fare || 110;
     const driverName = ride.driver?.name || ride.driverName || 'Verified Driver';
     const driverVehicle = `${ride.driver?.vehicleNumber || 'TG 08 AB 1234'} • ${ride.driver?.vehicleName || ride.vehicleType || 'Corridor Commute'}`;
-    const upiId = ride.driver?.upiId || ride.driver?.upi_id || 'shanthankolupula123@okhdfcbank';
+    const upiId = ride.driver?.upiId || ride.driver?.upi_id || 'routemate.driver@oksbi';
 
     // Populate displays
     const fareEl = document.getElementById('paymentModalFareDisplay');
@@ -5113,9 +5116,14 @@
     const upiUrl = `upi://pay?pa=${encodeURIComponent(upiId)}&pn=${encodeURIComponent(driverName)}&am=${fare}&cu=INR&tn=${encodeURIComponent('Routemate Fuel Share')}`;
     if (upiDeepLinkEl) upiDeepLinkEl.href = upiUrl;
 
-    // Dynamic QR code
+    // Driver's QR Code or Dynamic UPI QR code
+    const driverQr = ride.driver?.upiQr || ride.driver?.upi_qr || null;
     if (qrImgEl) {
-      qrImgEl.src = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(upiUrl)}`;
+      if (driverQr && (driverQr.startsWith('data:image') || driverQr.startsWith('http'))) {
+        qrImgEl.src = driverQr;
+      } else {
+        qrImgEl.src = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(upiUrl)}`;
+      }
     }
 
     // Default to Payment Step View

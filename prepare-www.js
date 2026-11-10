@@ -24,7 +24,9 @@ const filesToCopy = [
   'android-chrome-192x192.png',
   'android-chrome-512x512.png',
   'manifest.json',
-  'site.webmanifest'
+  'site.webmanifest',
+  'terms.html',
+  'privacy.html'
 ];
 
 filesToCopy.forEach(file => {
