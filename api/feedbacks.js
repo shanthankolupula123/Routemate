@@ -83,8 +83,11 @@ module.exports = async (req, res) => {
       console.warn('[Feedbacks API] Supabase query notice:', e.message);
     }
 
+    // Filter out any mock/test feedbacks so only real user ratings exist
+    feedbacks = (feedbacks || []).filter(f => !f.id?.startsWith('FB-TEST') && f.driverId !== 'drv_sample_1' && f.driverId !== 'drv_sample_2');
+
     // Merge with persistent file store
-    const localStore = getStore() || [];
+    const localStore = (getStore() || []).filter(f => !f.id?.startsWith('FB-TEST') && f.driverId !== 'drv_sample_1' && f.driverId !== 'drv_sample_2');
     localStore.forEach(localItem => {
       const exists = feedbacks.find(f => f.id === localItem.id);
       if (!exists) {

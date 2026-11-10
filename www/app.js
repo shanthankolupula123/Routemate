@@ -5358,14 +5358,21 @@
         feedbacks = await window.db.feedbacks.getAllFeedbacks();
       }
 
-      state.admin.feedbacks = feedbacks || [];
+      // Strictly filter out any demo/mock entries so only real reviews appear
+      feedbacks = (feedbacks || []).filter(f => !f.id?.startsWith('FB-TEST') && f.driverId !== 'drv_sample_1' && f.driverId !== 'drv_sample_2');
+
+      state.admin.feedbacks = feedbacks;
 
       // Calculate unresolved safety alerts count
       const alertCount = (state.admin.feedbacks || []).filter(f => f.is_safety_flag && f.admin_action !== 'resolved').length;
       const alertBadge = document.getElementById('adminSafetyAlertBadge');
+      const metricSafety = document.getElementById('adminMetricSafetyAlerts');
       if (alertBadge) {
         alertBadge.textContent = alertCount;
         alertBadge.classList.toggle('hidden', alertCount === 0);
+      }
+      if (metricSafety) {
+        metricSafety.textContent = alertCount;
       }
 
       renderAdminFeedbacks();
@@ -5393,12 +5400,14 @@
 
     if (filtered.length === 0) {
       container.innerHTML = `
-        <div class="routemate-card p-8 text-center bg-white border border-slate-200">
-          <div class="w-12 h-12 rounded-2xl bg-slate-100 text-slate-400 mx-auto flex items-center justify-center mb-2">
-            <i data-lucide="shield-check" class="w-6 h-6 text-emerald-500"></i>
+        <div class="routemate-card p-8 text-center bg-white border border-slate-200 rounded-3xl space-y-2 shadow-sm">
+          <div class="w-12 h-12 rounded-2xl bg-emerald-50 text-emerald-600 mx-auto flex items-center justify-center">
+            <i data-lucide="shield-check" class="w-6 h-6"></i>
           </div>
-          <h4 class="text-xs font-bold text-slate-700">No reviews found</h4>
-          <p class="text-[11px] text-slate-400 mt-0.5">There are no feedback records under the '${filter}' filter.</p>
+          <h4 class="text-xs font-black text-slate-800">No Safety Alerts or Complaints</h4>
+          <p class="text-[11px] text-slate-400 max-w-xs mx-auto">
+            All drivers are operating smoothly with 0 active safety warnings. Real passenger reviews will stream here as trips complete.
+          </p>
         </div>
       `;
       if (window.lucide) lucide.createIcons();

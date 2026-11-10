@@ -910,7 +910,9 @@
 
       const resp = await fetch(`${apiBase}/api/feedbacks`);
       const data = await resp.json().catch(() => ({}));
-      return data.feedbacks || [];
+      const rawList = data.feedbacks || [];
+      // Strictly exclude any demo/mock test feedback so only real passenger reviews appear
+      return rawList.filter(f => !f.id?.startsWith('FB-TEST') && f.driverId !== 'drv_sample_1' && f.driverId !== 'drv_sample_2');
     },
 
     async executeSafetyAction(payload) {
