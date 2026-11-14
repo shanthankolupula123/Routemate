@@ -5573,7 +5573,13 @@
       }
 
       await window.routematePayment.initiateWalletRecharge(
-        { amount: finalAmount, user },
+        {
+          amount: finalAmount,
+          user: {
+            ...user,
+            wallet_balance: typeof state.wallet.balance === 'number' ? state.wallet.balance : 0
+          }
+        },
         function onRechargeSuccess(result) {
           const newBal = result?.creditResult?.newBalance !== undefined 
             ? Number(result.creditResult.newBalance)

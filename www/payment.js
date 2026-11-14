@@ -162,12 +162,19 @@ const routematePayment = {
 
             console.log('✅ Payment signature verified successfully:', verifyData);
 
-            // STEP 4: BACKEND - Credit Driver Wallet
+            // STEP 4: BACKEND - Credit Driver Wallet (Instantaneous, No KYC Interruption)
             if (window.db?.kyc?.rechargeDriverWallet) {
+              const curBal = (typeof user?.wallet_balance === 'number' && !isNaN(user.wallet_balance))
+                ? user.wallet_balance
+                : ((typeof window.state?.wallet?.balance === 'number' && !isNaN(window.state?.wallet?.balance))
+                  ? window.state.wallet.balance
+                  : null);
+
               const creditRes = await window.db.kyc.rechargeDriverWallet({
                 userId: user?.id || window.state?.currentUser?.id,
                 amount: rechargeAmount,
-                paymentId: response.razorpay_payment_id
+                paymentId: response.razorpay_payment_id,
+                currentBalance: curBal
               });
 
               if (onSuccess) {

@@ -9,7 +9,12 @@ function getStore() {
     if (fs.existsSync(STORE_PATH)) {
       const content = fs.readFileSync(STORE_PATH, 'utf8');
       const data = JSON.parse(content || '[]');
-      if (Array.isArray(data)) return data;
+      if (Array.isArray(data)) {
+        // Only return genuine driver KYC submissions (filter out any non-KYC stubs)
+        return data.filter(item => Boolean(
+          item && (item.dl_number || item.vehicle_number || item.rc_photo || item.dl_front_photo || item.aadhaar_number)
+        ));
+      }
     }
   } catch (e) {}
   return [];

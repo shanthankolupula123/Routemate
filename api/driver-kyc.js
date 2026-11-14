@@ -88,6 +88,12 @@ module.exports = async (req, res) => {
     // 2. Fallback / Merge with persistent file store
     const storeSubmissions = getStore() || [];
     storeSubmissions.forEach(item => {
+      // STRICT FILTER: Only consider submissions that actually submitted genuine KYC documents!
+      const hasKycDocuments = Boolean(
+        item.dl_number || item.vehicle_number || item.rc_photo || item.dl_front_photo || item.aadhaar_number
+      );
+      if (!hasKycDocuments) return; // Do NOT merge wallet-only stubs into KYC queue!
+
       const exists = allSubmissions.find(s => 
         (s.id && s.id === item.id) || 
         (s.user_id && s.user_id === item.user_id) || 
@@ -99,6 +105,8 @@ module.exports = async (req, res) => {
     });
 
     // 3. Fallback / Merge with Supabase `profiles` table
+    let queriedProfileExtra = null;
+    let queriedProfileRow = null;
     try {
       let profileQuery = `${SUPABASE_URL}/rest/v1/profiles?select=*`;
       if (userId && email) {
@@ -117,21 +125,27 @@ module.exports = async (req, res) => {
       if (profRes.ok) {
         const pRows = await profRes.json();
         if (Array.isArray(pRows)) {
+          const cleanEmail = email ? String(email).trim().toLowerCase() : '';
           pRows.forEach(p => {
             if (p.role === 'PURGED_DUMMY' || p.name === 'Purged Test Account' || p.phone === '0000000000' || p.phone === 'PURGED') return;
 
             let extra = {};
-            if (p.role && typeof p.role === 'string' && (p.role.trim().startsWith('{') || p.role.includes('kyc') || p.role.includes('dl_'))) {
+            if (p.role && typeof p.role === 'string' && (p.role.trim().startsWith('{') || p.role.includes('kyc') || p.role.includes('dl_') || p.role.includes('wallet_balance'))) {
               try { extra = JSON.parse(p.role); } catch (e) {}
             }
             const pEmail = extra.email || (p.phone && p.phone.includes('@') ? p.phone : '');
             const isAdmin = isSuperAdminEmail(pEmail) || isSuperAdminEmail(p.phone) || isSuperAdminEmail(email);
 
+            if ((userId && p.id === userId) || (cleanEmail && (pEmail.toLowerCase() === cleanEmail || (p.phone && p.phone.toLowerCase() === cleanEmail)))) {
+              queriedProfileExtra = extra;
+              queriedProfileRow = p;
+            }
+
             // Strictly check if this profile actually submitted genuine driver KYC
             const hasRealSubmission = Boolean(
               (extra.dl_number && extra.dl_number !== 'ADMIN-DL-001') ||
               (extra.vehicle_number && extra.vehicle_number !== 'TS08-RM-0001') ||
-              (extra.kyc_status && extra.kyc_status !== 'not_submitted') ||
+              (extra.kyc_status && !['not_submitted', 'unverified'].includes(extra.kyc_status)) ||
               (extra.vehicles && Array.isArray(extra.vehicles) && extra.vehicles.length > 0)
             );
 
@@ -251,20 +265,40 @@ module.exports = async (req, res) => {
         (cleanEmail && s.driver_email && s.driver_email.trim().toLowerCase() === cleanEmail)
       );
 
-      // Strict Unverified / Genuine State: Drivers must submit genuine KYC documents to be approved
-      const finalStatus = userSub ? userSub.status : 'not_submitted';
+      // Resolve user's wallet balance & transactions strictly from userSub OR queriedProfileExtra
+      let resolvedBalance = 0;
+      let resolvedTransactions = [];
+      let welcomeBonusCredited = false;
+
+      if (userSub && typeof userSub.wallet_balance === 'number') {
+        resolvedBalance = userSub.wallet_balance;
+        resolvedTransactions = Array.isArray(userSub.wallet_transactions) ? userSub.wallet_transactions : [];
+        welcomeBonusCredited = Boolean(userSub.welcome_bonus_credited);
+      } else if (queriedProfileExtra && typeof queriedProfileExtra.wallet_balance === 'number') {
+        resolvedBalance = queriedProfileExtra.wallet_balance;
+        resolvedTransactions = Array.isArray(queriedProfileExtra.wallet_transactions) ? queriedProfileExtra.wallet_transactions : [];
+        welcomeBonusCredited = Boolean(queriedProfileExtra.welcome_bonus_credited);
+      } else if (isAdmin) {
+        resolvedBalance = 100;
+        welcomeBonusCredited = true;
+      }
+
+      // Strict Unverified / Genuine State:
+      // If no genuine KYC submission with real documents exists, status is strictly 'not_submitted'.
+      // Adding money to the wallet never alters this status and never requires admin approval!
+      const finalStatus = userSub ? (userSub.status || 'not_submitted') : 'not_submitted';
       return res.status(200).json({
         success: true,
         submission: userSub || null,
-        vehicles: userSub ? (userSub.vehicles || []) : [],
+        vehicles: userSub ? (userSub.vehicles || []) : (queriedProfileExtra?.vehicles || []),
         wallet: {
-          balance: userSub ? userSub.wallet_balance : (isAdmin ? 100 : 0),
-          welcomeBonusCredited: userSub ? Boolean(userSub.welcome_bonus_credited) : isAdmin,
-          transactions: userSub ? (userSub.wallet_transactions || []) : []
+          balance: resolvedBalance,
+          welcomeBonusCredited: welcomeBonusCredited,
+          transactions: resolvedTransactions
         },
         upi: {
-          id: userSub ? (userSub.upi_id || '') : '',
-          qr: userSub ? (userSub.upi_qr || '') : ''
+          id: userSub ? (userSub.upi_id || '') : (queriedProfileExtra?.upi_id || ''),
+          qr: userSub ? (userSub.upi_qr || '') : (queriedProfileExtra?.upi_qr || '')
         },
         status: finalStatus
       });
@@ -473,7 +507,7 @@ module.exports = async (req, res) => {
     }
 
     // -----------------------------------------------------------------------
-    // ACTION: Vehicle-Wise Dynamic Commission Deduction for Cash Rides
+    // ACTION: Vehicle-Wise Dynamic Commission Deduction for Cash/UPI Rides
     // Bike: Flat ₹5, Auto: Flat ₹10, Car: Flat ₹18
     // -----------------------------------------------------------------------
     if (action === 'deduct_commission') {
@@ -490,64 +524,91 @@ module.exports = async (req, res) => {
       if (vType.includes('car')) commission = 18; // Balanced ₹18 for Car Seat
       else if (vType.includes('auto')) commission = 10; // Moderate ₹10 for Auto
 
+      // 1. Fetch from Supabase profiles
+      let profileRow = null;
+      let meta = {};
+      let curBal = null;
+      let txs = [];
+
+      try {
+        let profUrl = `${SUPABASE_URL}/rest/v1/profiles?id=eq.${encodeURIComponent(targetId)}&select=*&limit=1`;
+        if (cleanEmail) {
+          profUrl = `${SUPABASE_URL}/rest/v1/profiles?or=(id.eq.${encodeURIComponent(targetId)},phone.eq.${encodeURIComponent(cleanEmail)},role.ilike.*${encodeURIComponent(cleanEmail)}*)&select=*&limit=1`;
+        }
+        const profRes = await fetch(profUrl, {
+          headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` }
+        });
+        if (profRes.ok) {
+          const rows = await profRes.json();
+          if (rows && rows.length > 0) {
+            profileRow = rows[0];
+            try {
+              if (typeof profileRow.role === 'string' && (profileRow.role.startsWith('{') || profileRow.role.includes('{'))) {
+                meta = JSON.parse(profileRow.role);
+              }
+            } catch (e) {}
+            if (typeof meta.wallet_balance === 'number' && !isNaN(meta.wallet_balance)) {
+              curBal = Number(meta.wallet_balance);
+            }
+            if (Array.isArray(meta.wallet_transactions)) {
+              txs = [...meta.wallet_transactions];
+            }
+          }
+        }
+      } catch (e) {}
+
+      // 2. Fallback to getStore
       const list = getStore();
       const idx = list.findIndex(s => 
         (targetId && (s.id === targetId || s.user_id === targetId)) ||
         (cleanEmail && s.driver_email && s.driver_email.trim().toLowerCase() === cleanEmail)
       );
-      let newBalance = 100 - commission;
-      let txs = [];
 
-      const payMethodLabel = paymentMethod === 'cash' ? 'Cash' : 'UPI';
-
-      if (idx !== -1) {
-        const curBal = typeof list[idx].wallet_balance === 'number' ? list[idx].wallet_balance : (list[idx].status === 'approved' ? 100 : 0);
-        newBalance = Math.round((curBal - commission) * 100) / 100;
-        list[idx].wallet_balance = newBalance;
-        if (!list[idx].wallet_transactions) list[idx].wallet_transactions = [];
-        list[idx].wallet_transactions.unshift({
-          id: 'tx_comm_' + Date.now().toString(36),
-          type: 'debit',
-          amount: commission,
-          vehicleType: vType,
-          description: `Platform fee for ${payMethodLabel} Ride #${rideId || 'TRIP'} (${vType.toUpperCase()})`,
-          timestamp: new Date().toISOString()
-        });
-        txs = list[idx].wallet_transactions;
-        saveStore(list);
-      } else {
-        txs = [
-          {
-            id: 'tx_comm_' + Date.now().toString(36),
-            type: 'debit',
-            amount: commission,
-            vehicleType: vType,
-            description: `Platform fee for ${payMethodLabel} Ride #${rideId || 'TRIP'} (${vType.toUpperCase()})`,
-            timestamp: new Date().toISOString()
-          },
-          {
-            id: 'tx_welcome_bonus',
-            type: 'credit',
-            amount: 100,
-            description: '🎁 Routemate ₹100 Welcome Bonus Credited',
-            timestamp: new Date().toISOString()
-          }
-        ];
+      if (curBal === null && idx !== -1 && typeof list[idx].wallet_balance === 'number') {
+        curBal = list[idx].wallet_balance;
+        if (Array.isArray(list[idx].wallet_transactions) && txs.length === 0) {
+          txs = [...list[idx].wallet_transactions];
+        }
       }
 
-      // Update Supabase
-      try {
-        const lookup = targetId ? `id.eq.${encodeURIComponent(targetId)},user_id.eq.${encodeURIComponent(targetId)}` : `driver_email.eq.${encodeURIComponent(cleanEmail)}`;
-        await fetch(`${SUPABASE_URL}/rest/v1/driver_kyc?or=(${lookup})`, {
-          method: 'PATCH',
-          headers: {
-            'apikey': SUPABASE_KEY,
-            'Authorization': `Bearer ${SUPABASE_KEY}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({ wallet_balance: newBalance })
-        });
-      } catch (e) {}
+      if (curBal === null) {
+        curBal = 100;
+      }
+
+      const newBalance = Math.round((curBal - commission) * 100) / 100;
+      const payMethodLabel = paymentMethod === 'cash' ? 'Cash' : 'UPI';
+      const commTx = {
+        id: 'tx_comm_' + Date.now().toString(36),
+        type: 'debit',
+        amount: commission,
+        vehicleType: vType,
+        description: `Platform fee for ${payMethodLabel} Ride #${rideId || 'TRIP'} (${vType.toUpperCase()})`,
+        timestamp: new Date().toISOString()
+      };
+      txs.unshift(commTx);
+
+      // Save to Supabase profiles
+      if (profileRow) {
+        meta.wallet_balance = newBalance;
+        meta.wallet_transactions = txs;
+        try {
+          await fetch(`${SUPABASE_URL}/rest/v1/profiles?id=eq.${encodeURIComponent(profileRow.id)}`, {
+            method: 'PATCH',
+            headers: {
+              'apikey': SUPABASE_KEY,
+              'Authorization': `Bearer ${SUPABASE_KEY}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ role: JSON.stringify(meta) })
+          });
+        } catch (e) {}
+      }
+
+      if (idx !== -1) {
+        list[idx].wallet_balance = newBalance;
+        list[idx].wallet_transactions = txs;
+        saveStore(list);
+      }
 
       return res.status(200).json({
         success: true,
@@ -560,10 +621,10 @@ module.exports = async (req, res) => {
     }
 
     // -----------------------------------------------------------------------
-    // ACTION: Driver In-App Wallet Recharge
+    // ACTION: Driver In-App Wallet Recharge (Instantaneous, No Admin Approval Required)
     // -----------------------------------------------------------------------
     if (action === 'recharge_wallet') {
-      const { userId, amount, paymentId } = body;
+      const { userId, amount, paymentId, currentBalance } = body;
       const cleanUserId = userId || body.user_id;
       const rechargeAmount = parseFloat(amount);
 
@@ -571,95 +632,108 @@ module.exports = async (req, res) => {
         return res.status(400).json({ success: false, error: 'Valid user ID and recharge amount are required.' });
       }
 
-      const list = getStore();
-      const idx = list.findIndex(s => s.id === cleanUserId || s.user_id === cleanUserId);
-      let newBalance = rechargeAmount;
+      // Step 1: Query existing balance & transactions from Supabase profiles
+      let profileRow = null;
+      let roleMeta = {};
+      let curBal = null;
       let txs = [];
 
-      if (idx !== -1) {
-        const curBal = typeof list[idx].wallet_balance === 'number' ? list[idx].wallet_balance : 0;
-        newBalance = Math.round((curBal + rechargeAmount) * 100) / 100;
-        list[idx].wallet_balance = newBalance;
-        if (!list[idx].wallet_transactions) list[idx].wallet_transactions = [];
-        list[idx].wallet_transactions.unshift({
-          id: 'tx_rech_' + Date.now().toString(36),
-          type: 'credit',
-          amount: rechargeAmount,
-          paymentId: paymentId || ('RZP-' + Date.now().toString(36).toUpperCase()),
-          description: `⚡ Wallet Online Top-Up (+₹${rechargeAmount})`,
-          timestamp: new Date().toISOString()
-        });
-        txs = list[idx].wallet_transactions;
-        saveStore(list);
-      } else {
-        txs = [
-          {
-            id: 'tx_rech_' + Date.now().toString(36),
-            type: 'credit',
-            amount: rechargeAmount,
-            paymentId: paymentId || ('RZP-' + Date.now().toString(36).toUpperCase()),
-            description: `⚡ Wallet Online Top-Up (+₹${rechargeAmount})`,
-            timestamp: new Date().toISOString()
-          }
-        ];
-        list.push({
-          id: cleanUserId,
-          user_id: cleanUserId,
-          wallet_balance: newBalance,
-          wallet_transactions: txs
-        });
-        saveStore(list);
-      }
-
-      // Update Supabase `driver_kyc`
-      try {
-        await fetch(`${SUPABASE_URL}/rest/v1/driver_kyc?or=(id.eq.${encodeURIComponent(cleanUserId)},user_id.eq.${encodeURIComponent(cleanUserId)})`, {
-          method: 'PATCH',
-          headers: {
-            'apikey': SUPABASE_KEY,
-            'Authorization': `Bearer ${SUPABASE_KEY}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({ wallet_balance: newBalance })
-        });
-      } catch (e) {}
-
-      // Update Supabase `profiles` role metadata
       try {
         const profRes = await fetch(`${SUPABASE_URL}/rest/v1/profiles?id=eq.${encodeURIComponent(cleanUserId)}&select=*&limit=1`, {
-          headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` }
+          headers: {
+            'apikey': SUPABASE_KEY,
+            'Authorization': `Bearer ${SUPABASE_KEY}`
+          }
         });
         if (profRes.ok) {
           const rows = await profRes.json();
           if (rows && rows.length > 0) {
-            let meta = {};
+            profileRow = rows[0];
             try {
-              if (typeof rows[0].role === 'string' && rows[0].role.includes('{')) {
-                meta = JSON.parse(rows[0].role);
+              if (typeof profileRow.role === 'string' && (profileRow.role.startsWith('{') || profileRow.role.includes('{'))) {
+                roleMeta = JSON.parse(profileRow.role);
               }
             } catch (e) {}
-            meta.wallet_balance = newBalance;
-            if (!meta.wallet_transactions) meta.wallet_transactions = [];
-            meta.wallet_transactions.unshift({
-              id: 'tx_rech_' + Date.now().toString(36),
-              type: 'credit',
-              amount: rechargeAmount,
-              paymentId: paymentId || ('RZP-' + Date.now().toString(36).toUpperCase()),
-              description: `⚡ Wallet Online Top-Up (+₹${rechargeAmount})`,
-              timestamp: new Date().toISOString()
-            });
-            await fetch(`${SUPABASE_URL}/rest/v1/profiles?id=eq.${encodeURIComponent(rows[0].id)}`, {
-              method: 'PATCH',
-              headers: {
-                'apikey': SUPABASE_KEY,
-                'Authorization': `Bearer ${SUPABASE_KEY}`,
-                'Content-Type': 'application/json'
-              },
-              body: JSON.stringify({ role: JSON.stringify(meta) })
-            });
+
+            if (typeof roleMeta.wallet_balance === 'number' && !isNaN(roleMeta.wallet_balance)) {
+              curBal = Number(roleMeta.wallet_balance);
+            }
+            if (Array.isArray(roleMeta.wallet_transactions)) {
+              txs = [...roleMeta.wallet_transactions];
+            }
           }
         }
-      } catch (e) {}
+      } catch (e) {
+        console.warn('[recharge_wallet] Profile fetch error:', e.message);
+      }
+
+      // Step 2: Check in-memory store if profile didn't specify balance
+      const list = getStore();
+      const idx = list.findIndex(s => s.id === cleanUserId || s.user_id === cleanUserId);
+      if (curBal === null && idx !== -1 && typeof list[idx].wallet_balance === 'number') {
+        curBal = list[idx].wallet_balance;
+        if (Array.isArray(list[idx].wallet_transactions) && txs.length === 0) {
+          txs = [...list[idx].wallet_transactions];
+        }
+      }
+
+      // Step 3: Check client-supplied currentBalance
+      if (curBal === null && typeof currentBalance === 'number' && !isNaN(currentBalance)) {
+        curBal = Number(currentBalance);
+      }
+
+      // Step 4: If still null, check if admin / welcome bonus or default 0
+      if (curBal === null) {
+        const userEmail = roleMeta.email || (profileRow?.phone?.includes('@') ? profileRow.phone : '');
+        curBal = isSuperAdminEmail(userEmail) || isSuperAdminEmail(cleanUserId) ? 100 : 0;
+      }
+
+      // Step 5: CUMULATIVE CALCULATION: strictly (curBal + rechargeAmount)
+      // E.g. If balance is 100 and recharge is 10, new balance is 110!
+      const newBalance = Math.round((curBal + rechargeAmount) * 100) / 100;
+
+      // Step 6: Create new transaction
+      const newTx = {
+        id: 'tx_rech_' + Date.now().toString(36),
+        type: 'credit',
+        amount: rechargeAmount,
+        paymentId: paymentId || ('RZP-' + Date.now().toString(36).toUpperCase()),
+        description: `⚡ Wallet Online Top-Up (+₹${rechargeAmount})`,
+        timestamp: new Date().toISOString()
+      };
+      txs.unshift(newTx);
+
+      // Step 7: Update Supabase `profiles` table
+      // CRITICAL: We preserve all user credentials and roleMeta, NEVER touching kyc_status!
+      // Money top-up is instantaneous and does NOT require admin approval.
+      roleMeta.wallet_balance = newBalance;
+      roleMeta.wallet_transactions = txs;
+
+      if (profileRow) {
+        try {
+          await fetch(`${SUPABASE_URL}/rest/v1/profiles?id=eq.${encodeURIComponent(profileRow.id)}`, {
+            method: 'PATCH',
+            headers: {
+              'apikey': SUPABASE_KEY,
+              'Authorization': `Bearer ${SUPABASE_KEY}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              role: JSON.stringify(roleMeta)
+            })
+          });
+        } catch (e) {
+          console.warn('[recharge_wallet] Supabase profile patch error:', e.message);
+        }
+      }
+
+      // Step 8: Update persistent store ONLY if user already had a KYC submission
+      // NEVER push a bare stub into list when idx === -1!
+      if (idx !== -1) {
+        list[idx].wallet_balance = newBalance;
+        list[idx].wallet_transactions = txs;
+        saveStore(list);
+      }
 
       return res.status(200).json({
         success: true,
