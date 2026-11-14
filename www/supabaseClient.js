@@ -414,7 +414,7 @@
           rating: row.rating || 5.0,
           total_rides: row.total_rides || 0,
           avatar_url: row.avatar_url || null,
-          is_verified: row.is_verified !== false,
+          is_verified: Boolean(row.is_verified === true && kycStatus === 'approved'),
           upi_id: extra.upi_id || '',
           kyc_status: kycStatus,
           wallet_balance: walletBal,
@@ -563,7 +563,7 @@
       const cleanUpi = String(upiId || upi_id || existingProfile?.upi_id || existingMeta.upi_id || '').trim();
       const userGender = gender !== undefined ? gender : (existingProfile?.gender || existingMeta.gender || '');
       const userDob = dob !== undefined ? dob : (existingProfile?.dob || existingMeta.dob || '');
-      const finalKycStatus = kycStatus || kyc_status || existingProfile?.kyc_status || existingMeta.kyc_status || (existingProfile?.is_verified ? 'approved' : 'not_submitted');
+      const finalKycStatus = kycStatus || kyc_status || existingProfile?.kyc_status || existingMeta.kyc_status || 'not_submitted';
       const finalWalletBalance = (walletBalance !== undefined) ? Number(walletBalance) : ((wallet_balance !== undefined) ? Number(wallet_balance) : ((existingProfile?.wallet_balance !== undefined) ? Number(existingProfile.wallet_balance) : (existingMeta.wallet_balance !== undefined ? Number(existingMeta.wallet_balance) : 0)));
       const finalTransactions = (Array.isArray(walletTransactions) && walletTransactions.length > 0) ? walletTransactions : (Array.isArray(wallet_transactions) && wallet_transactions.length > 0 ? wallet_transactions : (Array.isArray(existingProfile?.wallet_transactions) && existingProfile.wallet_transactions.length > 0 ? existingProfile.wallet_transactions : (Array.isArray(existingMeta.wallet_transactions) ? existingMeta.wallet_transactions : [])));
       const finalVehicles = (Array.isArray(vehicles) && vehicles.length > 0) ? vehicles : (Array.isArray(existingProfile?.vehicles) && existingProfile.vehicles.length > 0 ? existingProfile.vehicles : (Array.isArray(existingMeta.vehicles) ? existingMeta.vehicles : []));
@@ -590,7 +590,7 @@
         name: cleanName,
         phone: cleanPhone,
         role: JSON.stringify(metaObj),
-        is_verified: finalKycStatus === 'approved' || existingProfile?.is_verified === true
+        is_verified: finalKycStatus === 'approved'
       };
 
       let finalId = (existingProfile && existingProfile.id) || (userId && isUUID(userId) ? userId : null);
@@ -790,23 +790,31 @@
             for (const r of rows) {
               let extra = {};
               try { extra = JSON.parse(r.role); } catch (e) {}
-              const kStatus = isAdmin ? 'approved' : (extra.kyc_status || (r.is_verified ? 'approved' : null));
-              if (kStatus || extra.dl_number || isAdmin) {
+              const hasRealSubmission = Boolean(
+                (extra.dl_number && extra.dl_number !== 'ADMIN-DL-001') ||
+                (extra.vehicle_number && extra.vehicle_number !== 'TS08-RM-0001') ||
+                (extra.kyc_status && extra.kyc_status !== 'not_submitted')
+              );
+              if (hasRealSubmission) {
+                const kStatus = extra.kyc_status || 'pending';
                 return {
-                  status: kStatus || 'pending',
+                  status: kStatus,
                   submission: {
                     ...extra,
                     driver_name: extra.driver_name || r.name,
                     driver_phone: r.phone,
                     driver_email: extra.email || cleanEmail,
-                    status: kStatus || 'pending'
+                    status: kStatus
                   },
                   wallet: {
                     balance: extra.wallet_balance !== undefined ? extra.wallet_balance : (kStatus === 'approved' ? 100 : 0),
                     transactions: extra.wallet_transactions || []
                   },
                   vehicles: extra.vehicles || [],
-                  upi: { id: extra.upi_id || '', qr: extra.upi_qr || '' }
+                  upi: {
+                    id: extra.upi_id || '',
+                    qr: extra.upi_qr || ''
+                  }
                 };
               }
             }

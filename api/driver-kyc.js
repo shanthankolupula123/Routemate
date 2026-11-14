@@ -251,40 +251,8 @@ module.exports = async (req, res) => {
         (cleanEmail && s.driver_email && s.driver_email.trim().toLowerCase() === cleanEmail)
       );
 
-      // Super Admin is inherently authorized, but strictly uses genuine driver records (no phantom vehicles)
-      if (isAdmin) {
-        if (!userSub) {
-          userSub = {
-            id: userId || 'admin_usr',
-            user_id: userId || 'admin_usr',
-            driver_name: 'Shanthan Kolupula',
-            driver_phone: '+919494285249',
-            driver_email: cleanEmail || SUPER_ADMIN_EMAIL,
-            dl_number: '',
-            vehicle_number: '',
-            vehicle_type: 'bike',
-            vehicle_name: '',
-            vehicle_color: '',
-            status: 'approved',
-            wallet_balance: 100.00,
-            welcome_bonus_credited: true,
-            wallet_transactions: [
-              {
-                id: 'tx_admin_bonus',
-                type: 'credit',
-                amount: 100.00,
-                description: '🎁 Routemate ₹100 Welcome Bonus Credited',
-                timestamp: new Date().toISOString()
-              }
-            ],
-            vehicles: []
-          };
-        } else {
-          userSub.status = 'approved';
-        }
-      }
-
-      const finalStatus = isAdmin ? 'approved' : (userSub ? userSub.status : 'not_submitted');
+      // Strict Unverified / Genuine State: Drivers must submit genuine KYC documents to be approved
+      const finalStatus = userSub ? userSub.status : 'not_submitted';
       return res.status(200).json({
         success: true,
         submission: userSub || null,

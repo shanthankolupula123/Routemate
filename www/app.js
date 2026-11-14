@@ -812,7 +812,22 @@
         pPhoneEl.textContent = state.currentUser.phone ? `Phone: ${state.currentUser.phone}` : '';
         pPhoneEl.classList.toggle('hidden', !state.currentUser.phone);
       }
-      if (pRoleEl) pRoleEl.textContent = `Verified Member • 5.0 ★`;
+      if (pRoleEl) {
+        if (state.currentUser.kyc_status === 'approved') {
+          pRoleEl.textContent = 'Verified Driver • 5.0 ★';
+          pRoleEl.className = 'text-[11px] font-bold text-emerald-600 mt-1';
+        } else if (state.currentUser.kyc_status === 'pending') {
+          pRoleEl.textContent = 'KYC Under Review • Commuter';
+          pRoleEl.className = 'text-[11px] font-bold text-amber-600 mt-1';
+        } else {
+          pRoleEl.textContent = 'Unverified Commuter';
+          pRoleEl.className = 'text-[11px] font-bold text-slate-500 mt-1';
+        }
+      }
+      const pVerifiedBadge = document.getElementById('profileUserVerifiedBadge');
+      if (pVerifiedBadge) {
+        pVerifiedBadge.classList.toggle('hidden', state.currentUser.kyc_status !== 'approved');
+      }
 
       // Update avatar with clean dynamic initial (No mock images)
       if (avatarEl) {
@@ -3894,7 +3909,7 @@
       if (forceRefresh) showToast('Checking Driver KYC verification status...', 'info');
 
       // 1. Initial State / Cache Recovery:
-      let status = isSuperAdmin ? 'approved' : (user.kyc_status || state.kyc.status || 'not_submitted');
+      let status = user.kyc_status || state.kyc.status || 'not_submitted';
       let submission = state.kyc.submission || null;
 
       if (!submission) {
@@ -3911,18 +3926,12 @@
       }
 
       if (kycRes) {
-        if (isSuperAdmin) {
-          status = 'approved';
-        } else if (kycRes.status) {
+        if (kycRes.status) {
           status = kycRes.status;
         }
         if (kycRes.submission) {
           submission = kycRes.submission;
         }
-      }
-
-      if (isSuperAdmin) {
-        status = 'approved';
       }
 
       state.kyc.status = status;
@@ -4121,10 +4130,18 @@
               <div class="flex items-center gap-2">✓ Vehicle Registration Certificate (RC)</div>
               <div class="flex items-center gap-2">✓ Driver Selfie / Photo</div>
             </div>
-            <button type="button" onclick="openDriverKycModal()" class="px-6 py-3.5 btn-pill-primary text-xs font-black shadow-lg cursor-pointer inline-flex items-center gap-2 active:scale-95">
-              <i data-lucide="id-card" class="w-4 h-4 text-cyan-200"></i>
-              <span>Start KYC Verification</span>
-            </button>
+            <div class="pt-1 flex flex-wrap items-center justify-center gap-2">
+              <button type="button" onclick="openDriverKycModal()" class="px-6 py-3.5 btn-pill-primary text-xs font-black shadow-lg cursor-pointer inline-flex items-center gap-2 active:scale-95">
+                <i data-lucide="id-card" class="w-4 h-4 text-cyan-200"></i>
+                <span>Start KYC Verification</span>
+              </button>
+              ${isSuperAdmin ? `
+                <button type="button" onclick="navigateToTab('admin')" class="px-4 py-3.5 rounded-2xl bg-slate-900 text-white text-xs font-bold hover:bg-slate-800 transition shadow-sm cursor-pointer flex items-center gap-1.5">
+                  <i data-lucide="shield-check" class="w-4 h-4 text-rose-400"></i>
+                  <span>Open Super Admin</span>
+                </button>
+              ` : ''}
+            </div>
           </div>
         `;
       }
@@ -4717,7 +4734,7 @@
     }
 
     if (vehicles.length === 0) {
-      const isApproved = state.kyc?.status === 'approved' || user.is_verified;
+      const isApproved = state.kyc?.status === 'approved';
       container.innerHTML = `
         <div class="p-4 rounded-xl border border-dashed border-slate-200 bg-white text-center space-y-2">
           <div class="w-8 h-8 rounded-full bg-blue-50 text-blue-600 mx-auto flex items-center justify-center">
