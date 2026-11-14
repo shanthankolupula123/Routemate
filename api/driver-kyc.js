@@ -429,11 +429,12 @@ module.exports = async (req, res) => {
     // Bike: Flat ₹5, Auto: Flat ₹10, Car: Flat ₹18
     // -----------------------------------------------------------------------
     if (action === 'deduct_commission') {
-      const { userId, driverId, vehicleType, fare, rideId } = body;
+      const { userId, driverId, vehicleType, fare, rideId, email, driverEmail, paymentMethod } = body;
       const targetId = userId || driverId || body.user_id;
+      const cleanEmail = String(email || driverEmail || '').trim().toLowerCase();
 
-      if (!targetId) {
-        return res.status(400).json({ success: false, error: 'Driver User ID is required.' });
+      if (!targetId && !cleanEmail) {
+        return res.status(400).json({ success: false, error: 'Driver identifier is required.' });
       }
 
       const vType = String(vehicleType || 'bike').toLowerCase();
@@ -442,8 +443,14 @@ module.exports = async (req, res) => {
       else if (vType.includes('auto')) commission = 10; // Moderate ₹10 for Auto
 
       const list = getStore();
-      const idx = list.findIndex(s => s.id === targetId || s.user_id === targetId);
+      const idx = list.findIndex(s => 
+        (targetId && (s.id === targetId || s.user_id === targetId)) ||
+        (cleanEmail && s.driver_email && s.driver_email.trim().toLowerCase() === cleanEmail)
+      );
       let newBalance = 100 - commission;
+      let txs = [];
+
+      const payMethodLabel = paymentMethod === 'cash' ? 'Cash' : 'UPI';
 
       if (idx !== -1) {
         const curBal = typeof list[idx].wallet_balance === 'number' ? list[idx].wallet_balance : (list[idx].status === 'approved' ? 100 : 0);
@@ -455,15 +462,35 @@ module.exports = async (req, res) => {
           type: 'debit',
           amount: commission,
           vehicleType: vType,
-          description: `Platform fee for Cash Ride #${rideId || 'TRIP'} (${vType.toUpperCase()})`,
+          description: `Platform fee for ${payMethodLabel} Ride #${rideId || 'TRIP'} (${vType.toUpperCase()})`,
           timestamp: new Date().toISOString()
         });
+        txs = list[idx].wallet_transactions;
         saveStore(list);
+      } else {
+        txs = [
+          {
+            id: 'tx_comm_' + Date.now().toString(36),
+            type: 'debit',
+            amount: commission,
+            vehicleType: vType,
+            description: `Platform fee for ${payMethodLabel} Ride #${rideId || 'TRIP'} (${vType.toUpperCase()})`,
+            timestamp: new Date().toISOString()
+          },
+          {
+            id: 'tx_welcome_bonus',
+            type: 'credit',
+            amount: 100,
+            description: '🎁 Routemate ₹100 Welcome Bonus Credited',
+            timestamp: new Date().toISOString()
+          }
+        ];
       }
 
       // Update Supabase
       try {
-        await fetch(`${SUPABASE_URL}/rest/v1/driver_kyc?or=(id.eq.${encodeURIComponent(targetId)},user_id.eq.${encodeURIComponent(targetId)})`, {
+        const lookup = targetId ? `id.eq.${encodeURIComponent(targetId)},user_id.eq.${encodeURIComponent(targetId)}` : `driver_email.eq.${encodeURIComponent(cleanEmail)}`;
+        await fetch(`${SUPABASE_URL}/rest/v1/driver_kyc?or=(${lookup})`, {
           method: 'PATCH',
           headers: {
             'apikey': SUPABASE_KEY,
@@ -478,6 +505,8 @@ module.exports = async (req, res) => {
         success: true,
         commissionDeducted: commission,
         newBalance,
+        wallet_balance: newBalance,
+        wallet_transactions: txs,
         isNegative: newBalance < 0
       });
     }

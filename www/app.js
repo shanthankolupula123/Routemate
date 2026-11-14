@@ -2110,13 +2110,19 @@
               Math.cos(p.lat * Math.PI / 180) * Math.cos(d.lat * Math.PI / 180) *
               Math.sin(dLng/2) * Math.sin(dLng/2);
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-    state.distanceKm = Math.max(5, Math.round(R * c * 1.2));
+    state.distanceKm = Math.max(3, Math.round(R * c * 1.2));
 
+    let minFare = 20;
     let rate = 1.3;
-    if (state.vehicleType === 'car') rate = 2.6;
-    if (state.vehicleType === 'auto') rate = 1.8;
+    if (state.vehicleType === 'car') {
+      minFare = 50;
+      rate = 2.6;
+    } else if (state.vehicleType === 'auto') {
+      minFare = 35;
+      rate = 1.8;
+    }
 
-    state.fare = Math.round(state.distanceKm * rate);
+    state.fare = Math.max(minFare, Math.round(state.distanceKm * rate));
     const fareEl = document.getElementById('fareDisplay');
     if (fareEl) fareEl.textContent = `₹${state.fare}`;
   }
@@ -2532,7 +2538,7 @@
             <div class="flex items-center gap-2">
               <span class="w-2.5 h-2.5 rounded-full ${isStarted ? 'bg-cyan-400' : 'bg-emerald-400'} live-dot"></span>
               <span class="text-xs font-black uppercase tracking-wider ${isStarted ? 'text-cyan-300' : 'text-emerald-300'}">
-                ${isStarted ? 'Trip In Progress' : 'Driver En Route to Pickup'}
+                ${isStarted ? 'Ride Started • Live GPS Active' : 'Driver En Route to Pickup'}
               </span>
             </div>
             <span class="text-xs font-mono font-black bg-emerald-900/60 text-emerald-200 border border-emerald-700/60 px-3 py-1 rounded-full">
@@ -2553,7 +2559,7 @@
           </div>
 
           <div class="mt-4 pt-3 border-t border-white/10 flex items-center justify-between text-xs">
-            <span class="text-slate-300">Fuel Share to Pay (UPI)</span>
+            <span class="text-slate-300">Exact Fuel Share</span>
             <span class="font-black text-emerald-300 text-base">₹${req.fare}</span>
           </div>
 
@@ -2588,7 +2594,8 @@
       state.activeRiderRequest.status = 'ride_started';
       if (statusData.driver) state.activeRiderRequest.driver = statusData.driver;
       renderRiderActiveHUD(state.activeRiderRequest);
-      showToast('Trip is now in progress! Enjoy your highway commute.', 'info');
+      if (state.maps.rider) updateRouteLine(state.maps.rider, 'rider');
+      showToast('🚀 Ride Started! Live GPS route tracking is active. Have a safe journey.', 'success');
     } else if (statusData.status === 'ride_completed' || statusData.status === 'completed') {
       const completedRide = { ...state.activeRiderRequest, ...statusData };
       state.activeRiderRequest = null;
@@ -2849,10 +2856,10 @@
           <div class="flex items-center gap-2">
             <span class="w-2.5 h-2.5 rounded-full ${isStarted ? 'bg-cyan-400' : 'bg-emerald-400'} live-dot"></span>
             <span class="text-xs font-black uppercase tracking-wider text-cyan-300">
-              ${isStarted ? 'Trip In Progress' : 'Commuter Awaiting Pickup'}
+              ${isStarted ? 'Ride Started • Live GPS Active' : 'Commuter Awaiting Pickup'}
             </span>
           </div>
-          <span class="text-xs font-bold text-slate-300">Fuel Split: <strong class="text-white text-sm">₹${trip.fare}</strong></span>
+          <span class="text-xs font-bold text-slate-300">Exact Fuel Share: <strong class="text-white text-sm">₹${trip.fare}</strong></span>
         </div>
 
         <div class="mt-3.5 flex items-center justify-between">
@@ -2880,9 +2887,9 @@
               <span>Verify Commuter PIN & Start Ride</span>
             </button>
           ` : `
-            <button type="button" onclick="completeDriverTripAction()" class="w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-full text-xs flex items-center justify-center gap-2 shadow-lg transition cursor-pointer">
-              <i data-lucide="check-circle" class="w-4 h-4"></i>
-              <span>Complete Ride & Collect ₹${trip.fare} (Direct UPI)</span>
+            <button type="button" onclick="openDriverTripCompletionModal()" class="w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-black rounded-full text-xs flex items-center justify-center gap-2 shadow-lg transition cursor-pointer active:scale-95">
+              <i data-lucide="check-check" class="w-4 h-4"></i>
+              <span>Verify Payment & Complete Trip (₹${trip.fare})</span>
             </button>
           `}
         </div>
@@ -2918,35 +2925,106 @@
     await window.db.matching.startRide(state.activeDriverTrip.id);
     state.activeDriverTrip.status = 'ride_started';
     renderDriverActiveTripCard();
-    showToast('✅ PIN Verified! Ride officially started. Drive safe!', 'success');
+    if (state.maps.driver) {
+      updateRouteLine(state.maps.driver, 'driver');
+    }
+    showToast('🚀 Ride Started! Live GPS route tracking is active. Drive safe!', 'success');
   };
 
-  window.completeDriverTripAction = async function () {
+  let selectedDriverPaymentMethod = 'upi';
+
+  window.openDriverTripCompletionModal = function () {
     if (!state.activeDriverTrip) return;
+    const trip = state.activeDriverTrip;
+    const modal = document.getElementById('driverTripCompletionModal');
+    if (!modal) return;
+
+    const fareEl = document.getElementById('driverModalFareAmount');
+    if (fareEl) fareEl.textContent = `₹${trip.fare}`;
+
+    const riderEl = document.getElementById('driverModalRiderName');
+    if (riderEl) riderEl.textContent = trip.riderName || 'Commuter';
+
+    const checkFareEl = document.getElementById('driverConfirmCheckFare');
+    if (checkFareEl) checkFareEl.textContent = `₹${trip.fare}`;
+
+    const chk = document.getElementById('driverConfirmPaymentCheckbox');
+    if (chk) chk.checked = true;
+
+    selectDriverPaymentMethod('upi');
+    modal.classList.remove('hidden');
+    if (window.lucide) lucide.createIcons();
+  };
+
+  window.closeDriverTripCompletionModal = function () {
+    const modal = document.getElementById('driverTripCompletionModal');
+    if (modal) modal.classList.add('hidden');
+  };
+
+  window.selectDriverPaymentMethod = function (method) {
+    selectedDriverPaymentMethod = method;
+    const upiBtn = document.getElementById('driverPayMethodBtn-upi');
+    const cashBtn = document.getElementById('driverPayMethodBtn-cash');
+
+    if (method === 'upi') {
+      if (upiBtn) {
+        upiBtn.className = 'py-2.5 px-3 rounded-2xl border-2 border-emerald-500 bg-emerald-50/70 text-emerald-800 text-xs font-black transition flex items-center justify-center gap-1.5 cursor-pointer shadow-sm';
+      }
+      if (cashBtn) {
+        cashBtn.className = 'py-2.5 px-3 rounded-2xl border-2 border-slate-200 bg-slate-50 text-slate-600 text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer';
+      }
+    } else {
+      if (cashBtn) {
+        cashBtn.className = 'py-2.5 px-3 rounded-2xl border-2 border-emerald-500 bg-emerald-50/70 text-emerald-800 text-xs font-black transition flex items-center justify-center gap-1.5 cursor-pointer shadow-sm';
+      }
+      if (upiBtn) {
+        upiBtn.className = 'py-2.5 px-3 rounded-2xl border-2 border-slate-200 bg-slate-50 text-slate-600 text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer';
+      }
+    }
+    if (window.lucide) lucide.createIcons();
+  };
+
+  window.executeDriverPaymentVerificationAndCompletion = async function () {
+    if (!state.activeDriverTrip) return;
+    const chk = document.getElementById('driverConfirmPaymentCheckbox');
+    if (chk && !chk.checked) {
+      showToast('Please confirm verification of payment receipt to complete trip.', 'warning');
+      return;
+    }
+
     const trip = state.activeDriverTrip;
     const fare = trip.fare;
     const vehicleType = (trip.vehicle || trip.vehicle_type || 'bike').toLowerCase();
+    const paymentMethod = selectedDriverPaymentMethod;
 
     let commissionFee = 5;
     if (vehicleType.includes('car')) commissionFee = 18;
     else if (vehicleType.includes('auto')) commissionFee = 10;
 
-    try {
-      showToast('Completing ride and recording fuel share...', 'info');
+    const btn = document.getElementById('btnDriverConfirmAndComplete');
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = `<span class="animate-spin inline-block mr-2">⚙️</span> Completing & Recording Settlement...`;
+    }
 
-      // Deduct dynamic vehicle-wise platform commission from driver in-app wallet
+    try {
+      // 1. Deduct dynamic vehicle-wise platform commission from driver in-app wallet
       if (window.db?.kyc?.deductDriverCommission && state.currentUser) {
         try {
           const deductRes = await window.db.kyc.deductDriverCommission({
             userId: state.currentUser.id,
+            email: state.currentUser.email,
             vehicleType,
             rideId: trip.id,
             fare,
-            paymentMethod: 'cash'
+            paymentMethod
           });
-          if (deductRes && deductRes.wallet_balance !== undefined) {
-            state.wallet.balance = Number(deductRes.wallet_balance);
-            state.wallet.transactions = deductRes.wallet_transactions || state.wallet.transactions;
+          const newBal = deductRes?.wallet_balance !== undefined ? deductRes.wallet_balance : deductRes?.newBalance;
+          if (newBal !== undefined) {
+            state.wallet.balance = Number(newBal);
+            if (Array.isArray(deductRes.wallet_transactions)) {
+              state.wallet.transactions = deductRes.wallet_transactions;
+            }
             if (typeof updateWalletDisplays === 'function') updateWalletDisplays();
           }
         } catch (comErr) {
@@ -2954,28 +3032,50 @@
         }
       }
 
+      // 2. Broadcast ride completion to matching engine & commuter
       await window.db.matching.completeRide(trip.id, {
         upiId: state.driverUpi?.upiId || state.kyc?.submission?.upi_id || '',
         driverName: state.currentUser?.name || 'Verified Driver',
         fare,
         vehicleType,
-        vehicleNumber: state.kyc?.submission?.vehicle_number || ''
+        vehicleNumber: state.kyc?.submission?.vehicle_number || '',
+        paymentMethod,
+        paymentVerifiedByDriver: true
       });
 
+      // 3. Clear driver route markers
       if (state.maps.driver) {
         if (state.mapMarkers.driverRouteLine) { state.maps.driver.removeLayer(state.mapMarkers.driverRouteLine); state.mapMarkers.driverRouteLine = null; }
         if (state.mapMarkers.driverPickup) { state.maps.driver.removeLayer(state.mapMarkers.driverPickup); state.mapMarkers.driverPickup = null; }
         if (state.mapMarkers.driverDrop) { state.maps.driver.removeLayer(state.mapMarkers.driverDrop); state.mapMarkers.driverDrop = null; }
       }
+
+      closeDriverTripCompletionModal();
       state.activeDriverTrip = null;
       renderDriverActiveTripCard();
       startDriverRadar();
 
+      const payMethodLabel = paymentMethod === 'cash' ? 'Cash in Hand' : 'Direct UPI';
       if (state.wallet.balance < 0) {
-        showToast(`🎉 Ride Completed! ₹${fare} collected. Wallet balance is -₹${Math.abs(state.wallet.balance).toFixed(2)}. Please recharge soon.`, 'warning');
+        showToast(`🎉 Driver Confirmed Payment! ₹${fare} collected via ${payMethodLabel}. Wallet balance is -₹${Math.abs(state.wallet.balance).toFixed(2)}. Please recharge soon.`, 'warning');
       } else {
-        showToast(`🎉 Ride Completed! ₹${fare} collected via Direct UPI. (₹${commissionFee} platform fee deducted)`, 'success');
+        showToast(`🎉 Driver Confirmed Payment! ₹${fare} verified via ${payMethodLabel}. (₹${commissionFee} commission deducted from wallet)`, 'success');
       }
+    } catch (err) {
+      console.error('Complete ride error:', err);
+      showToast('Failed to complete ride: ' + err.message, 'danger');
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = `<i data-lucide="check-check" class="w-4 h-4"></i><span>Driver Confirmed Payment & Complete Trip</span>`;
+        if (window.lucide) lucide.createIcons();
+      }
+    }
+  };
+
+  window.completeDriverTripAction = function () {
+    openDriverTripCompletionModal();
+  };
     } catch (err) {
       console.error('Complete ride error:', err);
       showToast('Failed to complete ride: ' + err.message, 'danger');
@@ -3695,16 +3795,27 @@
       // Extract driver wallet balance, welcome bonus, and personal UPI ID
       if (kycRes) {
         const sub = kycRes.submission || kycRes;
-        if (sub.wallet_balance !== undefined) {
-          state.wallet.balance = Number(sub.wallet_balance);
-        } else if (kycRes.wallet_balance !== undefined) {
-          state.wallet.balance = Number(kycRes.wallet_balance);
+        const w = kycRes.wallet || {};
+        const bal = (w.balance !== undefined) ? w.balance : (sub.wallet_balance !== undefined ? sub.wallet_balance : (kycRes.wallet_balance !== undefined ? kycRes.wallet_balance : (status === 'approved' ? 100 : 0)));
+        state.wallet.balance = Number(bal);
+
+        const txs = (Array.isArray(w.transactions) && w.transactions.length > 0)
+          ? w.transactions
+          : (Array.isArray(sub.wallet_transactions) ? sub.wallet_transactions : []);
+
+        if (status === 'approved' && txs.length === 0) {
+          txs.push({
+            id: 'tx_welcome_' + (user.id || 'bonus'),
+            type: 'credit',
+            amount: 100,
+            description: '🎁 Routemate ₹100 Welcome Bonus Credited',
+            timestamp: new Date().toISOString()
+          });
         }
-        if (Array.isArray(sub.wallet_transactions)) {
-          state.wallet.transactions = sub.wallet_transactions;
-        }
-        if (sub.upi_id) state.driverUpi.upiId = sub.upi_id;
-        if (sub.upi_qr) state.driverUpi.upiQr = sub.upi_qr;
+        state.wallet.transactions = txs;
+
+        if (sub.upi_id || kycRes.upi?.id) state.driverUpi.upiId = sub.upi_id || kycRes.upi?.id;
+        if (sub.upi_qr || kycRes.upi?.qr) state.driverUpi.upiQr = sub.upi_qr || kycRes.upi?.qr;
         if (typeof updateWalletDisplays === 'function') updateWalletDisplays();
       }
 
