@@ -30,7 +30,7 @@ const SAFETY_FLAG_TAGS = ['Rash Driving', 'Over-speeding', 'Rude Behavior', 'Veh
 module.exports = async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, apikey');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, apikey, x-admin-email');
 
   if (req.method === 'OPTIONS') {
     return res.status(204).end();
@@ -119,13 +119,13 @@ module.exports = async (req, res) => {
 
     // 1. Super Admin Safety Actions (Warning, Block / Suspend, Resolve)
     if (action === 'safety_action') {
-      const { feedbackId, driverId, actionType, adminEmail, notes } = data;
-      const cleanAdmin = String(adminEmail || '').trim().toLowerCase();
+      const { feedbackId, driverId, actionType, notes } = data;
+      const cleanAdmin = String(data.adminEmail || data.admin_email || req.headers['x-admin-email'] || '').trim().toLowerCase();
 
       if (cleanAdmin !== SUPER_ADMIN_EMAIL) {
         return res.status(403).json({
           success: false,
-          error: 'Unauthorized: Only authorized admin can execute driver safety actions.'
+          error: 'Unauthorized: Only authorized admin (shanthankolupula123@gmail.com) can execute driver safety actions.'
         });
       }
 

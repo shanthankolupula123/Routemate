@@ -3668,6 +3668,7 @@
    */
   async function checkDriverKycStatus(forceRefresh = false) {
     const user = state.currentUser;
+    const isSuperAdmin = isAuthorizedSuperAdmin(user);
     const gateContainer = document.getElementById('driverKycGateContainer');
     const operationalContainer = document.getElementById('driverOperationalContainer');
 
@@ -3793,10 +3794,12 @@
                 <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i>
                 <span>Refresh Status</span>
               </button>
-              <button type="button" onclick="navigateToTab('admin')" class="px-4 py-2.5 rounded-xl bg-slate-900 text-white text-xs font-bold hover:bg-slate-800 transition shadow-sm cursor-pointer flex items-center gap-1.5">
-                <i data-lucide="shield-check" class="w-3.5 h-3.5 text-rose-400"></i>
-                <span>Open Super Admin</span>
-              </button>
+              ${isSuperAdmin ? `
+                <button type="button" onclick="navigateToTab('admin')" class="px-4 py-2.5 rounded-xl bg-slate-900 text-white text-xs font-bold hover:bg-slate-800 transition shadow-sm cursor-pointer flex items-center gap-1.5">
+                  <i data-lucide="shield-check" class="w-3.5 h-3.5 text-rose-400"></i>
+                  <span>Open Super Admin</span>
+                </button>
+              ` : ''}
             </div>
           </div>
         `;
@@ -4567,7 +4570,7 @@
   async function loadAdminKycSubmissions(showToastMsg = false) {
     const user = state.currentUser;
     if (!isAuthorizedSuperAdmin(user)) return;
-    const adminEmail = (user?.email && user.email.includes('shanthankolupula')) ? user.email : 'shanthankolupula123@gmail.com';
+    const adminEmail = 'shanthankolupula123@gmail.com';
 
     if (showToastMsg) showToast('Refreshing driver submissions...', 'info');
 
@@ -4897,7 +4900,7 @@
       showToast('Unauthorized: Super Admin access required.', 'danger');
       return;
     }
-    const adminEmail = (user?.email && user.email.includes('shanthankolupula')) ? user.email : 'shanthankolupula123@gmail.com';
+    const adminEmail = 'shanthankolupula123@gmail.com';
 
     let reason = '';
     if (newStatus === 'rejected') {
@@ -4912,6 +4915,7 @@
       if (window.db?.kyc?.reviewDriverKyc) {
         await window.db.kyc.reviewDriverKyc({
           id: targetId,
+          userId: targetId,
           status: newStatus,
           rejectionReason: reason,
           adminEmail: adminEmail
@@ -4932,7 +4936,7 @@
       showToast('Unauthorized: Super Admin access required.', 'danger');
       return;
     }
-    const adminEmail = (user?.email && user.email.includes('shanthankolupula')) ? user.email : 'shanthankolupula123@gmail.com';
+    const adminEmail = 'shanthankolupula123@gmail.com';
 
     let rejectionReason = null;
     if (newStatus === 'rejected') {
@@ -5459,7 +5463,7 @@
   async function loadAdminSafetyData(showToastMsg = false) {
     const user = state.currentUser;
     if (!isAuthorizedSuperAdmin(user)) return;
-    const adminEmail = (user?.email && user.email.includes('shanthankolupula')) ? user.email : 'shanthankolupula123@gmail.com';
+    const adminEmail = 'shanthankolupula123@gmail.com';
 
     if (showToastMsg) showToast('Refreshing passenger safety ratings...', 'info');
 
@@ -5600,7 +5604,7 @@
       showToast('Unauthorized: Super Admin access required.', 'danger');
       return;
     }
-    const adminEmail = (user?.email && user.email.includes('shanthankolupula')) ? user.email : 'shanthankolupula123@gmail.com';
+    const adminEmail = 'shanthankolupula123@gmail.com';
 
     let notes = '';
     if (actionType === 'warning') {

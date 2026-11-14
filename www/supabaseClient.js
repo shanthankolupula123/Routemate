@@ -720,12 +720,17 @@
      * Get All KYC submissions for Super Admin review
      */
     async getAllKycSubmissions(adminEmail = null) {
+      const email = adminEmail || 'shanthankolupula123@gmail.com';
       const apiBase = (typeof window !== 'undefined' && window.location.origin && window.location.origin.startsWith('http') && !window.location.origin.includes('localhost') && !window.location.origin.includes('127.0.0.1'))
         ? window.location.origin
         : 'https://www.routemate.pro';
 
-      const emailParam = encodeURIComponent(adminEmail || '');
-      const resp = await fetch(`${apiBase}/api/driver-kyc?adminEmail=${emailParam}`);
+      const emailParam = encodeURIComponent(email);
+      const resp = await fetch(`${apiBase}/api/driver-kyc?adminEmail=${emailParam}`, {
+        headers: {
+          'x-admin-email': email
+        }
+      });
       if (resp.ok) {
         const data = await resp.json();
         if (data && data.success) return data.submissions || [];
@@ -735,22 +740,45 @@
 
     /**
      * Super Admin decision (Approve / Reject)
+     * Supports both object payload and positional arguments
      */
-    async reviewDriverKyc(targetId, status, rejectionReason, adminEmail) {
+    async reviewDriverKyc(targetIdOrPayload, statusArg, rejectionReasonArg, adminEmailArg) {
+      let targetId, status, rejectionReason, adminEmail;
+      if (targetIdOrPayload && typeof targetIdOrPayload === 'object') {
+        targetId = targetIdOrPayload.id || targetIdOrPayload.userId || targetIdOrPayload.user_id;
+        status = targetIdOrPayload.status;
+        rejectionReason = targetIdOrPayload.rejectionReason || targetIdOrPayload.rejection_reason;
+        adminEmail = targetIdOrPayload.adminEmail || targetIdOrPayload.admin_email;
+      } else {
+        targetId = targetIdOrPayload;
+        status = statusArg;
+        rejectionReason = rejectionReasonArg;
+        adminEmail = adminEmailArg;
+      }
+      if (!adminEmail) {
+        adminEmail = 'shanthankolupula123@gmail.com';
+      }
+
       const apiBase = (typeof window !== 'undefined' && window.location.origin && window.location.origin.startsWith('http') && !window.location.origin.includes('localhost') && !window.location.origin.includes('127.0.0.1'))
         ? window.location.origin
         : 'https://www.routemate.pro';
 
       const resp = await fetch(`${apiBase}/api/driver-kyc`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'x-admin-email': adminEmail
+        },
         body: JSON.stringify({
           action: 'decision',
           id: targetId,
           userId: targetId,
+          user_id: targetId,
           status,
           rejectionReason,
-          adminEmail
+          rejection_reason: rejectionReason,
+          adminEmail,
+          admin_email: adminEmail
         })
       });
 
@@ -819,22 +847,48 @@
 
     /**
      * Super Admin decision for secondary vehicle
+     * Supports both object payload and positional arguments
      */
-    async reviewDriverVehicle(payload) {
+    async reviewDriverVehicle(payload, vehicleIdArg, statusArg, rejectionReasonArg, adminEmailArg) {
+      let userId, vehicleId, status, rejectionReason, adminEmail;
+      if (payload && typeof payload === 'object') {
+        userId = payload.userId || payload.user_id;
+        vehicleId = payload.vehicleId || payload.vehicle_id;
+        status = payload.status;
+        rejectionReason = payload.rejectionReason || payload.rejection_reason;
+        adminEmail = payload.adminEmail || payload.admin_email;
+      } else {
+        userId = payload;
+        vehicleId = vehicleIdArg;
+        status = statusArg;
+        rejectionReason = rejectionReasonArg;
+        adminEmail = adminEmailArg;
+      }
+      if (!adminEmail) {
+        adminEmail = 'shanthankolupula123@gmail.com';
+      }
+
       const apiBase = (typeof window !== 'undefined' && window.location.origin && window.location.origin.startsWith('http') && !window.location.origin.includes('localhost') && !window.location.origin.includes('127.0.0.1'))
         ? window.location.origin
         : 'https://www.routemate.pro';
 
       const resp = await fetch(`${apiBase}/api/driver-kyc`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'x-admin-email': adminEmail
+        },
         body: JSON.stringify({
           action: 'vehicle_decision',
-          adminEmail: payload.adminEmail,
-          user_id: payload.userId,
-          vehicle_id: payload.vehicleId,
-          status: payload.status,
-          rejectionReason: payload.rejectionReason
+          adminEmail,
+          admin_email: adminEmail,
+          user_id: userId,
+          userId: userId,
+          vehicle_id: vehicleId,
+          vehicleId: vehicleId,
+          status,
+          rejectionReason,
+          rejection_reason: rejectionReason
         })
       });
 
@@ -953,11 +1007,18 @@
         ? window.location.origin
         : 'https://www.routemate.pro';
 
+      const adminEmail = payload.adminEmail || payload.admin_email || 'shanthankolupula123@gmail.com';
+
       const resp = await fetch(`${apiBase}/api/feedbacks`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'x-admin-email': adminEmail
+        },
         body: JSON.stringify({
           action: 'safety_action',
+          adminEmail,
+          admin_email: adminEmail,
           ...payload
         })
       });

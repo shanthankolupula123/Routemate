@@ -34,7 +34,7 @@ function isSuperAdminEmail(email) {
 module.exports = async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, apikey');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, apikey, x-admin-email');
 
   if (req.method === 'OPTIONS') {
     return res.status(204).end();
@@ -256,12 +256,13 @@ module.exports = async (req, res) => {
     // ACTION: Admin Decision (Approve or Reject)
     // -----------------------------------------------------------------------
     if (action === 'decision') {
-      const { id, userId, status, rejectionReason, adminEmail } = body;
+      const { id, userId, status, rejectionReason } = body;
+      const cleanAdmin = String(body.adminEmail || body.admin_email || req.headers['x-admin-email'] || '').trim().toLowerCase();
 
-      if (!isSuperAdminEmail(adminEmail)) {
+      if (!isSuperAdminEmail(cleanAdmin)) {
         return res.status(403).json({
           success: false,
-          error: 'Unauthorized: Only authorized admin can review driver KYC submissions.'
+          error: 'Unauthorized: Only authorized admin (shanthankolupula123@gmail.com) can review driver KYC submissions.'
         });
       }
 
@@ -269,53 +270,19 @@ module.exports = async (req, res) => {
         return res.status(400).json({ success: false, error: 'Invalid status parameter.' });
       }
 
-      const targetId = userId || id;
+      const targetId = userId || id || body.user_id || body.targetId || body.target_id;
       if (!targetId) {
         return res.status(400).json({ success: false, error: 'Target driver ID is required.' });
       }
 
       const isApproved = status === 'approved';
 
-      // 1. Update Supabase `driver_kyc` table
-      try {
-        await fetch(`${SUPABASE_URL}/rest/v1/driver_kyc?or=(id.eq.${encodeURIComponent(targetId)},user_id.eq.${encodeURIComponent(targetId)})`, {
-          method: 'PATCH',
-          headers: {
-            'apikey': SUPABASE_KEY,
-            'Authorization': `Bearer ${SUPABASE_KEY}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            status,
-            rejection_reason: isApproved ? null : (rejectionReason || 'Documents did not meet criteria'),
-            reviewed_at: new Date().toISOString(),
-            reviewed_by: cleanAdmin
-          })
-        });
-      } catch (e) {}
-
-      // 2. Update Supabase `profiles` table
-      try {
-        await fetch(`${SUPABASE_URL}/rest/v1/profiles?id=eq.${encodeURIComponent(targetId)}`, {
-          method: 'PATCH',
-          headers: {
-            'apikey': SUPABASE_KEY,
-            'Authorization': `Bearer ${SUPABASE_KEY}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            is_verified: isApproved,
-            role: isApproved ? 'driver' : 'Daily Commuter'
-          })
-        });
-      } catch (e) {}
-
-      // 3. Update persistent store
+      // 1. Update persistent store
       const list = getStore();
-      const idx = list.findIndex(s => s.id === targetId || s.user_id === targetId || s.driver_email === body.email);
+      const idx = list.findIndex(s => s.id === targetId || s.user_id === targetId || (body.email && s.driver_email === body.email));
       if (idx !== -1) {
         list[idx].status = status;
-        list[idx].rejection_reason = isApproved ? null : rejectionReason;
+        list[idx].rejection_reason = isApproved ? null : (rejectionReason || 'Documents did not meet criteria');
         list[idx].reviewed_at = new Date().toISOString();
         list[idx].reviewed_by = cleanAdmin;
         if (isApproved && list[idx].vehicles) {
@@ -339,21 +306,49 @@ module.exports = async (req, res) => {
         saveStore(list);
       }
 
-      if (isApproved) {
-        try {
-          await fetch(`${SUPABASE_URL}/rest/v1/driver_kyc?or=(id.eq.${encodeURIComponent(targetId)},user_id.eq.${encodeURIComponent(targetId)})`, {
-            method: 'PATCH',
-            headers: {
-              'apikey': SUPABASE_KEY,
-              'Authorization': `Bearer ${SUPABASE_KEY}`,
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-              wallet_balance: 100.00,
-              welcome_bonus_credited: true
-            })
-          });
-        } catch (e) {}
+      // 2. Update Supabase `profiles` table
+      try {
+        const driverEmail = body.email || body.driverEmail || body.driver_email || (idx !== -1 ? list[idx].driver_email : '');
+        let profUrl = `${SUPABASE_URL}/rest/v1/profiles?id=eq.${encodeURIComponent(targetId)}&select=*&limit=1`;
+        if (driverEmail) {
+          profUrl = `${SUPABASE_URL}/rest/v1/profiles?or=(id.eq.${encodeURIComponent(targetId)},role.ilike.*${encodeURIComponent(driverEmail)}*,phone.eq.${encodeURIComponent(driverEmail)})&select=*&limit=1`;
+        }
+        const profRes = await fetch(profUrl, {
+          headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` }
+        });
+        if (profRes.ok) {
+          const rows = await profRes.json();
+          if (rows && rows.length > 0) {
+            const pRow = rows[0];
+            let meta = {};
+            try {
+              if (typeof pRow.role === 'string' && (pRow.role.startsWith('{') || pRow.role.includes('{'))) {
+                meta = JSON.parse(pRow.role);
+              }
+            } catch (e) {}
+            meta.kyc_status = status;
+            meta.is_verified = isApproved;
+            if (isApproved && meta.vehicles) {
+              meta.vehicles.forEach(v => {
+                if (v.status === 'pending') v.status = 'approved';
+              });
+            }
+            await fetch(`${SUPABASE_URL}/rest/v1/profiles?id=eq.${encodeURIComponent(pRow.id)}`, {
+              method: 'PATCH',
+              headers: {
+                'apikey': SUPABASE_KEY,
+                'Authorization': `Bearer ${SUPABASE_KEY}`,
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({
+                is_verified: isApproved,
+                role: JSON.stringify(meta)
+              })
+            });
+          }
+        }
+      } catch (e) {
+        console.warn('[KYC Decision] Supabase profiles sync notice:', e.message);
       }
 
       return res.status(200).json({
@@ -543,9 +538,10 @@ module.exports = async (req, res) => {
     // ACTION: Super Admin Driver Safety Action (Warning, Block, Unblock)
     // -----------------------------------------------------------------------
     if (action === 'safety_action') {
-      const { targetId, actionType, adminEmail, notes } = body;
-      if (!isSuperAdminEmail(adminEmail)) {
-        return res.status(403).json({ success: false, error: 'Unauthorized: Only Super Admin can take safety actions.' });
+      const { targetId, actionType, notes } = body;
+      const cleanAdmin = String(body.adminEmail || body.admin_email || req.headers['x-admin-email'] || '').trim().toLowerCase();
+      if (!isSuperAdminEmail(cleanAdmin)) {
+        return res.status(403).json({ success: false, error: 'Unauthorized: Only Super Admin (shanthankolupula123@gmail.com) can take safety actions.' });
       }
 
       const list = getStore();
@@ -718,22 +714,26 @@ module.exports = async (req, res) => {
     // ACTION: Super Admin Decision for Secondary Vehicle
     // -----------------------------------------------------------------------
     if (action === 'vehicle_decision') {
-      const { adminEmail, user_id, vehicle_id, status, rejectionReason } = body;
-      if (!isSuperAdminEmail(adminEmail)) {
+      const targetUserId = body.user_id || body.userId || body.targetId || body.id;
+      const targetVehicleId = body.vehicle_id || body.vehicleId;
+      const { status, rejectionReason } = body;
+      const cleanAdmin = String(body.adminEmail || body.admin_email || req.headers['x-admin-email'] || '').trim().toLowerCase();
+
+      if (!isSuperAdminEmail(cleanAdmin)) {
         return res.status(403).json({
           success: false,
-          error: 'Unauthorized: Only authorized admin can verify vehicles.'
+          error: 'Unauthorized: Only authorized admin (shanthankolupula123@gmail.com) can verify vehicles.'
         });
       }
 
       const list = getStore();
-      const sub = list.find(s => s.user_id === user_id || s.id === user_id || (s.vehicles && s.vehicles.some(v => v.id === vehicle_id)));
+      const sub = list.find(s => (targetUserId && (s.user_id === targetUserId || s.id === targetUserId)) || (s.vehicles && s.vehicles.some(v => v.id === targetVehicleId)));
 
       if (!sub || !sub.vehicles) {
         return res.status(404).json({ success: false, error: 'Driver vehicles not found.' });
       }
 
-      const targetVeh = sub.vehicles.find(v => v.id === vehicle_id);
+      const targetVeh = sub.vehicles.find(v => v.id === targetVehicleId);
       if (!targetVeh) {
         return res.status(404).json({ success: false, error: 'Target vehicle not found.' });
       }
@@ -750,6 +750,35 @@ module.exports = async (req, res) => {
       }
 
       saveStore(list);
+
+      // Sync updated vehicles array to Supabase profiles table
+      try {
+        const profId = sub.user_id || sub.id;
+        const profRes = await fetch(`${SUPABASE_URL}/rest/v1/profiles?or=(id.eq.${encodeURIComponent(profId)},role.ilike.*${encodeURIComponent(sub.driver_email || '')}*)&select=*&limit=1`, {
+          headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` }
+        });
+        if (profRes.ok) {
+          const pRows = await profRes.json();
+          if (pRows && pRows.length > 0) {
+            let meta = {};
+            try {
+              if (typeof pRows[0].role === 'string' && pRows[0].role.includes('{')) {
+                meta = JSON.parse(pRows[0].role);
+              }
+            } catch (e) {}
+            meta.vehicles = sub.vehicles;
+            await fetch(`${SUPABASE_URL}/rest/v1/profiles?id=eq.${encodeURIComponent(pRows[0].id)}`, {
+              method: 'PATCH',
+              headers: {
+                'apikey': SUPABASE_KEY,
+                'Authorization': `Bearer ${SUPABASE_KEY}`,
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({ role: JSON.stringify(meta) })
+            });
+          }
+        }
+      } catch (e) {}
 
       return res.status(200).json({
         success: true,
