@@ -271,44 +271,60 @@
     },
 
     /**
-     * Google OAuth Login
+     * Google OAuth Login (In-Page Popup Flow via Google Identity Services)
+     * Does NOT redirect away to avoid external callback / localhost errors
      */
     async signInWithGoogle() {
-      const client = getSupabase();
-      if (!client) throw new Error('Authentication service is initializing. Please try again.');
-
-      const redirectUrl = (typeof window !== 'undefined' && window.location && window.location.origin && !window.location.origin.includes('capacitor://'))
-        ? window.location.origin
-        : 'https://www.routemate.pro';
-
-      const directUrl = `${SUPABASE_CONFIG.url}/auth/v1/authorize?provider=google&redirect_to=${encodeURIComponent(redirectUrl)}`;
-
-      try {
-        const { data, error } = await client.auth.signInWithOAuth({
-          provider: 'google',
-          options: {
-            redirectTo: redirectUrl
+      return new Promise((resolve, reject) => {
+        // 1. Modern Google Identity Services tokenClient (Popup window)
+        if (typeof google !== 'undefined' && google.accounts && google.accounts.oauth2) {
+          try {
+            const tokenClient = google.accounts.oauth2.initTokenClient({
+              client_id: '667321797265-kcrogrinsipuk4n1c96ru71c0pocochm.apps.googleusercontent.com',
+              scope: 'email profile openid',
+              callback: async (tokenResponse) => {
+                if (tokenResponse && tokenResponse.access_token) {
+                  try {
+                    const res = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+                      headers: { Authorization: `Bearer ${tokenResponse.access_token}` }
+                    });
+                    const profile = await res.json();
+                    if (profile && profile.email) {
+                      if (typeof window.handleGoogleProfileSuccess === 'function') {
+                        await window.handleGoogleProfileSuccess(profile);
+                      }
+                      return resolve({ user: profile });
+                    }
+                  } catch (fetchErr) {
+                    return reject(fetchErr);
+                  }
+                }
+                reject(new Error('Google sign-in was cancelled.'));
+              },
+              error_callback: (err) => {
+                console.warn('Google tokenClient notice:', err);
+                reject(new Error(err.message || 'Google sign-in popup closed.'));
+              }
+            });
+            tokenClient.requestAccessToken({ prompt: 'select_account' });
+            return;
+          } catch (gisErr) {
+            console.warn('Google Identity Services exception:', gisErr);
           }
-        });
-
-        if (error) {
-          console.warn('Supabase signInWithOAuth returned error, redirecting directly:', error.message);
-          window.location.href = directUrl;
-          return { provider: 'google', url: directUrl };
         }
 
-        if (data && data.url) {
-          window.location.href = data.url;
-          return data;
-        } else {
-          window.location.href = directUrl;
-          return { provider: 'google', url: directUrl };
+        // 2. Google One-Tap prompt fallback
+        if (typeof google !== 'undefined' && google.accounts && google.accounts.id) {
+          google.accounts.id.prompt((notification) => {
+            if (notification.isNotDisplayed() || notification.isSkippedMoment()) {
+              reject(new Error('Google One-Tap is not displayed. Please use Email OTP.'));
+            }
+          });
+          return;
         }
-      } catch (e) {
-        console.warn('OAuth initiate notice, redirecting to Google:', e.message);
-        window.location.href = directUrl;
-        return { provider: 'google', url: directUrl };
-      }
+
+        reject(new Error('Google services initializing. Please use Email OTP.'));
+      });
     },
 
     /**
@@ -368,8 +384,12 @@
         } catch (e) {}
 
         const parsedEmail = extra.email || (row.phone && row.phone.includes('@') ? row.phone : cleanEmail);
-        const parsedPhone = extra.phone || (!row.phone || row.phone.includes('@') ? '' : row.phone);
-        const parsedName = row.name && row.name !== 'User' ? row.name : (extra.name || '');
+        const parsedPhone = (extra.phone && !extra.phone.includes('@'))
+          ? extra.phone
+          : ((row.phone && !row.phone.includes('@')) ? row.phone : '');
+        const parsedName = (row.name && row.name !== 'User' && !row.name.includes('@'))
+          ? row.name
+          : (extra.name && extra.name !== 'User' && !extra.name.includes('@') ? extra.name : (row.name || ''));
         const parsedRole = extra.role || (row.role && !row.role.startsWith('{') ? row.role : 'Daily Commuter');
         const kycStatus = extra.kyc_status || (row.is_verified ? 'approved' : 'not_submitted');
         const walletBal = extra.wallet_balance !== undefined ? Number(extra.wallet_balance) : (row.wallet_balance !== undefined ? Number(row.wallet_balance) : (kycStatus === 'approved' ? 100 : 0));
@@ -408,6 +428,7 @@
 
       try {
         let profile = null;
+        let candidateRows = [];
 
         // 1. Query by UUID if valid (auth.uid())
         if (userId && isUUID(userId)) {
@@ -420,13 +441,13 @@
           });
           if (resp.ok) {
             const rows = await resp.json();
-            if (rows && rows.length > 0) profile = unpackProfile(rows[0]);
+            if (Array.isArray(rows) && rows.length > 0) candidateRows.push(...rows);
           }
         }
 
-        // 2. Query by email in phone column (legacy records store email in phone)
-        if (!profile && cleanEmail) {
-          const resp = await fetch(`${SUPABASE_CONFIG.url}/rest/v1/profiles?phone=eq.${encodeURIComponent(cleanEmail)}&select=*&limit=1`, {
+        // 2. Query by email across all columns (role JSON and phone column)
+        if (cleanEmail) {
+          const resp = await fetch(`${SUPABASE_CONFIG.url}/rest/v1/profiles?or=(role.ilike.*${encodeURIComponent(cleanEmail)}*,phone.eq.${encodeURIComponent(cleanEmail)})&select=*`, {
             method: 'GET',
             headers: {
               'apikey': SUPABASE_CONFIG.publishableKey,
@@ -435,23 +456,27 @@
           });
           if (resp.ok) {
             const rows = await resp.json();
-            if (rows && rows.length > 0) profile = unpackProfile(rows[0]);
+            if (Array.isArray(rows) && rows.length > 0) candidateRows.push(...rows);
           }
         }
 
-        // 3. Query by email inside role JSON
-        if (!profile && cleanEmail) {
-          const respRole = await fetch(`${SUPABASE_CONFIG.url}/rest/v1/profiles?role=ilike.*${encodeURIComponent(cleanEmail)}*&select=*&limit=1`, {
-            method: 'GET',
-            headers: {
-              'apikey': SUPABASE_CONFIG.publishableKey,
-              'Authorization': `Bearer ${SUPABASE_CONFIG.publishableKey}`
-            }
-          });
-          if (respRole.ok) {
-            const rows = await respRole.json();
-            if (rows && rows.length > 0) profile = unpackProfile(rows[0]);
-          }
+        // Prioritize the profile row that contains actual stored credentials (valid 10-digit phone and real name)
+        if (candidateRows.length > 0) {
+          const bestRow = candidateRows.find(r => {
+            let extra = {};
+            try { extra = JSON.parse(r.role); } catch (e) {}
+            const p = (extra.phone && !extra.phone.includes('@')) ? extra.phone : ((r.phone && !r.phone.includes('@')) ? r.phone : '');
+            const digits = p.replace(/\D/g, '');
+            const hasGoodName = r.name && r.name !== 'User' && !r.name.includes('@');
+            return digits.length >= 10 && hasGoodName;
+          }) || candidateRows.find(r => {
+            let extra = {};
+            try { extra = JSON.parse(r.role); } catch (e) {}
+            const p = (extra.phone && !extra.phone.includes('@')) ? extra.phone : ((r.phone && !r.phone.includes('@')) ? r.phone : '');
+            return p.replace(/\D/g, '').length >= 10;
+          }) || candidateRows[0];
+
+          profile = unpackProfile(bestRow);
         }
 
         // 4. Enrich or Fallback check in driver_kyc (API gateway or table)

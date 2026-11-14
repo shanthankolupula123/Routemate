@@ -1206,13 +1206,66 @@
     }
   }
 
+  window.handleGoogleProfileSuccess = async function (profile) {
+    if (!profile || !profile.email) return;
+    const cleanEmail = String(profile.email).trim().toLowerCase();
+    const fullName = profile.name || cleanEmail.split('@')[0];
+    const avatar = profile.picture || getInitialsAvatarSvg(fullName, 120);
+
+    showToast(`Signing in as ${fullName}...`, 'info');
+
+    let supaUser = null;
+    if (window.db?.getSupabase) {
+      const client = window.db.getSupabase();
+      if (profile.id_token && client?.auth && typeof client.auth.signInWithIdToken === 'function') {
+        try {
+          const { data } = await client.auth.signInWithIdToken({
+            provider: 'google',
+            token: profile.id_token
+          });
+          if (data?.user) supaUser = data.user;
+        } catch (e) {}
+      }
+    }
+
+    const finalUser = {
+      id: (supaUser && supaUser.id) || ('usr_g_' + (profile.sub || Date.now())),
+      email: cleanEmail,
+      name: fullName,
+      phone: (supaUser && supaUser.phone) || '',
+      gender: '',
+      dob: '',
+      role: 'commuter',
+      rating: 5.0,
+      avatar: avatar
+    };
+
+    // Pre-hydrate from localStorage for returning users so they are never treated as new accounts
+    try {
+      const saved = localStorage.getItem('routemate_user');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed && parsed.email && parsed.email.toLowerCase() === cleanEmail) {
+          if (parsed.id && !finalUser.id.includes('-') && parsed.id.includes('-')) finalUser.id = parsed.id;
+          if (parsed.phone) finalUser.phone = parsed.phone;
+          if (parsed.name && parsed.name !== 'User') finalUser.name = parsed.name;
+          if (parsed.gender) finalUser.gender = parsed.gender;
+          if (parsed.dob) finalUser.dob = parsed.dob;
+          if (parsed.upi_id) finalUser.upi_id = parsed.upi_id;
+          if (parsed.kyc_status) finalUser.kyc_status = parsed.kyc_status;
+          if (parsed.wallet_balance !== undefined) finalUser.wallet_balance = parsed.wallet_balance;
+        }
+      }
+    } catch (e) {}
+
+    await handleAuthUserFlow(finalUser, true);
+  };
+
   window.handleGoogleCredentialResponse = async function (response) {
     if (!response || !response.credential) {
       showToast('Google sign-in did not return credentials.', 'danger');
       return;
     }
-
-    showToast('Signing in with Google...', 'info');
 
     try {
       const token = response.credential;
@@ -1220,56 +1273,10 @@
       const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
       const jsonPayload = decodeURIComponent(atob(base64).split('').map(c => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2)).join(''));
       const payload = JSON.parse(jsonPayload);
+      payload.id_token = token;
 
       console.log('✅ [GOOGLE AUTH] User signed in via GIS:', payload.email, payload.name);
-
-      let supaUser = null;
-      if (window.db?.getSupabase) {
-        const client = window.db.getSupabase();
-        if (client?.auth && typeof client.auth.signInWithIdToken === 'function') {
-          try {
-            const { data, error } = await client.auth.signInWithIdToken({
-              provider: 'google',
-              token: token
-            });
-            if (!error && data && data.user) {
-              supaUser = data.user;
-            }
-          } catch (supaErr) {
-            console.warn('Supabase signInWithIdToken note:', supaErr.message);
-          }
-        }
-      }
-
-      const finalUser = {
-        id: (supaUser && supaUser.id) || ('usr_g_' + payload.sub),
-        email: payload.email,
-        name: payload.name || payload.email.split('@')[0],
-        phone: (supaUser && supaUser.phone) || '',
-        gender: '',
-        dob: '',
-        role: 'commuter',
-        rating: 5.0,
-        avatar: payload.picture || getInitialsAvatarSvg(payload.name || payload.email, 120)
-      };
-
-      // Pre-hydrate from localStorage for returning users so they are never treated as new accounts
-      try {
-        const saved = localStorage.getItem('routemate_user');
-        if (saved) {
-          const parsed = JSON.parse(saved);
-          if (parsed && parsed.email && parsed.email.toLowerCase() === payload.email.toLowerCase()) {
-            if (parsed.id && !finalUser.id.includes('-') && parsed.id.includes('-')) finalUser.id = parsed.id;
-            if (parsed.phone) finalUser.phone = parsed.phone;
-            if (parsed.name && parsed.name !== 'User') finalUser.name = parsed.name;
-            if (parsed.gender) finalUser.gender = parsed.gender;
-            if (parsed.dob) finalUser.dob = parsed.dob;
-            if (parsed.upi_id) finalUser.upi_id = parsed.upi_id;
-          }
-        }
-      } catch (e) {}
-
-      await handleAuthUserFlow(finalUser, true);
+      await window.handleGoogleProfileSuccess(payload);
     } catch (err) {
       console.error('Google credential parse error:', err);
       showToast('Google Sign In: ' + err.message, 'danger');
@@ -1315,33 +1322,23 @@
     try {
       await window.db.auth.signInWithGoogle();
     } catch (err) {
-      console.warn('Google sign-in check notice:', err);
-      const isProviderDisabled = err.code === 'PROVIDER_NOT_ENABLED' ||
-        err.message?.includes('provider is not enabled') ||
-        err.message?.includes('Unsupported provider') ||
-        err.message?.includes('not configured');
-
-      if (isProviderDisabled) {
-        if (emailVal && emailVal.includes('@')) {
-          showToast('Sending 6-digit verification code to ' + emailVal + '...', 'info');
-          try {
-            await window.db.auth.sendOtp(emailVal, {
-              name: emailVal.split('@')[0],
-              role: 'rider'
-            });
-            state.otpEmail = emailVal;
-            showToast('6-digit code sent to your Google inbox!', 'success');
-            showOtpStep(emailVal);
-          } catch (sendErr) {
-            showToast(sendErr.message || 'Failed to send OTP code.', 'danger');
-          }
-          return;
+      console.warn('Google sign-in notice:', err.message);
+      if (emailVal && emailVal.includes('@')) {
+        showToast('Sending 6-digit verification code to ' + emailVal + '...', 'info');
+        try {
+          await window.db.auth.sendOtp(emailVal, {
+            name: emailVal.split('@')[0],
+            role: 'rider'
+          });
+          state.otpEmail = emailVal;
+          showToast('6-digit code sent to your Google inbox!', 'success');
+          showOtpStep(emailVal);
+        } catch (sendErr) {
+          showToast(sendErr.message || 'Failed to send OTP code.', 'danger');
         }
-        openGoogleSignInModal(emailVal);
-      } else {
-        const redirectUrl = (typeof window !== 'undefined' && window.location && window.location.origin) ? window.location.origin : 'https://www.routemate.pro';
-        window.location.href = `https://hjieeilzfbvubkhmlmdg.supabase.co/auth/v1/authorize?provider=google&redirect_to=${encodeURIComponent(redirectUrl)}`;
+        return;
       }
+      openGoogleSignInModal(emailVal);
     }
   }
 
