@@ -232,7 +232,14 @@
           } catch (e) {}
           await handleAuthUserFlow(userObj, event === 'SIGNED_IN');
         } else if (event === 'SIGNED_OUT') {
-          lockAppToAuthScreen();
+          try {
+            const saved = localStorage.getItem('routemate_user');
+            if (!saved) {
+              lockAppToAuthScreen();
+            }
+          } catch (e) {
+            lockAppToAuthScreen();
+          }
         }
       });
     }
@@ -384,7 +391,18 @@
     }
 
     // If Profile Exists (Name & Phone Number are already saved):
-    // Permanently store in localStorage, close modal, and route directly to main app dashboard
+    // Permanently store in localStorage, sync to Supabase, close modal, and route directly to main app dashboard
+    if (window.db?.auth?.saveUserProfile && user.phone && user.name) {
+      window.db.auth.saveUserProfile(user.id, {
+        name: user.name,
+        phone: user.phone,
+        email: user.email,
+        gender: user.gender,
+        dob: user.dob,
+        upiId: user.upi_id
+      }).catch(e => console.warn('Background profile sync notice:', e));
+    }
+
     try {
       localStorage.setItem('routemate_user', JSON.stringify(user));
     } catch (e) {}
@@ -638,7 +656,6 @@
   function lockAppToAuthScreen() {
     state.currentUser = null;
     state.pendingCompletionUser = null;
-    localStorage.removeItem('routemate_user');
     closeProfileCompletionModal();
     closeDeleteAccountModal();
     closeLocationPreferencesModal();
@@ -1157,6 +1174,24 @@
     }
   };
 
+  window.showOtpStep = function (email) {
+    state.pendingAuth = state.pendingAuth || {};
+    state.pendingAuth.email = email;
+    const stepEmail = document.getElementById('authStepEmail');
+    const stepOtp = document.getElementById('authStepOtp');
+    const sentEl = document.getElementById('authOtpSentEmail');
+    if (stepEmail) stepEmail.classList.add('hidden');
+    if (stepOtp) stepOtp.classList.remove('hidden');
+    if (sentEl) sentEl.textContent = email;
+
+    const otpInput = document.getElementById('authOtpInput');
+    if (otpInput) {
+      otpInput.value = '';
+      setTimeout(() => otpInput.focus(), 250);
+    }
+    startResendCountdown();
+  };
+
   window.handleGoogleSignIn = async function () {
     const termsCheck = document.getElementById('authTermsCheckbox');
     if (termsCheck && !termsCheck.checked) {
@@ -1170,29 +1205,12 @@
     }
 
     const emailVal = document.getElementById('authEmailInput')?.value?.trim();
-
-    // 1. Try Google Identity Services One Tap prompt first (in-page popup, never redirects to localhost)
-    if (typeof google !== 'undefined' && google.accounts && google.accounts.id) {
-      showToast('Opening Google Sign-In...', 'info');
-      try {
-        google.accounts.id.prompt((notification) => {
-          if (notification.isNotDisplayed() || notification.isSkippedMoment()) {
-            console.log('GIS One-Tap prompt bypassed, proceeding with Google OAuth...');
-            fallbackGoogleOAuth(emailVal);
-          }
-        });
-        return;
-      } catch (gisErr) {
-        console.warn('GIS prompt error:', gisErr);
-      }
-    }
-
-    fallbackGoogleOAuth(emailVal);
+    showToast('Connecting to Google...', 'info');
+    await fallbackGoogleOAuth(emailVal);
   };
 
   async function fallbackGoogleOAuth(emailVal) {
     try {
-      showToast('Connecting to Google...', 'info');
       await window.db.auth.signInWithGoogle();
     } catch (err) {
       console.warn('Google sign-in check notice:', err);
@@ -1219,8 +1237,8 @@
         }
         openGoogleSignInModal(emailVal);
       } else {
-        showToast('Google Sign In: ' + err.message, 'danger');
-        openGoogleSignInModal(emailVal);
+        const redirectUrl = (typeof window !== 'undefined' && window.location && window.location.origin) ? window.location.origin : 'https://www.routemate.pro';
+        window.location.href = `https://hjieeilzfbvubkhmlmdg.supabase.co/auth/v1/authorize?provider=google&redirect_to=${encodeURIComponent(redirectUrl)}`;
       }
     }
   }
@@ -3075,11 +3093,6 @@
 
   window.completeDriverTripAction = function () {
     openDriverTripCompletionModal();
-  };
-    } catch (err) {
-      console.error('Complete ride error:', err);
-      showToast('Failed to complete ride: ' + err.message, 'danger');
-    }
   };
 
   window.toggleDriverOnline = function () {

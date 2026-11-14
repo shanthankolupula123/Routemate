@@ -104,7 +104,7 @@
 
       console.log('📧 [ROUTEMATE AUTH] Sending 6-digit OTP to:', cleanEmail);
 
-      const apiBase = (typeof window !== 'undefined' && window.location.origin && window.location.origin.startsWith('http') && !window.location.origin.includes('localhost') && !window.location.origin.includes('127.0.0.1'))
+      const apiBase = (typeof window !== 'undefined' && window.location && window.location.origin)
         ? window.location.origin
         : 'https://www.routemate.pro';
 
@@ -180,7 +180,7 @@
 
       console.log('🔑 [ROUTEMATE AUTH] Verifying OTP for:', cleanEmail);
 
-      const apiBase = (typeof window !== 'undefined' && window.location.origin && window.location.origin.startsWith('http') && !window.location.origin.includes('localhost') && !window.location.origin.includes('127.0.0.1'))
+      const apiBase = (typeof window !== 'undefined' && window.location && window.location.origin)
         ? window.location.origin
         : 'https://www.routemate.pro';
 
@@ -190,6 +190,13 @@
         otpToken = sessionStorage.getItem('routemate_otp_token') || '';
         expiresAt = sessionStorage.getItem('routemate_otp_expires') || '';
       } catch (e) {}
+
+      const getSvgInitialsAvatar = (userName, bg = '#0052CC') => {
+        const parts = String(userName || 'User').trim().split(/\s+/);
+        const initials = (parts.length >= 2 ? parts[0][0] + parts[1][0] : parts[0].slice(0, 2)).toUpperCase();
+        const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 120 120"><rect width="120" height="120" rx="60" fill="${bg}"/><text x="50%" y="54%" text-anchor="middle" dominant-baseline="middle" fill="#FFFFFF" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-weight="800" font-size="48px">${initials}</text></svg>`;
+        return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+      };
 
       // 1. Primary: Verify via Routemate API Gateway (Supabase DB + HMAC)
       try {
@@ -207,12 +214,6 @@
         });
 
         const data = await resp.json().catch(() => ({}));
-  function getSvgInitialsAvatar(name, bg = '#0052CC') {
-    const parts = String(name || 'User').trim().split(/\s+/);
-    const initials = (parts.length >= 2 ? parts[0][0] + parts[1][0] : parts[0].slice(0, 2)).toUpperCase();
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 120 120"><rect width="120" height="120" rx="60" fill="${bg}"/><text x="50%" y="54%" text-anchor="middle" dominant-baseline="middle" fill="#FFFFFF" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-weight="800" font-size="48px">${initials}</text></svg>`;
-    return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
-  }
 
         if (resp.ok && data.success && data.verified) {
           console.log('✅ [ROUTEMATE AUTH] OTP verified successfully!');
@@ -276,44 +277,38 @@
       const client = getSupabase();
       if (!client) throw new Error('Authentication service is initializing. Please try again.');
 
-      const redirectUrl = (typeof window !== 'undefined' && window.location && window.location.origin && !window.location.origin.includes('localhost') && !window.location.origin.includes('capacitor://'))
+      const redirectUrl = (typeof window !== 'undefined' && window.location && window.location.origin && !window.location.origin.includes('capacitor://'))
         ? window.location.origin
         : 'https://www.routemate.pro';
 
-      // Safe pre-probe: verify if the Google OAuth provider is actually enabled in the Supabase Dashboard.
-      // This prevents dumping the user onto an unhandled 400 "provider is not enabled" raw JSON page.
-      const probeUrl = `${SUPABASE_CONFIG.url}/auth/v1/authorize?provider=google&redirect_to=${encodeURIComponent(redirectUrl)}`;
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 1500);
+      const directUrl = `${SUPABASE_CONFIG.url}/auth/v1/authorize?provider=google&redirect_to=${encodeURIComponent(redirectUrl)}`;
+
       try {
-        const probeResp = await fetch(probeUrl, { method: 'GET', signal: controller.signal });
-        clearTimeout(timeoutId);
-        if (probeResp.status === 400) {
-          const body = await probeResp.json().catch(() => ({}));
-          if (body.error_code === 'validation_failed' || (body.msg && body.msg.includes('provider is not enabled'))) {
-            const err = new Error('Google OAuth provider is not enabled on this Supabase project.');
-            err.code = 'PROVIDER_NOT_ENABLED';
-            throw err;
+        const { data, error } = await client.auth.signInWithOAuth({
+          provider: 'google',
+          options: {
+            redirectTo: redirectUrl
           }
+        });
+
+        if (error) {
+          console.warn('Supabase signInWithOAuth returned error, redirecting directly:', error.message);
+          window.location.href = directUrl;
+          return { provider: 'google', url: directUrl };
         }
-      } catch (probeErr) {
-        clearTimeout(timeoutId);
-        if (probeErr.code === 'PROVIDER_NOT_ENABLED' || probeErr.message?.includes('provider is not enabled')) {
-          throw probeErr;
+
+        if (data && data.url) {
+          window.location.href = data.url;
+          return data;
+        } else {
+          window.location.href = directUrl;
+          return { provider: 'google', url: directUrl };
         }
-        // If fetch redirected to accounts.google.com or timed out, proceed directly with OAuth!
-        console.log('Google OAuth active, proceeding with redirect...');
+      } catch (e) {
+        console.warn('OAuth initiate notice, redirecting to Google:', e.message);
+        window.location.href = directUrl;
+        return { provider: 'google', url: directUrl };
       }
-
-      const { data, error } = await client.auth.signInWithOAuth({
-        provider: 'google',
-        options: {
-          redirectTo: redirectUrl
-        }
-      });
-
-      if (error) throw error;
-      return data;
     },
 
     /**
@@ -596,7 +591,7 @@
      */
     async deleteAccount(userId, email = null) {
       if (!userId && !email) throw new Error('User ID or Email is required');
-      const apiBase = (typeof window !== 'undefined' && window.location.origin && window.location.origin.startsWith('http') && !window.location.origin.includes('localhost') && !window.location.origin.includes('127.0.0.1'))
+      const apiBase = (typeof window !== 'undefined' && window.location && window.location.origin)
         ? window.location.origin
         : 'https://www.routemate.pro';
 
@@ -651,7 +646,7 @@
      */
     async getDriverKyc(userId, email = null) {
       if (!userId && !email) return { status: 'not_submitted' };
-      const apiBase = (typeof window !== 'undefined' && window.location.origin && window.location.origin.startsWith('http') && !window.location.origin.includes('localhost') && !window.location.origin.includes('127.0.0.1'))
+      const apiBase = (typeof window !== 'undefined' && window.location && window.location.origin)
         ? window.location.origin
         : 'https://www.routemate.pro';
 
@@ -699,7 +694,7 @@
      * Submit Driver KYC documents (DL, Aadhaar, RC, Photo)
      */
     async submitDriverKyc(submissionData) {
-      const apiBase = (typeof window !== 'undefined' && window.location.origin && window.location.origin.startsWith('http') && !window.location.origin.includes('localhost') && !window.location.origin.includes('127.0.0.1'))
+      const apiBase = (typeof window !== 'undefined' && window.location && window.location.origin)
         ? window.location.origin
         : 'https://www.routemate.pro';
 
@@ -721,7 +716,7 @@
      */
     async getAllKycSubmissions(adminEmail = null) {
       const email = adminEmail || 'shanthankolupula123@gmail.com';
-      const apiBase = (typeof window !== 'undefined' && window.location.origin && window.location.origin.startsWith('http') && !window.location.origin.includes('localhost') && !window.location.origin.includes('127.0.0.1'))
+      const apiBase = (typeof window !== 'undefined' && window.location && window.location.origin)
         ? window.location.origin
         : 'https://www.routemate.pro';
 
@@ -759,7 +754,7 @@
         adminEmail = 'shanthankolupula123@gmail.com';
       }
 
-      const apiBase = (typeof window !== 'undefined' && window.location.origin && window.location.origin.startsWith('http') && !window.location.origin.includes('localhost') && !window.location.origin.includes('127.0.0.1'))
+      const apiBase = (typeof window !== 'undefined' && window.location && window.location.origin)
         ? window.location.origin
         : 'https://www.routemate.pro';
 
@@ -793,7 +788,7 @@
      * Add another secondary vehicle to driver's profile
      */
     async addDriverVehicle(payload) {
-      const apiBase = (typeof window !== 'undefined' && window.location.origin && window.location.origin.startsWith('http') && !window.location.origin.includes('localhost') && !window.location.origin.includes('127.0.0.1'))
+      const apiBase = (typeof window !== 'undefined' && window.location && window.location.origin)
         ? window.location.origin
         : 'https://www.routemate.pro';
 
@@ -824,7 +819,7 @@
      * Switch active driving vehicle
      */
     async switchDriverVehicle(userId, vehicleId) {
-      const apiBase = (typeof window !== 'undefined' && window.location.origin && window.location.origin.startsWith('http') && !window.location.origin.includes('localhost') && !window.location.origin.includes('127.0.0.1'))
+      const apiBase = (typeof window !== 'undefined' && window.location && window.location.origin)
         ? window.location.origin
         : 'https://www.routemate.pro';
 
@@ -868,7 +863,7 @@
         adminEmail = 'shanthankolupula123@gmail.com';
       }
 
-      const apiBase = (typeof window !== 'undefined' && window.location.origin && window.location.origin.startsWith('http') && !window.location.origin.includes('localhost') && !window.location.origin.includes('127.0.0.1'))
+      const apiBase = (typeof window !== 'undefined' && window.location && window.location.origin)
         ? window.location.origin
         : 'https://www.routemate.pro';
 
@@ -903,7 +898,7 @@
      * Driver UPI ID & QR Code configuration
      */
     async updateDriverUpi(userId, upiId, upiQr = null) {
-      const apiBase = (typeof window !== 'undefined' && window.location.origin && window.location.origin.startsWith('http') && !window.location.origin.includes('localhost') && !window.location.origin.includes('127.0.0.1'))
+      const apiBase = (typeof window !== 'undefined' && window.location && window.location.origin)
         ? window.location.origin
         : 'https://www.routemate.pro';
 
@@ -929,7 +924,7 @@
      * (Bike: ₹5, Auto: ₹10, Car: ₹18)
      */
     async deductDriverCommission(payload) {
-      const apiBase = (typeof window !== 'undefined' && window.location.origin && window.location.origin.startsWith('http') && !window.location.origin.includes('localhost') && !window.location.origin.includes('127.0.0.1'))
+      const apiBase = (typeof window !== 'undefined' && window.location && window.location.origin)
         ? window.location.origin
         : 'https://www.routemate.pro';
 
@@ -949,7 +944,7 @@
      * Recharges driver in-app wallet balance
      */
     async rechargeDriverWallet(payload) {
-      const apiBase = (typeof window !== 'undefined' && window.location.origin && window.location.origin.startsWith('http') && !window.location.origin.includes('localhost') && !window.location.origin.includes('127.0.0.1'))
+      const apiBase = (typeof window !== 'undefined' && window.location && window.location.origin)
         ? window.location.origin
         : 'https://www.routemate.pro';
 
@@ -974,7 +969,7 @@
    */
   const feedbacks = {
     async submitFeedback(payload) {
-      const apiBase = (typeof window !== 'undefined' && window.location.origin && window.location.origin.startsWith('http') && !window.location.origin.includes('localhost') && !window.location.origin.includes('127.0.0.1'))
+      const apiBase = (typeof window !== 'undefined' && window.location && window.location.origin)
         ? window.location.origin
         : 'https://www.routemate.pro';
 
@@ -991,7 +986,7 @@
     },
 
     async getAllFeedbacks() {
-      const apiBase = (typeof window !== 'undefined' && window.location.origin && window.location.origin.startsWith('http') && !window.location.origin.includes('localhost') && !window.location.origin.includes('127.0.0.1'))
+      const apiBase = (typeof window !== 'undefined' && window.location && window.location.origin)
         ? window.location.origin
         : 'https://www.routemate.pro';
 
@@ -1003,7 +998,7 @@
     },
 
     async executeSafetyAction(payload) {
-      const apiBase = (typeof window !== 'undefined' && window.location.origin && window.location.origin.startsWith('http') && !window.location.origin.includes('localhost') && !window.location.origin.includes('127.0.0.1'))
+      const apiBase = (typeof window !== 'undefined' && window.location && window.location.origin)
         ? window.location.origin
         : 'https://www.routemate.pro';
 
