@@ -63,6 +63,9 @@
   <!-- Official Google Identity Services SDK -->
   <script src="https://accounts.google.com/gsi/client" async defer></script>
 
+  <!-- Official Razorpay Checkout SDK -->
+  <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+
   <!-- Official Brand Stylesheet -->
   <link rel="stylesheet" href="styles.css?v=20261026_gis_direct_popup_v46" />
 </head>
@@ -1676,8 +1679,8 @@
           <!-- UPI ID Display & Copy -->
           <div class="p-3 bg-slate-50 rounded-2xl border border-slate-200/80 flex items-center justify-between gap-2">
             <div class="min-w-0">
-              <span class="text-[10px] text-slate-400 font-bold uppercase block">Driver's Personal UPI ID</span>
-              <span id="paymentModalUpiIdText" class="text-xs font-mono font-black text-slate-900 truncate block">driver@oksbi</span>
+              <span class="text-[10px] text-slate-400 font-bold uppercase block">Driver's Registered UPI ID</span>
+              <span id="paymentModalUpiIdText" class="text-xs font-mono font-black text-slate-900 truncate block">driver@upi</span>
             </div>
             <button type="button" onclick="copyDriverUpiId()" id="btnCopyDriverUpi" class="px-3 py-1.5 rounded-xl bg-blue-50 text-blue-700 hover:bg-blue-100 text-xs font-black transition cursor-pointer flex-shrink-0">
               Copy UPI
@@ -1831,7 +1834,7 @@
       <!-- Action Button -->
       <button type="button" onclick="executeDriverPaymentVerificationAndCompletion()" id="btnDriverConfirmAndComplete" class="w-full py-3.5 btn-pill-primary text-xs font-black flex items-center justify-center gap-2 shadow-lg cursor-pointer active:scale-95">
         <i data-lucide="check-check" class="w-4 h-4"></i>
-        <span>Driver Confirmed Payment & Complete Trip</span>
+        <span>Payment Done / Complete Ride</span>
       </button>
     </div>
   </div>
@@ -2316,8 +2319,8 @@
   </audio>
 
   <!-- Core Scripts -->
-  <script src="payment.js?v=20261114_kyc_submit_fix_v74"></script>
-  <script src="supabaseClient.js?v=20261114_kyc_submit_fix_v74"></script>
-  <script src="app.js?v=20261114_kyc_submit_fix_v74"></script>
+  <script src="payment.js?v=20261114_razorpay_driver_flow_v75"></script>
+  <script src="supabaseClient.js?v=20261114_razorpay_driver_flow_v75"></script>
+  <script src="app.js?v=20261114_razorpay_driver_flow_v75"></script>
 </body>
 </html>

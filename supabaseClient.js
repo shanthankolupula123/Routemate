@@ -1676,6 +1676,16 @@
      */
     async acceptRequest(requestId, driverUser) {
       console.log('⚡ [ROUTEMATE DRIVER] Accepting ride:', requestId);
+
+      // Dynamically resolve driver's registered UPI ID from driver profile
+      let resolvedUpiId = driverUser.upi_id || driverUser.upiId || driverUser.upi?.id || '';
+      let resolvedUpiQr = driverUser.upi_qr || driverUser.upiQr || driverUser.upi?.qr || '';
+
+      if (!resolvedUpiId && driverUser.phone) {
+        const cleanP = String(driverUser.phone).replace(/\D/g, '').slice(-10);
+        if (cleanP.length === 10) resolvedUpiId = `${cleanP}@upi`;
+      }
+
       const driverPayload = {
         id: driverUser.id,
         name: driverUser.name,
@@ -1684,8 +1694,10 @@
         vehicleName: driverUser.vehicleName || driverUser.vehicle_name || 'Verified Commuter Vehicle',
         vehicleNumber: driverUser.vehicleNumber || driverUser.vehicle_number || 'TG 08 AB 1234',
         vehicleType: driverUser.vehicleType || driverUser.vehicle_type || 'bike',
-        upiId: driverUser.upi_id || driverUser.upiId || 'routemate.driver@oksbi',
-        upiQr: driverUser.upi_qr || driverUser.upiQr || '',
+        upiId: resolvedUpiId,
+        upi_id: resolvedUpiId,
+        upiQr: resolvedUpiQr,
+        upi_qr: resolvedUpiQr,
         rating: driverUser.rating || 4.95
       };
 
@@ -1779,6 +1791,25 @@
         method: 'PATCH',
         body: { notes: updateNotes }
       });
+    },
+
+    async notifyDriverPayment(requestId, paymentInfo = {}) {
+      const client = getSupabase();
+      if (client) {
+        try {
+          const riderDirect = client.channel(`rider-ride-${requestId}`);
+          riderDirect.send({
+            type: 'broadcast',
+            event: 'rider_payment_ready',
+            payload: {
+              status: 'rider_payment_ready',
+              requestId,
+              ...paymentInfo
+            }
+          });
+        } catch (e) {}
+      }
+      return { success: true };
     },
 
     async completeRide(requestId, completedData = {}) {

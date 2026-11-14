@@ -574,6 +574,7 @@ module.exports = async (req, res) => {
       const list = getStore();
       const idx = list.findIndex(s => s.id === cleanUserId || s.user_id === cleanUserId);
       let newBalance = rechargeAmount;
+      let txs = [];
 
       if (idx !== -1) {
         const curBal = typeof list[idx].wallet_balance === 'number' ? list[idx].wallet_balance : 0;
@@ -588,10 +589,29 @@ module.exports = async (req, res) => {
           description: `⚡ Wallet Online Top-Up (+₹${rechargeAmount})`,
           timestamp: new Date().toISOString()
         });
+        txs = list[idx].wallet_transactions;
+        saveStore(list);
+      } else {
+        txs = [
+          {
+            id: 'tx_rech_' + Date.now().toString(36),
+            type: 'credit',
+            amount: rechargeAmount,
+            paymentId: paymentId || ('RZP-' + Date.now().toString(36).toUpperCase()),
+            description: `⚡ Wallet Online Top-Up (+₹${rechargeAmount})`,
+            timestamp: new Date().toISOString()
+          }
+        ];
+        list.push({
+          id: cleanUserId,
+          user_id: cleanUserId,
+          wallet_balance: newBalance,
+          wallet_transactions: txs
+        });
         saveStore(list);
       }
 
-      // Update Supabase
+      // Update Supabase `driver_kyc`
       try {
         await fetch(`${SUPABASE_URL}/rest/v1/driver_kyc?or=(id.eq.${encodeURIComponent(cleanUserId)},user_id.eq.${encodeURIComponent(cleanUserId)})`, {
           method: 'PATCH',
@@ -604,10 +624,49 @@ module.exports = async (req, res) => {
         });
       } catch (e) {}
 
+      // Update Supabase `profiles` role metadata
+      try {
+        const profRes = await fetch(`${SUPABASE_URL}/rest/v1/profiles?id=eq.${encodeURIComponent(cleanUserId)}&select=*&limit=1`, {
+          headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` }
+        });
+        if (profRes.ok) {
+          const rows = await profRes.json();
+          if (rows && rows.length > 0) {
+            let meta = {};
+            try {
+              if (typeof rows[0].role === 'string' && rows[0].role.includes('{')) {
+                meta = JSON.parse(rows[0].role);
+              }
+            } catch (e) {}
+            meta.wallet_balance = newBalance;
+            if (!meta.wallet_transactions) meta.wallet_transactions = [];
+            meta.wallet_transactions.unshift({
+              id: 'tx_rech_' + Date.now().toString(36),
+              type: 'credit',
+              amount: rechargeAmount,
+              paymentId: paymentId || ('RZP-' + Date.now().toString(36).toUpperCase()),
+              description: `⚡ Wallet Online Top-Up (+₹${rechargeAmount})`,
+              timestamp: new Date().toISOString()
+            });
+            await fetch(`${SUPABASE_URL}/rest/v1/profiles?id=eq.${encodeURIComponent(rows[0].id)}`, {
+              method: 'PATCH',
+              headers: {
+                'apikey': SUPABASE_KEY,
+                'Authorization': `Bearer ${SUPABASE_KEY}`,
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({ role: JSON.stringify(meta) })
+            });
+          }
+        }
+      } catch (e) {}
+
       return res.status(200).json({
         success: true,
         message: `Wallet successfully recharged with ₹${rechargeAmount}!`,
-        newBalance
+        newBalance,
+        wallet_balance: newBalance,
+        wallet_transactions: txs
       });
     }
 

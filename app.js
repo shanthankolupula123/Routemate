@@ -2696,6 +2696,36 @@
             <span class="font-black text-emerald-300 text-base">₹${req.fare}</span>
           </div>
 
+          <!-- Active Commuter Live Fuel Share Payment Selection (UPI / Cash) -->
+          <div class="mt-3.5 pt-3 border-t border-white/10 space-y-2">
+            <div class="flex items-center justify-between text-xs">
+              <span class="text-slate-300 font-bold">Payment to Driver:</span>
+              <span class="text-emerald-300 font-black">
+                ${req.paymentSettled ? '✓ Payment Settled' : (req.chosenPaymentMethod === 'cash' ? '💵 Cash in Hand' : '📱 Direct UPI / QR')}
+              </span>
+            </div>
+            <div class="grid grid-cols-2 gap-2 text-xs">
+              <button type="button" onclick="selectRiderActivePaymentMethod('upi')" class="py-2 px-2.5 rounded-xl font-bold transition flex items-center justify-center gap-1.5 cursor-pointer ${req.chosenPaymentMethod !== 'cash' ? 'bg-cyan-500 text-slate-950 font-black shadow' : 'bg-white/10 hover:bg-white/20 text-white'}">
+                <i data-lucide="smartphone" class="w-3.5 h-3.5"></i>
+                <span>Direct UPI / QR</span>
+              </button>
+              <button type="button" onclick="selectRiderActivePaymentMethod('cash')" class="py-2 px-2.5 rounded-xl font-bold transition flex items-center justify-center gap-1.5 cursor-pointer ${req.chosenPaymentMethod === 'cash' ? 'bg-amber-400 text-slate-950 font-black shadow' : 'bg-white/10 hover:bg-white/20 text-white'}">
+                <i data-lucide="banknote" class="w-3.5 h-3.5"></i>
+                <span>Cash in Hand</span>
+              </button>
+            </div>
+            ${!req.paymentSettled ? `
+              <button type="button" onclick="openRiderPaymentModal()" class="w-full py-2.5 rounded-xl bg-white/15 hover:bg-white/25 text-white text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer border border-white/20 active:scale-95 shadow-sm">
+                <i data-lucide="qr-code" class="w-4 h-4 text-cyan-300"></i>
+                <span>${req.chosenPaymentMethod === 'cash' ? `Confirm Cash Payment (₹${req.fare})` : `Show Driver QR Code & Pay UPI (₹${req.fare})`}</span>
+              </button>
+            ` : `
+              <div class="p-2 rounded-xl bg-emerald-500/20 border border-emerald-400/30 text-center text-[11px] font-bold text-emerald-300">
+                ✓ Fuel share payment recorded via ${(req.chosenPaymentMethod || 'upi').toUpperCase()}. Waiting for driver to complete trip.
+              </div>
+            `}
+          </div>
+
           <!-- Passenger Safety Action Bar (WhatsApp Share & Emergency SOS) -->
           <div class="mt-3.5 pt-3 border-t border-white/10 grid grid-cols-2 gap-2">
             <button type="button" onclick="shareRideDetailsWhatsApp()" class="py-2.5 px-3 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs flex items-center justify-center gap-1.5 transition shadow cursor-pointer active:scale-95">
@@ -2713,6 +2743,25 @@
 
     if (window.lucide) lucide.createIcons();
   }
+
+  window.selectRiderActivePaymentMethod = function (method) {
+    if (!state.activeRiderRequest) return;
+    state.activeRiderRequest.chosenPaymentMethod = method;
+    if (window.db?.matching?.notifyDriverPayment) {
+      window.db.matching.notifyDriverPayment(state.activeRiderRequest.id, {
+        paymentMethod: method,
+        settled: !!state.activeRiderRequest.paymentSettled,
+        fare: state.activeRiderRequest.fare
+      });
+    }
+    renderRiderActiveHUD(state.activeRiderRequest);
+    showToast(`Payment method updated to ${method === 'cash' ? 'Cash in Hand' : 'Direct UPI'}.`, 'info');
+  };
+
+  window.openRiderPaymentModal = function () {
+    if (!state.activeRiderRequest) return;
+    showRidePaymentAndRatingModal(state.activeRiderRequest);
+  };
 
   function handleRiderStatusUpdate(statusData) {
     if (!state.activeRiderRequest) return;
@@ -2919,13 +2968,62 @@
     const target = state.incomingRides.find(r => r.id === rideId);
     if (!target) return;
 
+    // Resolve driver's real registered UPI ID & QR code
+    let activeUpiId = state.driverUpi?.upiId || state.kyc?.submission?.upi_id || state.currentUser?.upi_id || state.currentUser?.upiId || '';
+    let activeUpiQr = state.driverUpi?.upiQr || state.kyc?.submission?.upi_qr || state.currentUser?.upi_qr || '';
+    if (!activeUpiId) {
+      try {
+        const storedKyc = JSON.parse(localStorage.getItem('routemate_driver_kyc') || '{}');
+        if (storedKyc.upi_id) activeUpiId = storedKyc.upi_id;
+        if (storedKyc.upi_qr) activeUpiQr = storedKyc.upi_qr;
+      } catch (e) {}
+    }
+    if (!activeUpiId && state.currentUser?.phone) {
+      const cleanP = String(state.currentUser.phone).replace(/\D/g, '').slice(-10);
+      if (cleanP.length === 10) activeUpiId = `${cleanP}@upi`;
+    }
+
+    const driverPayload = {
+      ...state.currentUser,
+      upi_id: activeUpiId,
+      upiId: activeUpiId,
+      upi_qr: activeUpiQr,
+      upiQr: activeUpiQr,
+      vehicleNumber: state.kyc?.submission?.vehicle_number || state.currentUser?.vehicles?.[0]?.vehicle_number || state.currentUser?.vehicleNumber || 'TG 08 AB 1234',
+      vehicleName: state.kyc?.submission?.vehicle_name || state.currentUser?.vehicles?.[0]?.vehicle_name || state.currentUser?.vehicleName || 'Two-Wheeler / Bike',
+      vehicleType: state.kyc?.submission?.vehicle_type || state.currentUser?.vehicles?.[0]?.vehicle_type || target.vehicleType || 'bike'
+    };
+
     try {
-      const resp = await window.db.matching.acceptRequest(rideId, state.currentUser);
+      const resp = await window.db.matching.acceptRequest(rideId, driverPayload);
       if (resp.success) {
         state.activeDriverTrip = {
           ...target,
-          status: 'driver_accepted'
+          status: 'driver_accepted',
+          driver: driverPayload,
+          paymentMethod: 'upi',
+          paymentSettled: false
         };
+
+        // Listen for realtime payment notification from commuter
+        const client = window.db?.getSupabase?.();
+        if (client) {
+          try {
+            const ch = client.channel(`rider-ride-${target.id}`);
+            ch.on('broadcast', { event: 'rider_payment_ready' }, (msg) => {
+              if (msg.payload && state.activeDriverTrip) {
+                state.activeDriverTrip.paymentSettled = !!msg.payload.settled;
+                state.activeDriverTrip.paymentMethod = msg.payload.paymentMethod || 'upi';
+                renderDriverActiveTripCard();
+                if (msg.payload.settled) {
+                  showToast(`💳 Commuter marked payment settled via ${(msg.payload.paymentMethod || 'upi').toUpperCase()}! Please verify receipt.`, 'info');
+                } else {
+                  showToast(`💳 Commuter selected payment method: ${(msg.payload.paymentMethod || 'upi').toUpperCase()}`, 'info');
+                }
+              }
+            }).subscribe();
+          } catch (e) {}
+        }
 
         // Persist to user ride activity history as driver
         try {
@@ -3013,6 +3111,17 @@
           <p><strong class="text-white">Drop:</strong> ${trip.drop}</p>
         </div>
 
+        <!-- Commuter Payment Settlement Status -->
+        <div class="mt-3 p-2.5 rounded-xl ${trip.paymentSettled ? 'bg-emerald-500/20 border border-emerald-400/30 text-emerald-300' : 'bg-white/10 border border-white/10 text-slate-300'} text-xs font-bold flex items-center justify-between">
+          <span class="flex items-center gap-1.5">
+            <i data-lucide="${(trip.paymentMethod === 'cash') ? 'banknote' : 'smartphone'}" class="w-3.5 h-3.5"></i>
+            <span>Payment Method:</span>
+          </span>
+          <span class="font-black text-white">
+            ${trip.paymentSettled ? `✓ Paid via ${(trip.paymentMethod || 'upi').toUpperCase()}` : (trip.paymentMethod === 'cash' ? '💵 Cash in Hand (Awaiting Drop)' : '📱 Direct UPI / QR')}
+          </span>
+        </div>
+
         <div class="mt-4 pt-3 border-t border-white/10">
           ${!isStarted ? `
             <button type="button" onclick="openPinModal()" class="w-full py-3 btn-pill-primary text-xs flex items-center justify-center gap-2 cursor-pointer">
@@ -3022,7 +3131,7 @@
           ` : `
             <button type="button" onclick="openDriverTripCompletionModal()" class="w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-black rounded-full text-xs flex items-center justify-center gap-2 shadow-lg transition cursor-pointer active:scale-95">
               <i data-lucide="check-check" class="w-4 h-4"></i>
-              <span>Verify Payment & Complete Trip (₹${trip.fare})</span>
+              <span>Payment Done / Complete Ride (₹${trip.fare})</span>
             </button>
           `}
         </div>
@@ -3084,7 +3193,7 @@
     const chk = document.getElementById('driverConfirmPaymentCheckbox');
     if (chk) chk.checked = true;
 
-    selectDriverPaymentMethod('upi');
+    selectDriverPaymentMethod(trip.paymentMethod || 'upi');
     modal.classList.remove('hidden');
     if (window.lucide) lucide.createIcons();
   };
@@ -3200,7 +3309,7 @@
     } finally {
       if (btn) {
         btn.disabled = false;
-        btn.innerHTML = `<i data-lucide="check-check" class="w-4 h-4"></i><span>Driver Confirmed Payment & Complete Trip</span>`;
+        btn.innerHTML = `<i data-lucide="check-check" class="w-4 h-4"></i><span>Payment Done / Complete Ride</span>`;
         if (window.lucide) lucide.createIcons();
       }
     }
@@ -5454,32 +5563,45 @@
     const btn = document.getElementById('btnExecuteWalletRecharge');
     const btnText = document.getElementById('btnExecuteWalletRechargeText');
     if (btn) btn.disabled = true;
-    if (btnText) btnText.textContent = `Processing ₹${finalAmount}...`;
+    if (btnText) btnText.textContent = `Opening Razorpay Gateway...`;
 
     try {
-      showToast(`Initiating instant wallet recharge of ₹${finalAmount}...`, 'info');
+      showToast(`Launching secure Razorpay checkout for ₹${finalAmount}...`, 'info');
 
-      if (window.db?.kyc?.rechargeDriverWallet) {
-        const res = await window.db.kyc.rechargeDriverWallet({
-          userId: user.id,
-          amount: finalAmount
-        });
-
-        if (res && res.wallet_balance !== undefined) {
-          state.wallet.balance = Number(res.wallet_balance);
-          state.wallet.transactions = res.wallet_transactions || state.wallet.transactions;
-        } else {
-          state.wallet.balance = (state.wallet.balance || 0) + finalAmount;
-        }
-
-        updateWalletDisplays();
-        closeDriverWalletRechargeModal();
-        showToast(`🎉 ₹${finalAmount} added to wallet successfully! Balance: ₹${state.wallet.balance.toFixed(2)}`, 'success');
+      if (!window.routematePayment?.initiateWalletRecharge) {
+        throw new Error('Payment gateway SDK not ready. Please refresh the page.');
       }
+
+      await window.routematePayment.initiateWalletRecharge(
+        { amount: finalAmount, user },
+        function onRechargeSuccess(result) {
+          const newBal = result?.creditResult?.newBalance !== undefined 
+            ? Number(result.creditResult.newBalance)
+            : (state.wallet.balance || 0) + finalAmount;
+
+          state.wallet.balance = newBal;
+          if (result?.creditResult?.wallet_transactions) {
+            state.wallet.transactions = result.creditResult.wallet_transactions;
+          }
+
+          updateWalletDisplays();
+          closeDriverWalletRechargeModal();
+          showToast(`🎉 ₹${finalAmount} added to wallet successfully! Balance: ₹${state.wallet.balance.toFixed(2)} (Payment ID: ${result.paymentId})`, 'success');
+
+          if (btn) btn.disabled = false;
+          if (btnText) btnText.textContent = `Pay & Recharge ₹${selectedRechargeAmount}`;
+        },
+        function onRechargeFailure(err) {
+          if (btn) btn.disabled = false;
+          if (btnText) btnText.textContent = `Pay & Recharge ₹${selectedRechargeAmount}`;
+          if (err && err.message && !err.message.includes('cancelled')) {
+            showToast('Recharge failed: ' + err.message, 'danger');
+          }
+        }
+      );
     } catch (err) {
       console.error('Wallet recharge error:', err);
-      showToast('Failed to recharge wallet: ' + err.message, 'danger');
-    } finally {
+      showToast('Failed to open payment gateway: ' + err.message, 'danger');
       if (btn) btn.disabled = false;
       if (btnText) btnText.textContent = `Pay & Recharge ₹${selectedRechargeAmount}`;
     }
@@ -5551,7 +5673,7 @@
     state.ratingState.activeRide = ride;
     state.ratingState.selectedStars = 5;
     state.ratingState.selectedTags = new Set(['Smooth & Safe Ride', 'Polite Driver']);
-    state.ratingState.chosenPaymentMethod = 'upi';
+    state.ratingState.chosenPaymentMethod = ride.chosenPaymentMethod || 'upi';
 
     const modal = document.getElementById('riderPaymentAndRatingModal');
     if (!modal) return;
@@ -5559,7 +5681,17 @@
     const fare = ride.fare || 110;
     const driverName = ride.driver?.name || ride.driverName || 'Verified Driver';
     const driverVehicle = `${ride.driver?.vehicleNumber || 'TG 08 AB 1234'} • ${ride.driver?.vehicleName || ride.vehicleType || 'Corridor Commute'}`;
-    const upiId = ride.driver?.upiId || ride.driver?.upi_id || 'routemate.driver@oksbi';
+
+    // Resolve active driver's actual registered UPI VPA dynamically from database / ride records
+    let upiId = ride.driver?.upiId || ride.driver?.upi_id || ride.upiId || ride.upi_id || '';
+    let driverQr = ride.driver?.upiQr || ride.driver?.upi_qr || ride.upiQr || ride.upi_qr || null;
+
+    if (!upiId && ride.driver?.phone) {
+      const cleanPhone = String(ride.driver.phone).replace(/\D/g, '').slice(-10);
+      if (cleanPhone.length === 10) upiId = `${cleanPhone}@upi`;
+    }
+
+    if (!upiId) upiId = 'driver@upi';
 
     // Populate displays
     const fareEl = document.getElementById('paymentModalFareDisplay');
@@ -5587,22 +5719,56 @@
     if (upiDeepLinkEl) upiDeepLinkEl.href = upiUrl;
 
     // Driver's QR Code or Dynamic UPI QR code
-    const driverQr = ride.driver?.upiQr || ride.driver?.upi_qr || null;
     if (qrImgEl) {
       if (driverQr && (driverQr.startsWith('data:image') || driverQr.startsWith('http'))) {
         qrImgEl.src = driverQr;
       } else {
-        qrImgEl.src = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(upiUrl)}`;
+        qrImgEl.src = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(upiUrl)}`;
       }
     }
 
-    // Default to Payment Step View
+    // Dynamic database fetch fallback: check Supabase profiles for driver's registered UPI ID
+    if (ride.driver?.id && window.db?.getSupabase) {
+      const supa = window.db.getSupabase();
+      if (supa) {
+        supa.from('profiles').select('role,phone').eq('id', ride.driver.id).maybeSingle().then(({ data: pRow }) => {
+          if (pRow) {
+            let meta = {};
+            try {
+              meta = typeof pRow.role === 'string' && pRow.role.startsWith('{') ? JSON.parse(pRow.role) : (pRow.role || {});
+            } catch (e) {}
+            const realUpi = meta.upi_id || (pRow.phone ? `${pRow.phone.replace(/\D/g, '').slice(-10)}@upi` : null);
+            const realQr = meta.upi_qr || null;
+            if (realUpi && realUpi !== upiId) {
+              upiId = realUpi;
+              if (upiTextEl) upiTextEl.textContent = upiId;
+              const newUpiUrl = `upi://pay?pa=${encodeURIComponent(upiId)}&pn=${encodeURIComponent(driverName)}&am=${fare}&cu=INR&tn=${encodeURIComponent('Routemate Fuel Share')}`;
+              if (upiDeepLinkEl) upiDeepLinkEl.href = newUpiUrl;
+              if (qrImgEl) {
+                if (realQr && (realQr.startsWith('data:image') || realQr.startsWith('http'))) {
+                  qrImgEl.src = realQr;
+                } else {
+                  qrImgEl.src = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(newUpiUrl)}`;
+                }
+              }
+            }
+          }
+        }).catch(() => {});
+      }
+    }
+
+    // Step View Selection: If payment was already settled during active trip, jump directly to Rating View
     const stepPay = document.getElementById('paymentModalStepPayment');
     const stepRate = document.getElementById('paymentModalStepRating');
-    if (stepPay) stepPay.classList.remove('hidden');
-    if (stepRate) stepRate.classList.add('hidden');
+    if (ride.paymentSettled && (ride.status === 'ride_completed' || ride.status === 'completed')) {
+      if (stepPay) stepPay.classList.add('hidden');
+      if (stepRate) stepRate.classList.remove('hidden');
+    } else {
+      if (stepPay) stepPay.classList.remove('hidden');
+      if (stepRate) stepRate.classList.add('hidden');
+    }
 
-    switchPaymentOption('upi');
+    switchPaymentOption(state.ratingState.chosenPaymentMethod);
     selectStarRating(5);
 
     modal.classList.remove('hidden');
@@ -5652,6 +5818,26 @@
 
   window.proceedToRatingStep = function (method) {
     state.ratingState.chosenPaymentMethod = method || 'upi';
+
+    // If active ride is STILL OPEN (waiting for driver verification & completion):
+    if (state.activeRiderRequest && state.activeRiderRequest.status !== 'ride_completed' && state.activeRiderRequest.status !== 'completed') {
+      state.activeRiderRequest.paymentSettled = true;
+      state.activeRiderRequest.chosenPaymentMethod = method;
+
+      if (window.db?.matching?.notifyDriverPayment) {
+        window.db.matching.notifyDriverPayment(state.activeRiderRequest.id, {
+          paymentMethod: method,
+          settled: true,
+          fare: state.activeRiderRequest.fare
+        });
+      }
+
+      closeRidePaymentAndRatingModal();
+      renderRiderActiveHUD(state.activeRiderRequest);
+      showToast(`✅ Payment marked settled via ${method.toUpperCase()}! The trip will close once verified by your driver.`, 'success');
+      return;
+    }
+
     const stepPay = document.getElementById('paymentModalStepPayment');
     const stepRate = document.getElementById('paymentModalStepRating');
     if (stepPay) stepPay.classList.add('hidden');
