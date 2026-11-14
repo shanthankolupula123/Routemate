@@ -204,6 +204,11 @@
                 if (parsed.gender && !sessionUser.gender) sessionUser.gender = parsed.gender;
                 if (parsed.dob && !sessionUser.dob) sessionUser.dob = parsed.dob;
                 if (parsed.role && !sessionUser.role) sessionUser.role = parsed.role;
+                if (parsed.upi_id && !sessionUser.upi_id) sessionUser.upi_id = parsed.upi_id;
+                if (parsed.kyc_status && !sessionUser.kyc_status) sessionUser.kyc_status = parsed.kyc_status;
+                if (parsed.wallet_balance !== undefined && sessionUser.wallet_balance === undefined) sessionUser.wallet_balance = parsed.wallet_balance;
+                if (parsed.wallet_transactions && !sessionUser.wallet_transactions) sessionUser.wallet_transactions = parsed.wallet_transactions;
+                if (parsed.vehicles && !sessionUser.vehicles) sessionUser.vehicles = parsed.vehicles;
               }
             }
           } catch (e) {}
@@ -216,20 +221,38 @@
       window.db.auth.onAuthStateChange(async (event, session) => {
         console.log('👤 [AUTH EVENT]:', event);
         if (session && session.user) {
+          // If session token refreshed and user is already active, do not interrupt UI
+          if (event === 'TOKEN_REFRESHED' && state.currentUser && (state.currentUser.id === session.user.id || (state.currentUser.email && state.currentUser.email.toLowerCase() === (session.user.email || '').toLowerCase()))) {
+            console.log('🔄 [AUTH] Token refreshed smoothly for active session:', session.user.email);
+            return;
+          }
+
           const userObj = normalizeAuthUser(session.user);
+          // Recover existing profile data from current state or localStorage
+          const cached = state.currentUser || null;
+          let savedUser = null;
           try {
             const saved = localStorage.getItem('routemate_user');
-            if (saved) {
-              const parsed = JSON.parse(saved);
-              if (parsed && (parsed.id === userObj.id || (parsed.email && parsed.email.toLowerCase() === (userObj.email || '').toLowerCase()))) {
-                if (parsed.phone && !userObj.phone) userObj.phone = parsed.phone;
-                if (parsed.name && (!userObj.name || userObj.name === 'User')) userObj.name = parsed.name;
-                if (parsed.gender && !userObj.gender) userObj.gender = parsed.gender;
-                if (parsed.dob && !userObj.dob) userObj.dob = parsed.dob;
-                if (parsed.role && !userObj.role) userObj.role = parsed.role;
-              }
-            }
+            if (saved) savedUser = JSON.parse(saved);
           } catch (e) {}
+
+          const source = (cached && (cached.id === userObj.id || (cached.email && cached.email.toLowerCase() === (userObj.email || '').toLowerCase())))
+            ? cached
+            : ((savedUser && (savedUser.id === userObj.id || (savedUser.email && savedUser.email.toLowerCase() === (userObj.email || '').toLowerCase()))) ? savedUser : null);
+
+          if (source) {
+            if (source.phone && !userObj.phone) userObj.phone = source.phone;
+            if (source.name && (!userObj.name || userObj.name === 'User')) userObj.name = source.name;
+            if (source.gender && !userObj.gender) userObj.gender = source.gender;
+            if (source.dob && !userObj.dob) userObj.dob = source.dob;
+            if (source.role && !userObj.role) userObj.role = source.role;
+            if (source.upi_id && !userObj.upi_id) userObj.upi_id = source.upi_id;
+            if (source.kyc_status && !userObj.kyc_status) userObj.kyc_status = source.kyc_status;
+            if (source.wallet_balance !== undefined && userObj.wallet_balance === undefined) userObj.wallet_balance = source.wallet_balance;
+            if (source.wallet_transactions && !userObj.wallet_transactions) userObj.wallet_transactions = source.wallet_transactions;
+            if (source.vehicles && !userObj.vehicles) userObj.vehicles = source.vehicles;
+          }
+
           await handleAuthUserFlow(userObj, event === 'SIGNED_IN');
         } else if (event === 'SIGNED_OUT') {
           try {
@@ -325,15 +348,35 @@
           if (parsed.gender && !user.gender) user.gender = parsed.gender;
           if (parsed.dob && !user.dob) user.dob = parsed.dob;
           if (parsed.role && !user.role) user.role = parsed.role;
-          if (parsed.upi_id) state.driverUpi.upiId = parsed.upi_id;
+          if (parsed.upi_id) {
+            user.upi_id = parsed.upi_id;
+            state.driverUpi.upiId = parsed.upi_id;
+          }
+          if (parsed.kyc_status) {
+            user.kyc_status = parsed.kyc_status;
+            state.kyc.status = parsed.kyc_status;
+          }
+          if (parsed.wallet_balance !== undefined) {
+            user.wallet_balance = Number(parsed.wallet_balance);
+            state.wallet.balance = Number(parsed.wallet_balance);
+          }
+          if (Array.isArray(parsed.wallet_transactions) && parsed.wallet_transactions.length > 0) {
+            user.wallet_transactions = parsed.wallet_transactions;
+            state.wallet.transactions = parsed.wallet_transactions;
+          }
+          if (Array.isArray(parsed.vehicles) && parsed.vehicles.length > 0) {
+            user.vehicles = parsed.vehicles;
+            state.kyc.vehicles = parsed.vehicles;
+          }
         }
       }
     } catch (e) {}
 
     // 2. Query Supabase `profiles` table using User ID or Email
+    let dbProfile = null;
     try {
       if (window.db?.auth?.getUserProfile) {
-        const dbProfile = await window.db.auth.getUserProfile(user.id, user.email);
+        dbProfile = await window.db.auth.getUserProfile(user.id, user.email);
         if (dbProfile) {
           if (dbProfile.id) user.id = dbProfile.id;
           const dbPhoneDigits = String(dbProfile.phone || '').replace(/\D/g, '');
@@ -351,29 +394,60 @@
             user.upi_id = dbProfile.upi_id;
             state.driverUpi.upiId = dbProfile.upi_id;
           }
+          if (dbProfile.kyc_status) {
+            user.kyc_status = dbProfile.kyc_status;
+            state.kyc.status = dbProfile.kyc_status;
+          }
+          if (dbProfile.wallet_balance !== undefined) {
+            user.wallet_balance = Number(dbProfile.wallet_balance);
+            state.wallet.balance = Number(dbProfile.wallet_balance);
+          }
+          if (Array.isArray(dbProfile.wallet_transactions) && dbProfile.wallet_transactions.length > 0) {
+            user.wallet_transactions = dbProfile.wallet_transactions;
+            state.wallet.transactions = dbProfile.wallet_transactions;
+          }
+          if (Array.isArray(dbProfile.vehicles) && dbProfile.vehicles.length > 0) {
+            user.vehicles = dbProfile.vehicles;
+            state.kyc.vehicles = dbProfile.vehicles;
+          }
+          if (typeof updateWalletDisplays === 'function') updateWalletDisplays();
         }
       }
     } catch (e) {
       console.warn('Profile DB check notice:', e);
     }
 
-    // 2b. Fallback check to Driver KYC table if phone is still missing
+    // 2b. Fallback check to Driver KYC table if phone or KYC is still missing
     const phoneDigitsSoFar = String(user.phone || '').replace(/\D/g, '');
-    if (phoneDigitsSoFar.length < 10 && window.db?.kyc?.getDriverKyc) {
+    if ((phoneDigitsSoFar.length < 10 || !user.kyc_status) && window.db?.kyc?.getDriverKyc) {
       try {
         const kycCheck = await window.db.kyc.getDriverKyc(user.id, user.email);
-        if (kycCheck?.driver_phone) {
-          const kycPhoneDigits = String(kycCheck.driver_phone).replace(/\D/g, '');
-          if (kycPhoneDigits.length >= 10) {
-            user.phone = kycCheck.driver_phone;
+        const kSub = kycCheck?.submission || kycCheck;
+        if (kSub?.driver_phone) {
+          const kycPhoneDigits = String(kSub.driver_phone).replace(/\D/g, '');
+          if (kycPhoneDigits.length >= 10 && phoneDigitsSoFar.length < 10) {
+            user.phone = kSub.driver_phone;
           }
         }
-        if (kycCheck?.driver_name && (!user.name || user.name === 'User' || user.name.includes('@'))) {
-          user.name = kycCheck.driver_name;
+        if (kSub?.driver_name && (!user.name || user.name === 'User' || user.name.includes('@'))) {
+          user.name = kSub.driver_name;
         }
-        if (kycCheck?.upi_id) {
-          user.upi_id = kycCheck.upi_id;
-          state.driverUpi.upiId = kycCheck.upi_id;
+        if (kSub?.upi_id || kycCheck?.upi?.id) {
+          user.upi_id = kSub?.upi_id || kycCheck?.upi?.id;
+          state.driverUpi.upiId = user.upi_id;
+        }
+        if (kSub?.status || kycCheck?.status) {
+          user.kyc_status = kSub?.status || kycCheck?.status;
+          state.kyc.status = user.kyc_status;
+        }
+        const kBal = (kycCheck?.wallet?.balance !== undefined) ? kycCheck.wallet.balance : kSub?.wallet_balance;
+        if (kBal !== undefined && user.wallet_balance === undefined) {
+          user.wallet_balance = Number(kBal);
+          state.wallet.balance = Number(kBal);
+        }
+        if (Array.isArray(kSub?.vehicles) && kSub.vehicles.length > 0 && (!user.vehicles || user.vehicles.length === 0)) {
+          user.vehicles = kSub.vehicles;
+          state.kyc.vehicles = kSub.vehicles;
         }
       } catch (e) {}
     }
@@ -390,17 +464,21 @@
       return;
     }
 
-    // If Profile Exists (Name & Phone Number are already saved):
-    // Permanently store in localStorage, sync to Supabase, close modal, and route directly to main app dashboard
-    if (window.db?.auth?.saveUserProfile && user.phone && user.name) {
+    // Returning authenticated user: profile is already present in DB
+    // Only perform an initial DB sync if this user has NO record in Supabase profiles yet
+    if (!dbProfile && window.db?.auth?.saveUserProfile && user.phone && user.name) {
       window.db.auth.saveUserProfile(user.id, {
         name: user.name,
         phone: user.phone,
         email: user.email,
         gender: user.gender,
         dob: user.dob,
-        upiId: user.upi_id
-      }).catch(e => console.warn('Background profile sync notice:', e));
+        upiId: user.upi_id,
+        kycStatus: state.kyc.status || user.kyc_status,
+        walletBalance: state.wallet.balance,
+        walletTransactions: state.wallet.transactions,
+        vehicles: state.kyc.vehicles || user.vehicles
+      }).catch(e => console.warn('Initial profile sync notice:', e));
     }
 
     try {
@@ -408,6 +486,7 @@
     } catch (e) {}
 
     closeProfileCompletionModal();
+    state.pendingCompletionUser = null;
     unlockAppWithUser(user, isNewSignIn);
   }
 
@@ -525,14 +604,19 @@
       showToast('Saving profile details...', 'info');
 
       // 1. Save to Supabase profiles table & Auth Metadata
+      let saved = null;
       if (window.db?.auth?.saveUserProfile) {
-        const saved = await window.db.auth.saveUserProfile(user.id, {
+        saved = await window.db.auth.saveUserProfile(user.id, {
           name: fullName,
           phone: formattedPhone,
           email: user.email,
           gender,
           dob,
-          upiId: rawUpi
+          upiId: rawUpi,
+          kycStatus: state.kyc.status || user.kyc_status,
+          walletBalance: state.wallet.balance,
+          walletTransactions: state.wallet.transactions,
+          vehicles: state.kyc.vehicles || user.vehicles
         });
         if (saved && saved.id) {
           user.id = saved.id;
@@ -547,6 +631,24 @@
       if (rawUpi) {
         user.upi_id = rawUpi;
         state.driverUpi.upiId = rawUpi;
+      }
+      if (saved) {
+        if (saved.kyc_status) {
+          user.kyc_status = saved.kyc_status;
+          state.kyc.status = saved.kyc_status;
+        }
+        if (saved.wallet_balance !== undefined) {
+          user.wallet_balance = Number(saved.wallet_balance);
+          state.wallet.balance = Number(saved.wallet_balance);
+        }
+        if (Array.isArray(saved.wallet_transactions) && saved.wallet_transactions.length > 0) {
+          user.wallet_transactions = saved.wallet_transactions;
+          state.wallet.transactions = saved.wallet_transactions;
+        }
+        if (Array.isArray(saved.vehicles) && saved.vehicles.length > 0) {
+          user.vehicles = saved.vehicles;
+          state.kyc.vehicles = saved.vehicles;
+        }
       }
       user.avatar = getInitialsAvatarSvg(fullName, 120);
 

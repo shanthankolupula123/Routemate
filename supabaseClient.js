@@ -371,6 +371,17 @@
         const parsedPhone = extra.phone || (!row.phone || row.phone.includes('@') ? '' : row.phone);
         const parsedName = row.name && row.name !== 'User' ? row.name : (extra.name || '');
         const parsedRole = extra.role || (row.role && !row.role.startsWith('{') ? row.role : 'Daily Commuter');
+        const kycStatus = extra.kyc_status || (row.is_verified ? 'approved' : 'not_submitted');
+        const walletBal = extra.wallet_balance !== undefined ? Number(extra.wallet_balance) : (row.wallet_balance !== undefined ? Number(row.wallet_balance) : (kycStatus === 'approved' ? 100 : 0));
+        const walletTxs = (Array.isArray(extra.wallet_transactions) && extra.wallet_transactions.length > 0)
+          ? extra.wallet_transactions
+          : (Array.isArray(row.wallet_transactions) ? row.wallet_transactions : []);
+        const vehiclesList = (Array.isArray(extra.vehicles) && extra.vehicles.length > 0)
+          ? extra.vehicles
+          : (Array.isArray(row.vehicles) ? row.vehicles : []);
+        const bonusCredited = (extra.welcome_bonus_credited !== undefined)
+          ? extra.welcome_bonus_credited
+          : (row.welcome_bonus_credited !== undefined ? row.welcome_bonus_credited : (kycStatus === 'approved'));
 
         return {
           id: row.id,
@@ -384,12 +395,21 @@
           total_rides: row.total_rides || 0,
           avatar_url: row.avatar_url || null,
           is_verified: row.is_verified !== false,
-          upi_id: extra.upi_id || ''
+          upi_id: extra.upi_id || '',
+          kyc_status: kycStatus,
+          wallet_balance: walletBal,
+          wallet_transactions: walletTxs,
+          welcome_bonus_credited: bonusCredited,
+          vehicles: vehiclesList,
+          settings: extra.settings || {},
+          _rawMeta: extra
         };
       };
 
       try {
-        // 1. Query by UUID if valid
+        let profile = null;
+
+        // 1. Query by UUID if valid (auth.uid())
         if (userId && isUUID(userId)) {
           const resp = await fetch(`${SUPABASE_CONFIG.url}/rest/v1/profiles?id=eq.${encodeURIComponent(userId)}&select=*&limit=1`, {
             method: 'GET',
@@ -400,12 +420,12 @@
           });
           if (resp.ok) {
             const rows = await resp.json();
-            if (rows && rows.length > 0) return unpackProfile(rows[0]);
+            if (rows && rows.length > 0) profile = unpackProfile(rows[0]);
           }
         }
 
         // 2. Query by email in phone column (legacy records store email in phone)
-        if (cleanEmail) {
+        if (!profile && cleanEmail) {
           const resp = await fetch(`${SUPABASE_CONFIG.url}/rest/v1/profiles?phone=eq.${encodeURIComponent(cleanEmail)}&select=*&limit=1`, {
             method: 'GET',
             headers: {
@@ -415,10 +435,12 @@
           });
           if (resp.ok) {
             const rows = await resp.json();
-            if (rows && rows.length > 0) return unpackProfile(rows[0]);
+            if (rows && rows.length > 0) profile = unpackProfile(rows[0]);
           }
+        }
 
-          // 3. Query by email inside role JSON
+        // 3. Query by email inside role JSON
+        if (!profile && cleanEmail) {
           const respRole = await fetch(`${SUPABASE_CONFIG.url}/rest/v1/profiles?role=ilike.*${encodeURIComponent(cleanEmail)}*&select=*&limit=1`, {
             method: 'GET',
             headers: {
@@ -428,42 +450,66 @@
           });
           if (respRole.ok) {
             const rows = await respRole.json();
-            if (rows && rows.length > 0) return unpackProfile(rows[0]);
+            if (rows && rows.length > 0) profile = unpackProfile(rows[0]);
           }
         }
 
-        // 4. Fallback check in driver_kyc table by email or userId
+        // 4. Enrich or Fallback check in driver_kyc (API gateway or table)
         if (cleanEmail || (userId && isUUID(userId))) {
-          const kycFilter = cleanEmail
-            ? `driver_email=eq.${encodeURIComponent(cleanEmail)}`
-            : `user_id=eq.${encodeURIComponent(userId)}`;
-          const respKyc = await fetch(`${SUPABASE_CONFIG.url}/rest/v1/driver_kyc?${kycFilter}&select=*&order=submitted_at.desc&limit=1`, {
-            method: 'GET',
-            headers: {
-              'apikey': SUPABASE_CONFIG.publishableKey,
-              'Authorization': `Bearer ${SUPABASE_CONFIG.publishableKey}`
+          try {
+            const kycResp = await kyc.getDriverKyc(userId, cleanEmail);
+            const kSub = kycResp?.submission || kycResp;
+            const kStatus = kycResp?.status || kSub?.status;
+            if (kStatus && kStatus !== 'not_submitted') {
+              if (!profile) {
+                profile = {
+                  id: kSub?.user_id || userId || kSub?.id,
+                  name: kSub?.driver_name || '',
+                  phone: kSub?.driver_phone || '',
+                  email: kSub?.driver_email || cleanEmail,
+                  role: 'Driver / Commuter',
+                  rating: 5.0,
+                  total_rides: 0,
+                  avatar_url: kSub?.driver_photo || null,
+                  is_verified: kStatus === 'approved',
+                  kyc_status: kStatus,
+                  upi_id: kSub?.upi_id || kycResp?.upi?.id || '',
+                  wallet_balance: (kycResp?.wallet?.balance !== undefined) ? Number(kycResp.wallet.balance) : ((kSub?.wallet_balance !== undefined) ? Number(kSub.wallet_balance) : (kStatus === 'approved' ? 100 : 0)),
+                  wallet_transactions: (Array.isArray(kycResp?.wallet?.transactions) && kycResp.wallet.transactions.length > 0) ? kycResp.wallet.transactions : (Array.isArray(kSub?.wallet_transactions) ? kSub.wallet_transactions : []),
+                  vehicles: (Array.isArray(kycResp?.vehicles) && kycResp.vehicles.length > 0) ? kycResp.vehicles : (Array.isArray(kSub?.vehicles) ? kSub.vehicles : []),
+                  welcome_bonus_credited: kycResp?.wallet?.welcomeBonusCredited !== undefined ? kycResp.wallet.welcomeBonusCredited : Boolean(kSub?.welcome_bonus_credited),
+                  settings: {},
+                  _rawMeta: {}
+                };
+              } else {
+                // Enrich existing profile with KYC and wallet records
+                if (!profile.kyc_status || profile.kyc_status === 'not_submitted') {
+                  profile.kyc_status = kStatus;
+                }
+                if (kStatus === 'approved') profile.is_verified = true;
+                if (!profile.upi_id && (kSub?.upi_id || kycResp?.upi?.id)) {
+                  profile.upi_id = kSub?.upi_id || kycResp?.upi?.id;
+                }
+                const kBal = (kycResp?.wallet?.balance !== undefined) ? Number(kycResp.wallet.balance) : ((kSub?.wallet_balance !== undefined) ? Number(kSub.wallet_balance) : undefined);
+                if (profile.wallet_balance === undefined && kBal !== undefined) {
+                  profile.wallet_balance = kBal;
+                }
+                const kTxs = (Array.isArray(kycResp?.wallet?.transactions) && kycResp.wallet.transactions.length > 0) ? kycResp.wallet.transactions : (Array.isArray(kSub?.wallet_transactions) && kSub.wallet_transactions.length > 0 ? kSub.wallet_transactions : null);
+                if ((!profile.wallet_transactions || profile.wallet_transactions.length === 0) && kTxs) {
+                  profile.wallet_transactions = kTxs;
+                }
+                const kVehs = (Array.isArray(kycResp?.vehicles) && kycResp.vehicles.length > 0) ? kycResp.vehicles : (Array.isArray(kSub?.vehicles) && kSub.vehicles.length > 0 ? kSub.vehicles : null);
+                if ((!profile.vehicles || profile.vehicles.length === 0) && kVehs) {
+                  profile.vehicles = kVehs;
+                }
+              }
             }
-          });
-          if (respKyc.ok) {
-            const kRows = await respKyc.json();
-            if (kRows && kRows.length > 0) {
-              const k = kRows[0];
-              return {
-                id: k.user_id || k.id,
-                name: k.driver_name || '',
-                phone: k.driver_phone || '',
-                email: k.driver_email || cleanEmail,
-                role: 'Driver / Commuter',
-                rating: 5.0,
-                total_rides: 0,
-                avatar_url: k.driver_photo || null,
-                is_verified: k.status === 'approved',
-                kyc_status: k.status,
-                upi_id: k.upi_id || ''
-              };
-            }
+          } catch (kycErr) {
+            console.warn('KYC check note in getUserProfile:', kycErr.message);
           }
         }
+
+        if (profile) return profile;
       } catch (e) {
         console.warn('⚠️ [SUPABASE PROFILES] Fetch error:', e);
       }
@@ -472,13 +518,12 @@
 
     /**
      * Upsert user profile to Supabase profiles table & Auth metadata
+     * Merges non-destructively so no wallet balance, KYC status, or settings are ever lost.
      */
-    async saveUserProfile(userId, { name, phone, email, gender, dob, upiId }) {
+    async saveUserProfile(userId, updates = {}) {
+      const { name, phone, email, gender, dob, upiId, upi_id, kycStatus, kyc_status, walletBalance, wallet_balance, walletTransactions, wallet_transactions, vehicles, welcomeBonusCredited, welcome_bonus_credited, settings } = updates;
       if (!userId && !email) throw new Error('User ID or Email is required');
-      const cleanName = String(name || '').trim();
-      const cleanPhone = String(phone || '').trim();
       const cleanEmail = String(email || '').trim().toLowerCase();
-      const cleanUpi = String(upiId || '').trim();
       const isUUID = (str) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(str || ''));
 
       // Check if user already has an existing row in Supabase
@@ -487,20 +532,40 @@
         existingProfile = await this.getUserProfile(userId, cleanEmail);
       } catch (e) {}
 
+      const existingMeta = (existingProfile && existingProfile._rawMeta) || {};
+      const cleanName = String(name || existingProfile?.name || '').trim();
+      const cleanPhone = String(phone || existingProfile?.phone || '').trim();
+      const cleanUpi = String(upiId || upi_id || existingProfile?.upi_id || existingMeta.upi_id || '').trim();
+      const userGender = gender !== undefined ? gender : (existingProfile?.gender || existingMeta.gender || '');
+      const userDob = dob !== undefined ? dob : (existingProfile?.dob || existingMeta.dob || '');
+      const finalKycStatus = kycStatus || kyc_status || existingProfile?.kyc_status || existingMeta.kyc_status || (existingProfile?.is_verified ? 'approved' : 'not_submitted');
+      const finalWalletBalance = (walletBalance !== undefined) ? Number(walletBalance) : ((wallet_balance !== undefined) ? Number(wallet_balance) : ((existingProfile?.wallet_balance !== undefined) ? Number(existingProfile.wallet_balance) : (existingMeta.wallet_balance !== undefined ? Number(existingMeta.wallet_balance) : 0)));
+      const finalTransactions = (Array.isArray(walletTransactions) && walletTransactions.length > 0) ? walletTransactions : (Array.isArray(wallet_transactions) && wallet_transactions.length > 0 ? wallet_transactions : (Array.isArray(existingProfile?.wallet_transactions) && existingProfile.wallet_transactions.length > 0 ? existingProfile.wallet_transactions : (Array.isArray(existingMeta.wallet_transactions) ? existingMeta.wallet_transactions : [])));
+      const finalVehicles = (Array.isArray(vehicles) && vehicles.length > 0) ? vehicles : (Array.isArray(existingProfile?.vehicles) && existingProfile.vehicles.length > 0 ? existingProfile.vehicles : (Array.isArray(existingMeta.vehicles) ? existingMeta.vehicles : []));
+      const finalBonusCredited = (welcomeBonusCredited !== undefined) ? welcomeBonusCredited : ((welcome_bonus_credited !== undefined) ? welcome_bonus_credited : (existingProfile?.welcome_bonus_credited !== undefined ? existingProfile.welcome_bonus_credited : Boolean(existingMeta.welcome_bonus_credited)));
+      const finalSettings = settings || existingProfile?.settings || existingMeta.settings || {};
+
       const metaObj = {
-        role: 'Daily Commuter',
-        email: cleanEmail,
-        phone: cleanPhone,
-        gender: gender || '',
-        dob: dob || '',
-        upi_id: cleanUpi || ''
+        ...existingMeta,
+        role: existingMeta.role || existingProfile?.role || 'Daily Commuter',
+        email: cleanEmail || existingMeta.email || '',
+        phone: cleanPhone || existingMeta.phone || '',
+        gender: userGender,
+        dob: userDob,
+        upi_id: cleanUpi,
+        kyc_status: finalKycStatus,
+        wallet_balance: finalWalletBalance,
+        wallet_transactions: finalTransactions,
+        vehicles: finalVehicles,
+        welcome_bonus_credited: finalBonusCredited,
+        settings: finalSettings
       };
 
       const payload = {
         name: cleanName,
         phone: cleanPhone,
         role: JSON.stringify(metaObj),
-        is_verified: true
+        is_verified: finalKycStatus === 'approved' || existingProfile?.is_verified === true
       };
 
       let finalId = (existingProfile && existingProfile.id) || (userId && isUUID(userId) ? userId : null);
@@ -519,7 +584,7 @@
             body: JSON.stringify(payload)
           });
           if (resp.ok) {
-            console.log('✅ [SUPABASE PROFILES] Successfully updated profile row:', existingProfile.id);
+            console.log('✅ [SUPABASE PROFILES] Successfully updated profile row without overwriting metadata:', existingProfile.id);
           }
         } else {
           const insertPayload = { ...payload };
@@ -554,8 +619,8 @@
             name: cleanName,
             full_name: cleanName,
             phone: cleanPhone,
-            gender: gender || '',
-            dob: dob || ''
+            gender: userGender,
+            dob: userDob
           };
           if (cleanUpi) metaPayload.upi_id = cleanUpi;
           await client.auth.updateUser({
@@ -580,9 +645,17 @@
         name: cleanName,
         phone: cleanPhone,
         email: cleanEmail,
-        gender: gender || '',
-        dob: dob || '',
-        upiId: cleanUpi
+        gender: userGender,
+        dob: userDob,
+        upi_id: cleanUpi,
+        upiId: cleanUpi,
+        kyc_status: finalKycStatus,
+        wallet_balance: finalWalletBalance,
+        wallet_transactions: finalTransactions,
+        vehicles: finalVehicles,
+        welcome_bonus_credited: finalBonusCredited,
+        is_verified: payload.is_verified,
+        _rawMeta: metaObj
       };
     },
 
