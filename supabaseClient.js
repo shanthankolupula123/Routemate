@@ -1809,6 +1809,23 @@
           });
         } catch (e) {}
       }
+
+      // Also persist payment settlement metadata in Supabase rides table
+      try {
+        await supabaseRest(`rides?vehicle_number=eq.${encodeURIComponent(requestId)}`, {
+          method: 'PATCH',
+          body: {
+            notes: JSON.stringify({
+              isRequest: true,
+              paymentSettled: true,
+              paymentMethod: paymentInfo.paymentMethod || 'upi',
+              settledAt: new Date().toISOString(),
+              ...paymentInfo
+            })
+          }
+        });
+      } catch (e) {}
+
       return { success: true };
     },
 

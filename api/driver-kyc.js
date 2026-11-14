@@ -151,7 +151,7 @@ module.exports = async (req, res) => {
 
             if (hasRealSubmission) {
               const matched = allSubmissions.find(s => s.user_id === p.id || s.id === p.id || (pEmail && s.driver_email === pEmail));
-              const computedStatus = isAdmin ? 'approved' : (extra.kyc_status || 'pending');
+              const computedStatus = (extra.kyc_status === 'suspended') ? 'suspended' : (isAdmin ? 'approved' : (extra.kyc_status || 'pending'));
               if (!matched) {
                 allSubmissions.push({
                   id: p.id,
@@ -172,6 +172,9 @@ module.exports = async (req, res) => {
                   vehicle_type: extra.vehicle_type || 'bike',
                   rc_photo: extra.rc_photo || '',
                   status: computedStatus,
+                  rejection_reason: extra.suspension_reason || extra.rejection_reason || null,
+                  warning_alert: extra.warning_alert || null,
+                  warning_count: extra.warning_count || (Array.isArray(extra.warnings) ? extra.warnings.length : 0),
                   wallet_balance: extra.wallet_balance !== undefined ? extra.wallet_balance : (computedStatus === 'approved' ? 100 : 0),
                   welcome_bonus_credited: computedStatus === 'approved',
                   wallet_transactions: extra.wallet_transactions || (computedStatus === 'approved' ? [
@@ -286,10 +289,26 @@ module.exports = async (req, res) => {
       // Strict Unverified / Genuine State:
       // If no genuine KYC submission with real documents exists, status is strictly 'not_submitted'.
       // Adding money to the wallet never alters this status and never requires admin approval!
-      const finalStatus = userSub ? (userSub.status || 'not_submitted') : 'not_submitted';
+      const finalStatus = userSub ? (userSub.status || 'not_submitted') : (queriedProfileExtra?.kyc_status === 'suspended' ? 'suspended' : 'not_submitted');
+      
+      const resolvedSubmission = userSub || (queriedProfileExtra ? {
+        id: queriedProfileRow?.id || userId,
+        user_id: queriedProfileRow?.id || userId,
+        status: finalStatus,
+        rejection_reason: queriedProfileExtra.suspension_reason || queriedProfileExtra.rejection_reason || null,
+        warning_alert: queriedProfileExtra.warning_alert || null,
+        warning_count: queriedProfileExtra.warning_count || (Array.isArray(queriedProfileExtra.warnings) ? queriedProfileExtra.warnings.length : 0)
+      } : null);
+
+      if (userSub && queriedProfileExtra) {
+        if (!userSub.warning_alert && queriedProfileExtra.warning_alert) userSub.warning_alert = queriedProfileExtra.warning_alert;
+        if (!userSub.warning_count && queriedProfileExtra.warning_count) userSub.warning_count = queriedProfileExtra.warning_count;
+        if (queriedProfileExtra.suspension_reason && !userSub.rejection_reason) userSub.rejection_reason = queriedProfileExtra.suspension_reason;
+      }
+
       return res.status(200).json({
         success: true,
-        submission: userSub || null,
+        submission: resolvedSubmission,
         vehicles: userSub ? (userSub.vehicles || []) : (queriedProfileExtra?.vehicles || []),
         wallet: {
           balance: resolvedBalance,
@@ -758,33 +777,103 @@ module.exports = async (req, res) => {
       const idx = list.findIndex(s => s.id === targetId || s.user_id === targetId);
 
       if (idx !== -1) {
-        if (actionType === 'block') {
-          list[idx].status = 'rejected';
-          list[idx].rejection_reason = `Driver account blocked by Super Admin due to safety violations: ${notes || 'Rash driving / passenger complaints'}`;
+        if (actionType === 'block' || actionType === 'suspend') {
+          list[idx].status = 'suspended';
+          list[idx].rejection_reason = notes || 'Driver account suspended by Super Admin due to safety compliance report';
         } else if (actionType === 'warning') {
           list[idx].warning_count = (list[idx].warning_count || 0) + 1;
-        } else if (actionType === 'unblock') {
+          list[idx].warning_alert = { notes: notes || 'Official Safety Warning', issuedAt: new Date().toISOString() };
+        } else if (actionType === 'unblock' || actionType === 'unsuspend') {
           list[idx].status = 'approved';
           list[idx].rejection_reason = null;
+          list[idx].warning_alert = null;
         }
         saveStore(list);
       }
 
-      // Update Supabase
+      // Update Supabase `profiles` table
       try {
-        await fetch(`${SUPABASE_URL}/rest/v1/driver_kyc?or=(id.eq.${encodeURIComponent(targetId)},user_id.eq.${encodeURIComponent(targetId)})`, {
-          method: 'PATCH',
-          headers: {
-            'apikey': SUPABASE_KEY,
-            'Authorization': `Bearer ${SUPABASE_KEY}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            status: actionType === 'block' ? 'rejected' : (actionType === 'unblock' ? 'approved' : undefined),
-            rejection_reason: actionType === 'block' ? `Driver account blocked by Super Admin: ${notes || 'Safety violations'}` : (actionType === 'unblock' ? null : undefined)
-          })
+        const profRes = await fetch(`${SUPABASE_URL}/rest/v1/profiles?or=(id.eq.${encodeURIComponent(targetId)},phone.eq.${encodeURIComponent(targetId)},role.ilike.*${encodeURIComponent(targetId)}*)&select=*&limit=1`, {
+          headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` }
         });
-      } catch (e) {}
+        if (profRes.ok) {
+          const rows = await profRes.json();
+          if (rows && rows.length > 0) {
+            const pRow = rows[0];
+            let meta = {};
+            try {
+              if (typeof pRow.role === 'string' && (pRow.role.startsWith('{') || pRow.role.includes('{'))) {
+                meta = JSON.parse(pRow.role);
+              }
+            } catch (e) {}
+
+            if (actionType === 'block' || actionType === 'suspend') {
+              meta.kyc_status = 'suspended';
+              meta.is_suspended = true;
+              meta.suspension_reason = notes || 'Driver account suspended due to passenger safety report.';
+              meta.suspended_at = new Date().toISOString();
+              meta.suspended_by = cleanAdmin;
+              if (meta.vehicles) {
+                meta.vehicles.forEach(v => { v.status = 'suspended'; });
+              }
+              await fetch(`${SUPABASE_URL}/rest/v1/profiles?id=eq.${encodeURIComponent(pRow.id)}`, {
+                method: 'PATCH',
+                headers: {
+                  'apikey': SUPABASE_KEY,
+                  'Authorization': `Bearer ${SUPABASE_KEY}`,
+                  'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                  role: JSON.stringify(meta),
+                  is_verified: false
+                })
+              });
+            } else if (actionType === 'warning') {
+              const warningObj = {
+                id: 'warn_' + Date.now().toString(36),
+                notes: notes || 'Official Compliance Warning: Please adhere strictly to Routemate safety and speed guidelines.',
+                issuedAt: new Date().toISOString(),
+                issuedBy: cleanAdmin
+              };
+              if (!Array.isArray(meta.warnings)) meta.warnings = [];
+              meta.warnings.unshift(warningObj);
+              meta.warning_count = meta.warnings.length;
+              meta.warning_alert = warningObj;
+
+              await fetch(`${SUPABASE_URL}/rest/v1/profiles?id=eq.${encodeURIComponent(pRow.id)}`, {
+                method: 'PATCH',
+                headers: {
+                  'apikey': SUPABASE_KEY,
+                  'Authorization': `Bearer ${SUPABASE_KEY}`,
+                  'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                  role: JSON.stringify(meta)
+                })
+              });
+            } else if (actionType === 'unblock' || actionType === 'unsuspend') {
+              meta.kyc_status = 'approved';
+              meta.is_suspended = false;
+              meta.suspension_reason = null;
+              meta.warning_alert = null;
+              await fetch(`${SUPABASE_URL}/rest/v1/profiles?id=eq.${encodeURIComponent(pRow.id)}`, {
+                method: 'PATCH',
+                headers: {
+                  'apikey': SUPABASE_KEY,
+                  'Authorization': `Bearer ${SUPABASE_KEY}`,
+                  'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                  role: JSON.stringify(meta),
+                  is_verified: true
+                })
+              });
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('[driver-kyc safety_action] Error patching profile:', e.message);
+      }
 
       return res.status(200).json({
         success: true,

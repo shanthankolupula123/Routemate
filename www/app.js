@@ -741,6 +741,7 @@
 
     // Load Driver KYC, wallet balance, and vehicle registrations immediately
     checkDriverKycStatus(false);
+    listenForDriverSafetyAlerts(user);
 
     // Default to commuter mode (user can freely toggle rider/driver anytime via header slider or bottom nav)
     switchMode('rider');
@@ -2697,31 +2698,32 @@
           </div>
 
           <!-- Active Commuter Live Fuel Share Payment Selection (UPI / Cash) -->
-          <div class="mt-3.5 pt-3 border-t border-white/10 space-y-2">
+          <div class="mt-3.5 pt-3 border-t border-white/10 space-y-2.5">
             <div class="flex items-center justify-between text-xs">
-              <span class="text-slate-300 font-bold">Payment to Driver:</span>
-              <span class="text-emerald-300 font-black">
+              <span class="text-slate-300 font-bold">Fuel Share Payment:</span>
+              <span class="${req.paymentSettled ? 'text-emerald-300' : 'text-cyan-300'} font-black text-xs">
                 ${req.paymentSettled ? '✓ Payment Settled' : (req.chosenPaymentMethod === 'cash' ? '💵 Cash in Hand' : '📱 Direct UPI / QR')}
               </span>
             </div>
             <div class="grid grid-cols-2 gap-2 text-xs">
-              <button type="button" onclick="selectRiderActivePaymentMethod('upi')" class="py-2 px-2.5 rounded-xl font-bold transition flex items-center justify-center gap-1.5 cursor-pointer ${req.chosenPaymentMethod !== 'cash' ? 'bg-cyan-500 text-slate-950 font-black shadow' : 'bg-white/10 hover:bg-white/20 text-white'}">
-                <i data-lucide="smartphone" class="w-3.5 h-3.5"></i>
+              <button type="button" onclick="selectRiderActivePaymentMethod('upi')" class="py-2.5 px-2.5 rounded-xl font-black transition flex items-center justify-center gap-1.5 cursor-pointer ${req.chosenPaymentMethod !== 'cash' ? 'bg-cyan-400 text-slate-950 font-black shadow-md' : 'bg-white/10 hover:bg-white/20 text-white'}">
+                <i data-lucide="smartphone" class="w-4 h-4"></i>
                 <span>Direct UPI / QR</span>
               </button>
-              <button type="button" onclick="selectRiderActivePaymentMethod('cash')" class="py-2 px-2.5 rounded-xl font-bold transition flex items-center justify-center gap-1.5 cursor-pointer ${req.chosenPaymentMethod === 'cash' ? 'bg-amber-400 text-slate-950 font-black shadow' : 'bg-white/10 hover:bg-white/20 text-white'}">
-                <i data-lucide="banknote" class="w-3.5 h-3.5"></i>
+              <button type="button" onclick="selectRiderActivePaymentMethod('cash')" class="py-2.5 px-2.5 rounded-xl font-black transition flex items-center justify-center gap-1.5 cursor-pointer ${req.chosenPaymentMethod === 'cash' ? 'bg-amber-400 text-slate-950 font-black shadow-md' : 'bg-white/10 hover:bg-white/20 text-white'}">
+                <i data-lucide="banknote" class="w-4 h-4"></i>
                 <span>Cash in Hand</span>
               </button>
             </div>
             ${!req.paymentSettled ? `
-              <button type="button" onclick="openRiderPaymentModal()" class="w-full py-2.5 rounded-xl bg-white/15 hover:bg-white/25 text-white text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer border border-white/20 active:scale-95 shadow-sm">
-                <i data-lucide="qr-code" class="w-4 h-4 text-cyan-300"></i>
+              <button type="button" onclick="openRiderPaymentModal()" class="w-full py-3 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-black text-xs transition flex items-center justify-center gap-2 cursor-pointer shadow-lg active:scale-95">
+                <i data-lucide="${req.chosenPaymentMethod === 'cash' ? 'hand-coins' : 'qr-code'}" class="w-4 h-4"></i>
                 <span>${req.chosenPaymentMethod === 'cash' ? `Confirm Cash Payment (₹${req.fare})` : `Show Driver QR Code & Pay UPI (₹${req.fare})`}</span>
               </button>
             ` : `
-              <div class="p-2 rounded-xl bg-emerald-500/20 border border-emerald-400/30 text-center text-[11px] font-bold text-emerald-300">
-                ✓ Fuel share payment recorded via ${(req.chosenPaymentMethod || 'upi').toUpperCase()}. Waiting for driver to complete trip.
+              <div class="p-2.5 rounded-2xl bg-emerald-500/20 border border-emerald-400/30 text-center text-xs font-bold text-emerald-300 flex items-center justify-center gap-2">
+                <i data-lucide="check-circle" class="w-4 h-4 text-emerald-400"></i>
+                <span>Payment settled via ${(req.chosenPaymentMethod || 'upi').toUpperCase()}. Driver will verify & complete trip.</span>
               </div>
             `}
           </div>
@@ -3112,13 +3114,13 @@
         </div>
 
         <!-- Commuter Payment Settlement Status -->
-        <div class="mt-3 p-2.5 rounded-xl ${trip.paymentSettled ? 'bg-emerald-500/20 border border-emerald-400/30 text-emerald-300' : 'bg-white/10 border border-white/10 text-slate-300'} text-xs font-bold flex items-center justify-between">
+        <div class="mt-3 p-2.5 rounded-xl ${trip.paymentSettled ? 'bg-emerald-500/20 border border-emerald-400/30 text-emerald-300' : 'bg-amber-500/20 border border-amber-400/30 text-amber-200'} text-xs font-bold flex items-center justify-between">
           <span class="flex items-center gap-1.5">
             <i data-lucide="${(trip.paymentMethod === 'cash') ? 'banknote' : 'smartphone'}" class="w-3.5 h-3.5"></i>
-            <span>Payment Method:</span>
+            <span>Payment Status:</span>
           </span>
-          <span class="font-black text-white">
-            ${trip.paymentSettled ? `✓ Paid via ${(trip.paymentMethod || 'upi').toUpperCase()}` : (trip.paymentMethod === 'cash' ? '💵 Cash in Hand (Awaiting Drop)' : '📱 Direct UPI / QR')}
+          <span class="font-black ${trip.paymentSettled ? 'text-emerald-300' : 'text-amber-300'}">
+            ${trip.paymentSettled ? `✓ Settled via ${(trip.paymentMethod || 'upi').toUpperCase()}` : (trip.paymentMethod === 'cash' ? '💵 Cash in Hand (Awaiting Drop)' : '📱 Direct UPI / QR (Awaiting Pay)')}
           </span>
         </div>
 
@@ -3129,9 +3131,9 @@
               <span>Verify Commuter PIN & Start Ride</span>
             </button>
           ` : `
-            <button type="button" onclick="openDriverTripCompletionModal()" class="w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-black rounded-full text-xs flex items-center justify-center gap-2 shadow-lg transition cursor-pointer active:scale-95">
+            <button type="button" onclick="openDriverTripCompletionModal()" class="w-full py-3.5 bg-emerald-600 hover:bg-emerald-500 text-white font-black rounded-full text-xs flex items-center justify-center gap-2 shadow-lg transition cursor-pointer active:scale-95">
               <i data-lucide="check-check" class="w-4 h-4"></i>
-              <span>Payment Done / Complete Ride (₹${trip.fare})</span>
+              <span>Verify Payment & Complete Trip (₹${trip.fare})</span>
             </button>
           `}
         </div>
@@ -3190,8 +3192,19 @@
     const checkFareEl = document.getElementById('driverConfirmCheckFare');
     if (checkFareEl) checkFareEl.textContent = `₹${trip.fare}`;
 
+    const fareBadge = document.getElementById('driverModalFareBadge');
+    if (fareBadge) {
+      if (trip.paymentSettled) {
+        fareBadge.className = 'px-2.5 py-0.5 rounded-full bg-emerald-500/25 text-emerald-300 text-[10px] font-black border border-emerald-400/40';
+        fareBadge.textContent = `✓ Rider Settled (${(trip.paymentMethod || 'upi').toUpperCase()})`;
+      } else {
+        fareBadge.className = 'px-2.5 py-0.5 rounded-full bg-amber-500/25 text-amber-200 text-[10px] font-black border border-amber-400/40';
+        fareBadge.textContent = `⚠️ Awaiting Settlement (${(trip.paymentMethod || 'upi').toUpperCase()})`;
+      }
+    }
+
     const chk = document.getElementById('driverConfirmPaymentCheckbox');
-    if (chk) chk.checked = true;
+    if (chk) chk.checked = !!trip.paymentSettled;
 
     selectDriverPaymentMethod(trip.paymentMethod || 'upi');
     modal.classList.remove('hidden');
@@ -3309,7 +3322,7 @@
     } finally {
       if (btn) {
         btn.disabled = false;
-        btn.innerHTML = `<i data-lucide="check-check" class="w-4 h-4"></i><span>Payment Done / Complete Ride</span>`;
+        btn.innerHTML = `<i data-lucide="check-check" class="w-4 h-4"></i><span>Verify Payment & Complete Trip</span>`;
         if (window.lucide) lucide.createIcons();
       }
     }
@@ -3320,6 +3333,11 @@
   };
 
   window.toggleDriverOnline = function () {
+    if (state.currentUser?.kyc_status === 'suspended' || state.kyc?.status === 'suspended') {
+      showToast('🚫 Driving Blocked: Your driver account is suspended due to passenger safety violations. Contact support to appeal.', 'danger');
+      return;
+    }
+
     if (!state.driverOnline && (state.wallet?.balance || 0) < 0) {
       showToast('⚠️ Negative wallet balance! Recharge your wallet to resume receiving rides.', 'warning');
       if (typeof openDriverWalletRechargeModal === 'function') {
@@ -4091,7 +4109,35 @@
       if (status === 'approved') {
         if (operationalContainer) operationalContainer.classList.remove('hidden');
 
+        const warning = submission?.warning_alert || user.warning_alert || null;
+        let warningHtml = '';
+        if (warning && warning.notes) {
+          warningHtml = `
+            <div id="driverWarningBanner" class="p-3.5 mb-3 rounded-2xl bg-amber-500/15 border-2 border-amber-400 text-amber-950 text-xs shadow-sm flex items-start gap-3 animate-in fade-in">
+              <div class="w-8 h-8 rounded-xl bg-amber-500 text-slate-950 flex items-center justify-center font-black flex-shrink-0 mt-0.5 shadow-sm">
+                <i data-lucide="alert-triangle" class="w-4 h-4"></i>
+              </div>
+              <div class="flex-1 min-w-0">
+                <div class="flex items-center justify-between gap-2">
+                  <h4 class="font-black text-amber-950 text-xs">Official Safety Compliance Warning</h4>
+                  <span class="text-[9px] font-black uppercase text-amber-900 px-2 py-0.5 rounded-full bg-amber-200/90 border border-amber-300">Active Notice</span>
+                </div>
+                <p class="text-[11px] text-amber-900 mt-1 leading-snug font-medium">
+                  "${warning.notes}"
+                </p>
+                <div class="mt-2.5 flex items-center justify-between text-[10px] text-amber-800">
+                  <span>Please adhere strictly to Routemate safety & speed guidelines.</span>
+                  <button type="button" onclick="dismissDriverWarningAlert()" class="px-3 py-1 rounded-lg bg-amber-300/80 hover:bg-amber-300 font-black text-amber-950 transition cursor-pointer shadow-xs active:scale-95">
+                    Acknowledge ✓
+                  </button>
+                </div>
+              </div>
+            </div>
+          `;
+        }
+
         gateContainer.innerHTML = `
+          ${warningHtml}
           <div class="routemate-card p-3.5 bg-emerald-50/80 border border-emerald-200 flex items-center justify-between">
             <div class="flex items-center gap-2.5">
               <div class="w-8 h-8 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center font-black">
@@ -4216,6 +4262,47 @@
         `;
       }
       // -----------------------------------------------------------------------
+      // CASE: SUSPENDED DRIVER ACCOUNT (SAFETY COMPLIANCE)
+      // -----------------------------------------------------------------------
+      else if (status === 'suspended') {
+        if (operationalContainer) operationalContainer.classList.add('hidden');
+        if (window.db?.matching) window.db.matching.stopDriverPolling();
+        state.driverOnline = false;
+
+        const reason = submission?.rejection_reason || submission?.suspension_reason || user.suspension_reason || 'Driver account suspended by Super Admin due to safety compliance violations.';
+
+        gateContainer.innerHTML = `
+          <div class="routemate-card p-6 text-center space-y-4 border-2 border-rose-500 bg-rose-50/90 shadow-xl animate-in fade-in">
+            <div class="w-16 h-16 rounded-2xl bg-rose-600 text-white mx-auto flex items-center justify-center font-black shadow-lg">
+              <i data-lucide="shield-ban" class="w-8 h-8 text-white"></i>
+            </div>
+            <div>
+              <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-rose-600 text-white text-[11px] font-black mb-1.5 shadow-sm">
+                <span>🚫 Account Suspended</span>
+              </span>
+              <h3 class="text-base font-black text-rose-950 mt-1">Driving Privileges Temporarily Suspended</h3>
+              <p class="text-xs text-rose-800 leading-relaxed max-w-sm mx-auto mt-1">
+                Your driver account has been suspended by the Routemate Compliance & Safety Team. You cannot accept or offer rides while suspended.
+              </p>
+            </div>
+            <div class="p-3.5 bg-white/95 rounded-2xl border border-rose-300 text-left text-xs space-y-2 max-w-sm mx-auto shadow-sm">
+              <div class="text-[11px] text-rose-600 font-bold uppercase tracking-wider">Reason for Suspension:</div>
+              <div class="font-bold text-slate-800 text-xs bg-rose-50 p-2.5 rounded-xl border border-rose-200">${reason}</div>
+              <div class="flex items-center justify-between text-[11px] pt-1.5 border-t border-slate-100 text-slate-500">
+                <span>Compliance Support:</span>
+                <a href="mailto:support@routemate.pro" class="text-blue-600 font-bold underline">support@routemate.pro</a>
+              </div>
+            </div>
+            <div class="pt-1 flex items-center justify-center gap-2">
+              <button type="button" onclick="checkDriverKycStatus(true)" class="px-4 py-2.5 rounded-xl bg-white border border-rose-200 text-xs font-bold text-rose-700 hover:bg-rose-50 transition shadow-sm cursor-pointer flex items-center gap-1.5">
+                <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i>
+                <span>Check Status</span>
+              </button>
+            </div>
+          </div>
+        `;
+      }
+      // -----------------------------------------------------------------------
       // CASE 4: NOT SUBMITTED
       // -----------------------------------------------------------------------
       else {
@@ -4262,6 +4349,54 @@
     }
   }
   window.checkDriverKycStatus = checkDriverKycStatus;
+
+  window.dismissDriverWarningAlert = function () {
+    const banner = document.getElementById('driverWarningBanner');
+    if (banner) banner.classList.add('hidden');
+    if (state.currentUser) {
+      state.currentUser.warning_alert = null;
+    }
+  };
+
+  function listenForDriverSafetyAlerts(user) {
+    if (!user || !user.id) return;
+    const client = window.db?.getSupabase?.();
+    if (!client) return;
+
+    try {
+      const ch = client.channel(`driver-alerts-${user.id}`);
+      ch.on('broadcast', { event: 'safety_action' }, (msg) => {
+        const p = msg.payload || {};
+        console.log('⚡ [SAFETY ALERT EVENT RECEIVED]', p);
+        if (p.actionType === 'block' || p.actionType === 'suspend') {
+          state.driverOnline = false;
+          if (state.currentUser) {
+            state.currentUser.kyc_status = 'suspended';
+            state.currentUser.suspension_reason = p.notes;
+          }
+          state.kyc.status = 'suspended';
+          showToast(`🚫 Account Suspended by Super Admin: ${p.notes || 'Safety compliance violation.'}`, 'danger');
+          checkDriverKycStatus(true);
+        } else if (p.actionType === 'warning') {
+          showToast(`⚠️ Official Safety Warning: ${p.notes || 'Please follow community safety guidelines.'}`, 'warning');
+          if (state.currentUser) {
+            state.currentUser.warning_alert = { notes: p.notes, issuedAt: p.timestamp || new Date().toISOString() };
+          }
+          checkDriverKycStatus(true);
+        } else if (p.actionType === 'unsuspend' || p.actionType === 'resolve') {
+          if (state.currentUser) {
+            state.currentUser.kyc_status = 'approved';
+            state.currentUser.warning_alert = null;
+          }
+          state.kyc.status = 'approved';
+          showToast('✓ Driver account reinstated by Compliance Team.', 'success');
+          checkDriverKycStatus(true);
+        }
+      }).subscribe();
+    } catch (e) {
+      console.warn('Realtime safety alert listener notice:', e);
+    }
+  }
 
   function refreshKycPreviews() {
     const previewMap = {
@@ -5126,9 +5261,10 @@
     }
 
     container.innerHTML = filtered.map(sub => {
+      const isSuspended = sub.status === 'suspended';
       const isApproved = sub.status === 'approved';
       const isRejected = sub.status === 'rejected';
-      const isPending = !isApproved && !isRejected;
+      const isPending = !isApproved && !isRejected && !isSuspended;
 
       const dlFront = sub.dl_front_photo || sub.dlFrontPhoto || '';
       const dlBack = sub.dl_back_photo || sub.dlBackPhoto || '';
@@ -5147,7 +5283,13 @@
           Pending Approval
         </span>
       `;
-      if (isApproved) {
+      if (isSuspended) {
+        statusBadge = `
+          <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-black bg-rose-600 text-white shadow-sm">
+            🔴 Suspended
+          </span>
+        `;
+      } else if (isApproved) {
         statusBadge = `
           <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-black bg-emerald-100 text-emerald-800 border border-emerald-200">
             Approved ✓
@@ -6092,11 +6234,29 @@
         </span>
       `)).join(' ');
 
-      const actionBadge = fb.admin_action ? `
-        <span class="px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 border border-blue-200 text-[9px] font-black uppercase">
-          Action Taken: ${fb.admin_action}
-        </span>
-      ` : '';
+      const isSuspended = fb.admin_action === 'block' || fb.admin_action === 'suspended' || fb.admin_action === 'suspend';
+      const isWarning = fb.admin_action === 'warning';
+
+      let actionBadge = '';
+      if (isSuspended) {
+        actionBadge = `
+          <span class="px-2 py-0.5 rounded-full bg-rose-600 text-white text-[9px] font-black uppercase tracking-wider">
+            🔴 SUSPENDED
+          </span>
+        `;
+      } else if (isWarning) {
+        actionBadge = `
+          <span class="px-2 py-0.5 rounded-full bg-amber-500 text-white text-[9px] font-black uppercase tracking-wider">
+            ⚠️ WARNING ISSUED
+          </span>
+        `;
+      } else if (fb.admin_action) {
+        actionBadge = `
+          <span class="px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 border border-blue-200 text-[9px] font-black uppercase">
+            Action Taken: ${fb.admin_action}
+          </span>
+        `;
+      }
 
       return `
         <div class="routemate-card p-4 space-y-3 bg-white border ${isSafetyAlert ? 'border-rose-300 ring-2 ring-rose-100' : 'border-slate-200'} shadow-sm">
@@ -6124,13 +6284,19 @@
           <!-- Admin Safety Decision Actions -->
           <div class="pt-2 border-t border-slate-100 flex items-center justify-between gap-2 flex-wrap">
             <span class="text-[10px] text-slate-400 font-bold uppercase">Super Admin Actions:</span>
-            <div class="flex items-center gap-1.5">
+            <div class="flex items-center gap-1.5 flex-wrap">
               <button type="button" onclick="handleAdminSafetyAction('${fb.id}', '${fb.driverId}', 'warning')" class="px-2.5 py-1 rounded-lg bg-amber-50 text-amber-800 border border-amber-200 hover:bg-amber-100 text-[10px] font-black transition cursor-pointer">
                 Issue Warning
               </button>
-              <button type="button" onclick="handleAdminSafetyAction('${fb.id}', '${fb.driverId}', 'block')" class="px-2.5 py-1 rounded-lg bg-rose-600 text-white hover:bg-rose-700 text-[10px] font-black transition cursor-pointer">
-                Suspend Driver
-              </button>
+              ${isSuspended ? `
+                <button type="button" onclick="handleAdminSafetyAction('${fb.id}', '${fb.driverId}', 'unsuspend')" class="px-2.5 py-1 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 text-[10px] font-black transition cursor-pointer">
+                  Reactivate Driver
+                </button>
+              ` : `
+                <button type="button" onclick="handleAdminSafetyAction('${fb.id}', '${fb.driverId}', 'block')" class="px-2.5 py-1 rounded-lg bg-rose-600 text-white hover:bg-rose-700 text-[10px] font-black transition cursor-pointer">
+                  Suspend Driver
+                </button>
+              `}
               ${isSafetyAlert ? `
                 <button type="button" onclick="handleAdminSafetyAction('${fb.id}', '${fb.driverId}', 'resolve')" class="px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-800 border border-emerald-200 hover:bg-emerald-100 text-[10px] font-black transition cursor-pointer">
                   Mark Resolved
@@ -6155,12 +6321,18 @@
 
     let notes = '';
     if (actionType === 'warning') {
-      notes = prompt('Enter warning message / reason for the driver:', 'Violation of Routemate safety guidelines: Rash driving report.');
+      notes = prompt('Enter warning message / reason for the driver:', 'Violation of Routemate safety guidelines: Rash driving or passenger complaint.');
       if (notes === null) return;
     } else if (actionType === 'block') {
-      const confirmBlock = confirm('Are you sure you want to suspend this driver from accepting rides on Routemate?');
-      if (!confirmBlock) return;
-      notes = 'Driver account suspended due to passenger safety violation.';
+      const reason = prompt('Enter driver suspension reason:', 'Account suspended due to safety violation / passenger complaint.');
+      if (reason === null) return;
+      notes = reason || 'Driver account suspended due to passenger safety violation.';
+    } else if (actionType === 'unsuspend') {
+      const confirmUnsuspend = confirm('Reactivate this driver account and restore their KYC approval?');
+      if (!confirmUnsuspend) return;
+      notes = 'Driver account restored by Super Admin.';
+    } else if (actionType === 'resolve') {
+      notes = 'Safety alert marked resolved by Super Admin.';
     }
 
     try {
@@ -6176,9 +6348,29 @@
         });
       }
 
+      // Also broadcast realtime alert to active driver session if online
+      if (window.supabase && driverId) {
+        try {
+          const client = window.supabase;
+          const channel = client.channel(`driver-alerts-${driverId}`);
+          await channel.send({
+            type: 'broadcast',
+            event: 'driver_safety_alert',
+            payload: {
+              actionType,
+              notes,
+              feedbackId,
+              timestamp: new Date().toISOString()
+            }
+          });
+        } catch (bErr) {
+          console.warn('[Safety] Realtime broadcast error (non-fatal):', bErr);
+        }
+      }
+
       showToast(`Safety action '${actionType}' executed successfully.`, 'success');
-      await loadAdminSafetyData();
-      await loadAdminKycSubmissions();
+      await loadAdminSafetyData(false);
+      await loadAdminKycSubmissions(false);
     } catch (err) {
       console.error('Safety action error:', err);
       showToast('Failed to record safety action: ' + err.message, 'danger');

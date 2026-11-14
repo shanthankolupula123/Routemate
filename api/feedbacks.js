@@ -154,40 +154,119 @@ module.exports = async (req, res) => {
         });
       } catch (e) {}
 
-      // If actionType is 'block', suspend driver KYC immediately
+      // Update target driver in Supabase `profiles` table and local KYC store
       const targetDriverId = driverId || (fb && fb.driverId);
       if (targetDriverId) {
-        if (actionType === 'block') {
-          try {
-            await fetch(`${SUPABASE_URL}/rest/v1/driver_kyc?or=(id.eq.${encodeURIComponent(targetDriverId)},user_id.eq.${encodeURIComponent(targetDriverId)})`, {
-              method: 'PATCH',
-              headers: {
-                'apikey': SUPABASE_KEY,
-                'Authorization': `Bearer ${SUPABASE_KEY}`,
-                'Content-Type': 'application/json'
-              },
-              body: JSON.stringify({
-                status: 'rejected',
-                rejection_reason: `Driver account suspended by Super Admin due to safety report #${feedbackId}: ${notes || 'Violation of Routemate safety standards'}`
-              })
-            });
-          } catch (e) {}
-        } else if (actionType === 'warning') {
-          try {
-            // Increment warning count
-            await fetch(`${SUPABASE_URL}/rest/v1/driver_kyc?or=(id.eq.${encodeURIComponent(targetDriverId)},user_id.eq.${encodeURIComponent(targetDriverId)})`, {
-              method: 'PATCH',
-              headers: {
-                'apikey': SUPABASE_KEY,
-                'Authorization': `Bearer ${SUPABASE_KEY}`,
-                'Content-Type': 'application/json'
-              },
-              body: JSON.stringify({
-                rejection_reason: `Official Safety Warning Issued: ${notes || 'Rash driving complaint received. Maintain safe speed.'}`
-              })
-            });
-          } catch (e) {}
+        try {
+          const profRes = await fetch(`${SUPABASE_URL}/rest/v1/profiles?or=(id.eq.${encodeURIComponent(targetDriverId)},phone.eq.${encodeURIComponent(targetDriverId)},role.ilike.*${encodeURIComponent(targetDriverId)}*)&select=*&limit=1`, {
+            headers: {
+              'apikey': SUPABASE_KEY,
+              'Authorization': `Bearer ${SUPABASE_KEY}`
+            }
+          });
+          if (profRes.ok) {
+            const rows = await profRes.json();
+            if (rows && rows.length > 0) {
+              const pRow = rows[0];
+              let meta = {};
+              try {
+                if (typeof pRow.role === 'string' && (pRow.role.startsWith('{') || pRow.role.includes('{'))) {
+                  meta = JSON.parse(pRow.role);
+                }
+              } catch (e) {}
+
+              if (actionType === 'block' || actionType === 'suspend') {
+                meta.kyc_status = 'suspended';
+                meta.is_suspended = true;
+                meta.suspension_reason = notes || `Driver account suspended by Super Admin due to safety report #${feedbackId || 'ALERT'}`;
+                meta.suspended_at = new Date().toISOString();
+                meta.suspended_by = cleanAdmin;
+                if (meta.vehicles && Array.isArray(meta.vehicles)) {
+                  meta.vehicles.forEach(v => { v.status = 'suspended'; });
+                }
+
+                await fetch(`${SUPABASE_URL}/rest/v1/profiles?id=eq.${encodeURIComponent(pRow.id)}`, {
+                  method: 'PATCH',
+                  headers: {
+                    'apikey': SUPABASE_KEY,
+                    'Authorization': `Bearer ${SUPABASE_KEY}`,
+                    'Content-Type': 'application/json'
+                  },
+                  body: JSON.stringify({
+                    role: JSON.stringify(meta),
+                    is_verified: false
+                  })
+                });
+              } else if (actionType === 'warning') {
+                const warningObj = {
+                  id: 'warn_' + Date.now().toString(36),
+                  feedbackId: feedbackId || null,
+                  notes: notes || 'Official Compliance Warning: Please strictly follow safety and community guidelines.',
+                  issuedAt: new Date().toISOString(),
+                  issuedBy: cleanAdmin
+                };
+                if (!Array.isArray(meta.warnings)) meta.warnings = [];
+                meta.warnings.unshift(warningObj);
+                meta.warning_count = meta.warnings.length;
+                meta.warning_alert = warningObj;
+
+                await fetch(`${SUPABASE_URL}/rest/v1/profiles?id=eq.${encodeURIComponent(pRow.id)}`, {
+                  method: 'PATCH',
+                  headers: {
+                    'apikey': SUPABASE_KEY,
+                    'Authorization': `Bearer ${SUPABASE_KEY}`,
+                    'Content-Type': 'application/json'
+                  },
+                  body: JSON.stringify({
+                    role: JSON.stringify(meta)
+                  })
+                });
+              } else if (actionType === 'unsuspend' || actionType === 'resolve') {
+                if (meta.kyc_status === 'suspended') {
+                  meta.kyc_status = 'approved';
+                  meta.is_suspended = false;
+                  meta.suspension_reason = null;
+                }
+                meta.warning_alert = null;
+
+                await fetch(`${SUPABASE_URL}/rest/v1/profiles?id=eq.${encodeURIComponent(pRow.id)}`, {
+                  method: 'PATCH',
+                  headers: {
+                    'apikey': SUPABASE_KEY,
+                    'Authorization': `Bearer ${SUPABASE_KEY}`,
+                    'Content-Type': 'application/json'
+                  },
+                  body: JSON.stringify({
+                    role: JSON.stringify(meta),
+                    is_verified: meta.kyc_status === 'approved'
+                  })
+                });
+              }
+            }
+          }
+        } catch (e) {
+          console.warn('[feedbacks.js safety_action] Error updating driver profile:', e.message);
         }
+
+        // Also update local kyc store if driver exists there
+        try {
+          const { getStore: getKycStore, saveStore: saveKycStore } = require('./_kyc-store');
+          const kycList = getKycStore();
+          const kIdx = kycList.findIndex(s => s.id === targetDriverId || s.user_id === targetDriverId);
+          if (kIdx !== -1) {
+            if (actionType === 'block' || actionType === 'suspend') {
+              kycList[kIdx].status = 'suspended';
+              kycList[kIdx].rejection_reason = notes || 'Driver account suspended by Super Admin due to safety report';
+            } else if (actionType === 'warning') {
+              kycList[kIdx].warning_count = (kycList[kIdx].warning_count || 0) + 1;
+              kycList[kIdx].warning_alert = { notes, issuedAt: new Date().toISOString() };
+            } else if (actionType === 'unsuspend') {
+              kycList[kIdx].status = 'approved';
+              kycList[kIdx].rejection_reason = null;
+            }
+            saveKycStore(kycList);
+          }
+        } catch (e) {}
       }
 
       saveStore(list);
