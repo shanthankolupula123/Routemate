@@ -595,6 +595,7 @@ module.exports = async (req, res) => {
       const cleanVehType = body.vehicle_type || body.vehicleType || 'bike';
       const cleanVehName = body.vehicle_name || body.vehicleName || (cleanVehType === 'car' ? 'Car Seat' : (cleanVehType === 'auto' ? 'Auto' : 'Bike'));
       const cleanVehColor = body.vehicle_color || body.vehicleColor || body.vehicle_colour || body.vehicleColour || 'Standard';
+      const cleanVehChassis = String(body.vehicle_chassis || body.vehicleChassis || body.chassis_number || body.chassisNumber || '').trim().toUpperCase();
       const cleanRcPhoto = body.rc_photo || body.rcPhoto;
 
       if (!cleanUserId || !cleanVehNum || !cleanRcPhoto) {
@@ -637,6 +638,8 @@ module.exports = async (req, res) => {
         id: 'veh_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
         user_id: cleanUserId,
         vehicle_number: cleanVehNum,
+        vehicle_chassis: cleanVehChassis,
+        chassis_number: cleanVehChassis,
         vehicle_type: cleanVehType,
         vehicle_name: cleanVehName,
         vehicle_color: cleanVehColor,
@@ -852,6 +855,7 @@ module.exports = async (req, res) => {
     const cleanAadhaarFront = body.aadhaar_front_photo || body.aadhaarFrontPhoto || body.aadhaar_front;
     const cleanAadhaarBack = body.aadhaar_back_photo || body.aadhaarBackPhoto || body.aadhaar_back;
     const cleanVehicleNumber = body.vehicle_number || body.vehicleNumber;
+    const cleanVehicleChassis = String(body.vehicle_chassis || body.vehicleChassis || body.chassis_number || body.chassisNumber || '').trim().toUpperCase();
     const cleanVehicleType = body.vehicle_type || body.vehicleType || 'bike';
     const cleanVehicleName = body.vehicle_name || body.vehicleName || (cleanVehicleType === 'car' ? 'Car Seat' : (cleanVehicleType === 'auto' ? 'Auto' : 'Two-Wheeler / Bike'));
     const cleanVehicleColor = body.vehicle_color || body.vehicleColor || body.vehicle_colour || body.vehicleColour || 'Standard';
@@ -903,6 +907,8 @@ module.exports = async (req, res) => {
       aadhaar_front_photo: cleanAadhaarFront,
       aadhaar_back_photo: cleanAadhaarBack,
       vehicle_number: String(cleanVehicleNumber).trim().toUpperCase(),
+      vehicle_chassis: cleanVehicleChassis,
+      chassis_number: cleanVehicleChassis,
       vehicle_type: cleanVehicleType,
       vehicle_name: cleanVehicleName,
       vehicle_color: cleanVehicleColor,
@@ -920,6 +926,8 @@ module.exports = async (req, res) => {
           id: 'veh_primary_' + cleanUserId,
           user_id: cleanUserId,
           vehicle_number: String(cleanVehicleNumber).trim().toUpperCase(),
+          vehicle_chassis: cleanVehicleChassis,
+          chassis_number: cleanVehicleChassis,
           vehicle_type: cleanVehicleType,
           vehicle_name: cleanVehicleName,
           vehicle_color: cleanVehicleColor,
@@ -1007,6 +1015,8 @@ module.exports = async (req, res) => {
         aadhaar_front_photo: submissionRecord.aadhaar_front_photo,
         aadhaar_back_photo: submissionRecord.aadhaar_back_photo,
         vehicle_number: submissionRecord.vehicle_number,
+        vehicle_chassis: cleanVehicleChassis,
+        chassis_number: cleanVehicleChassis,
         vehicle_name: submissionRecord.vehicle_name,
         vehicle_color: submissionRecord.vehicle_color,
         vehicle_type: submissionRecord.vehicle_type,

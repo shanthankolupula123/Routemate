@@ -312,6 +312,7 @@
       if (saved) {
         const parsed = JSON.parse(saved);
         if (parsed && (parsed.id === user.id || (parsed.email && parsed.email.toLowerCase() === (user.email || '').toLowerCase()))) {
+          if (parsed.id && !String(user.id || '').includes('-') && String(parsed.id).includes('-')) user.id = parsed.id;
           if (parsed.phone && !user.phone) user.phone = parsed.phone;
           if (parsed.name && (!user.name || user.name === 'User' || user.name.includes('@'))) user.name = parsed.name;
           if (parsed.gender && !user.gender) user.gender = parsed.gender;
@@ -327,6 +328,7 @@
       if (window.db?.auth?.getUserProfile) {
         const dbProfile = await window.db.auth.getUserProfile(user.id, user.email);
         if (dbProfile) {
+          if (dbProfile.id) user.id = dbProfile.id;
           const dbPhoneDigits = String(dbProfile.phone || '').replace(/\D/g, '');
           if (dbPhoneDigits.length >= 10 && !dbProfile.phone.includes('@')) {
             user.phone = dbProfile.phone;
@@ -346,6 +348,27 @@
       }
     } catch (e) {
       console.warn('Profile DB check notice:', e);
+    }
+
+    // 2b. Fallback check to Driver KYC table if phone is still missing
+    const phoneDigitsSoFar = String(user.phone || '').replace(/\D/g, '');
+    if (phoneDigitsSoFar.length < 10 && window.db?.kyc?.getDriverKyc) {
+      try {
+        const kycCheck = await window.db.kyc.getDriverKyc(user.id, user.email);
+        if (kycCheck?.driver_phone) {
+          const kycPhoneDigits = String(kycCheck.driver_phone).replace(/\D/g, '');
+          if (kycPhoneDigits.length >= 10) {
+            user.phone = kycCheck.driver_phone;
+          }
+        }
+        if (kycCheck?.driver_name && (!user.name || user.name === 'User' || user.name.includes('@'))) {
+          user.name = kycCheck.driver_name;
+        }
+        if (kycCheck?.upi_id) {
+          user.upi_id = kycCheck.upi_id;
+          state.driverUpi.upiId = kycCheck.upi_id;
+        }
+      } catch (e) {}
     }
 
     // 3. Conditional Routing Check: Name & Phone Number (10 digits)
@@ -1110,6 +1133,22 @@
         rating: 5.0,
         avatar: payload.picture || getInitialsAvatarSvg(payload.name || payload.email, 120)
       };
+
+      // Pre-hydrate from localStorage for returning users so they are never treated as new accounts
+      try {
+        const saved = localStorage.getItem('routemate_user');
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (parsed && parsed.email && parsed.email.toLowerCase() === payload.email.toLowerCase()) {
+            if (parsed.id && !finalUser.id.includes('-') && parsed.id.includes('-')) finalUser.id = parsed.id;
+            if (parsed.phone) finalUser.phone = parsed.phone;
+            if (parsed.name && parsed.name !== 'User') finalUser.name = parsed.name;
+            if (parsed.gender) finalUser.gender = parsed.gender;
+            if (parsed.dob) finalUser.dob = parsed.dob;
+            if (parsed.upi_id) finalUser.upi_id = parsed.upi_id;
+          }
+        }
+      } catch (e) {}
 
       await handleAuthUserFlow(finalUser, true);
     } catch (err) {
@@ -3048,43 +3087,67 @@
       const userEmail = String(user.email || '').toLowerCase().trim();
       const userId = String(user.id || '').trim();
 
+      // Strictly confirmed/completed rides filter - exclude searching, pending, or junk logs
+      const CONFIRMED_STATUSES = new Set([
+        'confirmed',
+        'driver_accepted',
+        'accepted',
+        'ride_started',
+        'in_progress',
+        'completed'
+      ]);
+
+      const clearedAtMs = parseInt(localStorage.getItem('routemate_activity_cleared_at') || '0', 10);
+
       // Filter rows belonging to the authenticated user
       const userRides = [];
       const seenIds = new Set();
 
-      // 1. Check current in-memory active rider request first
+      // 1. Check current in-memory active rider request (strictly confirmed only)
       if (state.activeRiderRequest) {
-        userRides.push({
-          id: state.activeRiderRequest.id,
-          pickup: state.activeRiderRequest.pickup,
-          drop: state.activeRiderRequest.drop,
-          fare: state.activeRiderRequest.fare,
-          vehicleType: state.activeRiderRequest.vehicleType || 'bike',
-          status: state.activeRiderRequest.status || 'searching',
-          userRole: 'commuter',
-          createdAt: state.activeRiderRequest.createdAt || new Date().toISOString(),
-          isActiveMemory: true
-        });
-        seenIds.add(state.activeRiderRequest.id);
+        const reqStatus = String(state.activeRiderRequest.status || '').toLowerCase();
+        if (CONFIRMED_STATUSES.has(reqStatus)) {
+          const createdAt = state.activeRiderRequest.createdAt || new Date().toISOString();
+          if (new Date(createdAt).getTime() > clearedAtMs) {
+            userRides.push({
+              id: state.activeRiderRequest.id,
+              pickup: state.activeRiderRequest.pickup,
+              drop: state.activeRiderRequest.drop,
+              fare: state.activeRiderRequest.fare,
+              vehicleType: state.activeRiderRequest.vehicleType || 'bike',
+              status: reqStatus,
+              userRole: 'commuter',
+              createdAt: createdAt,
+              isActiveMemory: true
+            });
+            seenIds.add(state.activeRiderRequest.id);
+          }
+        }
       }
 
-      // 2. Check current in-memory active driver trip
+      // 2. Check current in-memory active driver trip (strictly confirmed only)
       if (state.activeDriverTrip) {
-        userRides.push({
-          id: state.activeDriverTrip.id,
-          pickup: state.activeDriverTrip.pickup,
-          drop: state.activeDriverTrip.drop,
-          fare: state.activeDriverTrip.fare,
-          vehicleType: state.activeDriverTrip.vehicleType || 'bike',
-          status: state.activeDriverTrip.status || 'accepted',
-          userRole: 'driver',
-          createdAt: state.activeDriverTrip.createdAt || new Date().toISOString(),
-          isActiveMemory: true
-        });
-        seenIds.add(state.activeDriverTrip.id);
+        const tripStatus = String(state.activeDriverTrip.status || 'accepted').toLowerCase();
+        if (CONFIRMED_STATUSES.has(tripStatus)) {
+          const createdAt = state.activeDriverTrip.createdAt || new Date().toISOString();
+          if (new Date(createdAt).getTime() > clearedAtMs) {
+            userRides.push({
+              id: state.activeDriverTrip.id,
+              pickup: state.activeDriverTrip.pickup,
+              drop: state.activeDriverTrip.drop,
+              fare: state.activeDriverTrip.fare,
+              vehicleType: state.activeDriverTrip.vehicleType || 'bike',
+              status: tripStatus,
+              userRole: 'driver',
+              createdAt: createdAt,
+              isActiveMemory: true
+            });
+            seenIds.add(state.activeDriverTrip.id);
+          }
+        }
       }
 
-      // 3. Check locally cached user rides for instant offline & real-time sync (strictly verified to this user)
+      // 3. Check locally cached user rides (strictly confirmed only and after cleared timestamp)
       try {
         const localList = JSON.parse(localStorage.getItem('routemate_user_rides') || '[]');
         if (Array.isArray(localList)) {
@@ -3093,29 +3156,33 @@
             const lrUserId = String(lr.userId || lr.riderId || '').trim();
             const lrUserEmail = String(lr.userEmail || lr.riderEmail || '').toLowerCase().trim();
             const lrUserPhone = String(lr.userPhone || lr.riderPhone || '').replace(/\D/g, '').slice(-10);
+            const lrStatus = String(lr.status || '').toLowerCase();
+            const lrCreatedAt = lr.createdAt || new Date().toISOString();
 
             const isOwn = (userId && lrUserId === userId) ||
                           (userEmail && lrUserEmail === userEmail) ||
                           (userPhoneDigits && userPhoneDigits.length >= 10 && lrUserPhone === userPhoneDigits);
 
-            if (isOwn && lrId && !seenIds.has(lrId)) {
-              seenIds.add(lrId);
-              userRides.push({
-                id: lrId,
-                pickup: lr.pickup || 'Uppal Metro, Hyderabad',
-                drop: lr.drop || 'Jangaon Bus Depot',
-                fare: Math.round(Number(lr.fare || 110)),
-                vehicleType: lr.vehicleType || 'bike',
-                status: lr.status || 'searching',
-                userRole: lr.userRole || 'commuter',
-                createdAt: lr.createdAt || new Date().toISOString()
-              });
+            if (isOwn && lrId && !seenIds.has(lrId) && CONFIRMED_STATUSES.has(lrStatus)) {
+              if (new Date(lrCreatedAt).getTime() > clearedAtMs) {
+                seenIds.add(lrId);
+                userRides.push({
+                  id: lrId,
+                  pickup: lr.pickup || 'Uppal Metro, Hyderabad',
+                  drop: lr.drop || 'Jangaon Bus Depot',
+                  fare: Math.round(Number(lr.fare || 110)),
+                  vehicleType: lr.vehicleType || 'bike',
+                  status: lrStatus,
+                  userRole: lr.userRole || 'commuter',
+                  createdAt: lrCreatedAt
+                });
+              }
             }
           }
         }
       } catch (e) {}
 
-      // 4. Process Supabase database rows (Strict matching: User ID, Email, or 10-digit Phone only)
+      // 4. Process Supabase database rows (Strict matching & strictly confirmed only)
       for (const row of rides) {
         let notes = {};
         if (typeof row.notes === 'string') {
@@ -3151,21 +3218,26 @@
           userRole = 'driver';
         }
 
-        if (userRole) {
-          seenIds.add(rideId);
-          userRides.push({
-            id: rideId,
-            dbId: row.id,
-            pickup: row.pickup || notes.pickup || 'Uppal Metro, Hyderabad',
-            drop: row.drop_location || notes.drop || 'Jangaon Bus Depot',
-            fare: Math.round(Number(row.per_seat_price || notes.fare || 110)),
-            vehicleType: notes.vehicleType || row.vehicle_type || 'bike',
-            status: notes.status || row.status || 'completed',
-            userRole: userRole,
-            driverName: driverObj.name || (row.driver_name ? String(row.driver_name).replace(/\s*\([^)]*\)/g, '').trim() : ''),
-            riderName: notes.riderName || 'Commuter',
-            createdAt: row.created_at || notes.createdAt || new Date().toISOString()
-          });
+        const rowStatus = String(notes.status || row.status || 'completed').toLowerCase();
+        const rowCreatedAt = row.created_at || notes.createdAt || new Date().toISOString();
+
+        if (userRole && CONFIRMED_STATUSES.has(rowStatus)) {
+          if (new Date(rowCreatedAt).getTime() > clearedAtMs) {
+            seenIds.add(rideId);
+            userRides.push({
+              id: rideId,
+              dbId: row.id,
+              pickup: row.pickup || notes.pickup || 'Uppal Metro, Hyderabad',
+              drop: row.drop_location || notes.drop || 'Jangaon Bus Depot',
+              fare: Math.round(Number(row.per_seat_price || notes.fare || 110)),
+              vehicleType: notes.vehicleType || row.vehicle_type || 'bike',
+              status: rowStatus,
+              userRole: userRole,
+              driverName: driverObj.name || (row.driver_name ? String(row.driver_name).replace(/\s*\([^)]*\)/g, '').trim() : ''),
+              riderName: notes.riderName || 'Commuter',
+              createdAt: rowCreatedAt
+            });
+          }
         }
       }
 
@@ -3314,15 +3386,28 @@
   }
   window.renderActivityList = renderActivityList;
 
-  window.clearUserActivityHistory = function () {
+  window.clearUserActivityHistory = async function () {
+    if (!confirm('Are you sure you want to clear your ride activity history?')) return;
+    const user = state.currentUser;
     try {
+      localStorage.setItem('routemate_activity_cleared_at', String(Date.now()));
       localStorage.removeItem('routemate_user_rides');
     } catch (e) {}
+
     state.activeRiderRequest = null;
     state.activeDriverTrip = null;
     state.activities = [];
-    showToast('Activity cleared. Refreshing real ride history...', 'info');
-    renderActivityList(true);
+
+    if (user?.id && window.db?.supabaseRest) {
+      try {
+        await window.db.supabaseRest(`rides?or=(driver_id.eq.${encodeURIComponent(user.id)},rider_id.eq.${encodeURIComponent(user.id)})`, {
+          method: 'DELETE'
+        });
+      } catch (e) {}
+    }
+
+    showToast('Ride activity cleared successfully.', 'success');
+    renderActivityList();
   };
 
   // =========================================================================
@@ -4033,6 +4118,7 @@
     }
 
     const vehNum = document.getElementById('kycInputVehicleNumber')?.value.trim();
+    const vehChassis = document.getElementById('kycInputChassisNumber')?.value.trim().toUpperCase();
     const vehName = document.getElementById('kycInputVehicleName')?.value.trim();
     const vehColor = document.getElementById('kycInputVehicleColor')?.value.trim();
     const vehType = document.getElementById('kycSelectVehicleType')?.value || 'bike';
@@ -4040,6 +4126,10 @@
 
     if (!vehNum || vehNum.length < 5) {
       showKycError('Please enter a valid Vehicle Registration Number (e.g. TG 09 EA 1234).');
+      return;
+    }
+    if (!vehChassis || vehChassis.length < 5) {
+      showKycError('Please enter a valid Vehicle Chassis Number (from your RC).');
       return;
     }
     if (!vehName) {
@@ -4102,6 +4192,9 @@
         aadhaar_back_photo: state.kyc.formData.aadhaar_back,
         vehicleNumber: vehNum.toUpperCase(),
         vehicle_number: vehNum.toUpperCase(),
+        vehicleChassis: vehChassis,
+        vehicle_chassis: vehChassis,
+        chassis_number: vehChassis,
         vehicleName: vehName,
         vehicle_name: vehName,
         vehicleColor: vehColor,
@@ -4211,6 +4304,7 @@
     const vehicleColor = document.getElementById('addVehicleColorInput')?.value.trim();
     const vehicleNumberRaw = document.getElementById('addVehicleNumberInput')?.value.trim();
     const cleanNumber = (vehicleNumberRaw || '').toUpperCase().replace(/\s+/g, '');
+    const vehicleChassis = document.getElementById('addVehicleChassisInput')?.value.trim().toUpperCase();
 
     const errBox = document.getElementById('addVehicleErrorMsg');
     const submitBtn = document.getElementById('addVehicleSubmitBtn');
@@ -4219,6 +4313,14 @@
     if (!cleanNumber || cleanNumber.length < 5) {
       if (errBox) {
         errBox.textContent = 'Please enter a valid Vehicle Registration Number (e.g. TG09EA1234).';
+        errBox.classList.remove('hidden');
+      }
+      return;
+    }
+
+    if (!vehicleChassis || vehicleChassis.length < 5) {
+      if (errBox) {
+        errBox.textContent = 'Please enter a valid Vehicle Chassis Number (from your RC).';
         errBox.classList.remove('hidden');
       }
       return;
@@ -4265,6 +4367,9 @@
         driver_phone: user.phone || '',
         vehicleNumber: cleanNumber,
         vehicle_number: cleanNumber,
+        vehicleChassis,
+        vehicle_chassis: vehicleChassis,
+        chassis_number: vehicleChassis,
         vehicleType,
         vehicle_type: vehicleType,
         vehicleName,
@@ -4624,6 +4729,12 @@
                 <span class="font-bold text-slate-900 text-xs">${vehName || 'Vehicle'}${vehColor ? ` • <span class="text-blue-600 font-semibold">${vehColor}</span>` : ''}</span>
               </div>
               <span class="text-[10px] font-sans font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full uppercase">${vehType}</span>
+            </div>
+            <div class="col-span-2 pt-1 border-t border-slate-200/60 flex items-center justify-between">
+              <div>
+                <span class="text-[10px] text-slate-400 uppercase font-sans font-bold block">Vehicle Chassis Number</span>
+                <span class="font-bold text-slate-900 text-xs font-mono">${sub.vehicle_chassis || sub.chassis_number || (sub.vehicles && sub.vehicles[0]?.chassis_number) || 'N/A'}</span>
+              </div>
             </div>
             <div class="col-span-2 pt-1 border-t border-slate-200/60 flex items-center justify-between">
               <div>

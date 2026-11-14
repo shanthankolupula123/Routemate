@@ -436,6 +436,39 @@
             if (rows && rows.length > 0) return unpackProfile(rows[0]);
           }
         }
+
+        // 4. Fallback check in driver_kyc table by email or userId
+        if (cleanEmail || (userId && isUUID(userId))) {
+          const kycFilter = cleanEmail
+            ? `driver_email=eq.${encodeURIComponent(cleanEmail)}`
+            : `user_id=eq.${encodeURIComponent(userId)}`;
+          const respKyc = await fetch(`${SUPABASE_CONFIG.url}/rest/v1/driver_kyc?${kycFilter}&select=*&order=submitted_at.desc&limit=1`, {
+            method: 'GET',
+            headers: {
+              'apikey': SUPABASE_CONFIG.publishableKey,
+              'Authorization': `Bearer ${SUPABASE_CONFIG.publishableKey}`
+            }
+          });
+          if (respKyc.ok) {
+            const kRows = await respKyc.json();
+            if (kRows && kRows.length > 0) {
+              const k = kRows[0];
+              return {
+                id: k.user_id || k.id,
+                name: k.driver_name || '',
+                phone: k.driver_phone || '',
+                email: k.driver_email || cleanEmail,
+                role: 'Driver / Commuter',
+                rating: 5.0,
+                total_rides: 0,
+                avatar_url: k.driver_photo || null,
+                is_verified: k.status === 'approved',
+                kyc_status: k.status,
+                upi_id: k.upi_id || ''
+              };
+            }
+          }
+        }
       } catch (e) {
         console.warn('⚠️ [SUPABASE PROFILES] Fetch error:', e);
       }
