@@ -391,7 +391,7 @@
           ? row.name
           : (extra.name && extra.name !== 'User' && !extra.name.includes('@') ? extra.name : (row.name || ''));
         const parsedRole = extra.role || (row.role && !row.role.startsWith('{') ? row.role : 'Daily Commuter');
-        const kycStatus = extra.kyc_status || (row.is_verified ? 'approved' : 'not_submitted');
+        const kycStatus = extra.kyc_status || 'not_submitted';
         const walletBal = extra.wallet_balance !== undefined ? Number(extra.wallet_balance) : (row.wallet_balance !== undefined ? Number(row.wallet_balance) : (kycStatus === 'approved' ? 100 : 0));
         const walletTxs = (Array.isArray(extra.wallet_transactions) && extra.wallet_transactions.length > 0)
           ? extra.wallet_transactions
@@ -595,7 +595,7 @@
 
       let finalId = (existingProfile && existingProfile.id) || (userId && isUUID(userId) ? userId : null);
 
-      // 1. Update existing row or Insert new row in Supabase
+      // 1. Update existing row or Upsert row in Supabase profiles
       try {
         if (existingProfile && existingProfile.id) {
           const resp = await fetch(`${SUPABASE_CONFIG.url}/rest/v1/profiles?id=eq.${encodeURIComponent(existingProfile.id)}`, {
@@ -612,23 +612,23 @@
             console.log('✅ [SUPABASE PROFILES] Successfully updated profile row without overwriting metadata:', existingProfile.id);
           }
         } else {
-          const insertPayload = { ...payload };
-          if (finalId) insertPayload.id = finalId;
+          const upsertPayload = { ...payload };
+          if (finalId) upsertPayload.id = finalId;
           const resp = await fetch(`${SUPABASE_CONFIG.url}/rest/v1/profiles`, {
             method: 'POST',
             headers: {
               'apikey': SUPABASE_CONFIG.publishableKey,
               'Authorization': `Bearer ${SUPABASE_CONFIG.publishableKey}`,
               'Content-Type': 'application/json',
-              'Prefer': 'return=representation'
+              'Prefer': 'resolution=merge-duplicates,return=representation'
             },
-            body: JSON.stringify(insertPayload)
+            body: JSON.stringify(upsertPayload)
           });
           if (resp.ok) {
             const created = await resp.json().catch(() => []);
             if (created && created[0] && created[0].id) {
               finalId = created[0].id;
-              console.log('✅ [SUPABASE PROFILES] Successfully created profile row:', finalId);
+              console.log('✅ [SUPABASE PROFILES] Successfully upserted profile row:', finalId);
             }
           }
         }

@@ -401,6 +401,18 @@ module.exports = async (req, res) => {
                 if (v.status === 'pending') v.status = 'approved';
               });
             }
+            if (isApproved && !meta.welcome_bonus_credited) {
+              meta.wallet_balance = (meta.wallet_balance !== undefined) ? Number(meta.wallet_balance) + 100 : 100;
+              meta.welcome_bonus_credited = true;
+              if (!meta.wallet_transactions) meta.wallet_transactions = [];
+              meta.wallet_transactions.unshift({
+                id: 'tx_welcome_' + Date.now().toString(36),
+                type: 'credit',
+                amount: 100.00,
+                description: '🎁 Routemate ₹100 Welcome Bonus Credited',
+                timestamp: new Date().toISOString()
+              });
+            }
             await fetch(`${SUPABASE_URL}/rest/v1/profiles?id=eq.${encodeURIComponent(pRow.id)}`, {
               method: 'PATCH',
               headers: {
@@ -1126,9 +1138,34 @@ module.exports = async (req, res) => {
       console.warn('[Driver KYC API] driver_kyc table insert notice:', supaErr.message);
     }
 
-    // 2. Sync to Supabase `profiles` table
+    // 2. Sync to Supabase `profiles` table (Non-destructive merge to protect user session & credentials)
     try {
-      const kycRoleMetadata = JSON.stringify({
+      let profFilter = (cleanUserId && isUUID(cleanUserId))
+        ? `id=eq.${encodeURIComponent(cleanUserId)}`
+        : `or=(phone.eq.${encodeURIComponent(submissionRecord.driver_email)},role.ilike.*${encodeURIComponent(submissionRecord.driver_email)}*)`;
+
+      let existingRoleData = {};
+      try {
+        const getProf = await fetch(`${SUPABASE_URL}/rest/v1/profiles?${profFilter}&select=*&limit=1`, {
+          headers: {
+            'apikey': SUPABASE_KEY,
+            'Authorization': `Bearer ${SUPABASE_KEY}`
+          }
+        });
+        if (getProf.ok) {
+          const rows = await getProf.json();
+          if (rows && rows[0]) {
+            if (rows[0].role && typeof rows[0].role === 'string' && rows[0].role.includes('{')) {
+              try { existingRoleData = JSON.parse(rows[0].role); } catch (e) {}
+            }
+          }
+        }
+      } catch (e) {}
+
+      const mergedRole = {
+        ...existingRoleData,
+        email: existingRoleData.email || submissionRecord.driver_email,
+        phone: existingRoleData.phone || submissionRecord.driver_phone,
         kyc_status: 'pending',
         driver_name: submissionRecord.driver_name,
         driver_email: submissionRecord.driver_email,
@@ -1149,11 +1186,9 @@ module.exports = async (req, res) => {
         rc_photo: submissionRecord.rc_photo,
         submitted_at: submissionRecord.submitted_at,
         vehicles: submissionRecord.vehicles
-      });
+      };
 
-      let profFilter = (cleanUserId && isUUID(cleanUserId))
-        ? `id=eq.${encodeURIComponent(cleanUserId)}`
-        : `or=(phone.eq.${encodeURIComponent(submissionRecord.driver_email)},role.ilike.*${encodeURIComponent(submissionRecord.driver_email)}*)`;
+      const isAdminUser = isSuperAdminEmail(submissionRecord.driver_email);
 
       await fetch(`${SUPABASE_URL}/rest/v1/profiles?${profFilter}`, {
         method: 'PATCH',
@@ -1163,8 +1198,8 @@ module.exports = async (req, res) => {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          role: kycRoleMetadata,
-          is_verified: false // Strictly unverified until Admin explicitly approves
+          role: JSON.stringify(mergedRole),
+          is_verified: isAdminUser ? true : false // Strictly unverified driver until Admin explicitly approves
         })
       });
     } catch (profErr) {

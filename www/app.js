@@ -3894,7 +3894,7 @@
       if (forceRefresh) showToast('Checking Driver KYC verification status...', 'info');
 
       // 1. Initial State / Cache Recovery:
-      let status = isSuperAdmin ? 'approved' : (user.kyc_status || (user.is_verified ? 'approved' : state.kyc.status));
+      let status = isSuperAdmin ? 'approved' : (user.kyc_status || state.kyc.status || 'not_submitted');
       let submission = state.kyc.submission || null;
 
       if (!submission) {
@@ -3911,10 +3911,10 @@
       }
 
       if (kycRes) {
-        if (kycRes.status && kycRes.status !== 'not_submitted') {
-          status = kycRes.status;
-        } else if (isSuperAdmin) {
+        if (isSuperAdmin) {
           status = 'approved';
+        } else if (kycRes.status) {
+          status = kycRes.status;
         }
         if (kycRes.submission) {
           submission = kycRes.submission;
