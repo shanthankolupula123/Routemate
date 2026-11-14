@@ -101,8 +101,12 @@ module.exports = async (req, res) => {
     // 3. Fallback / Merge with Supabase `profiles` table
     try {
       let profileQuery = `${SUPABASE_URL}/rest/v1/profiles?select=*`;
-      if (userId) {
-        profileQuery = `${SUPABASE_URL}/rest/v1/profiles?id=eq.${encodeURIComponent(userId)}&select=*`;
+      if (userId && email) {
+        profileQuery = `${SUPABASE_URL}/rest/v1/profiles?or=(id.eq.${encodeURIComponent(userId)},role.ilike.*${encodeURIComponent(email)}*,phone.eq.${encodeURIComponent(email)})&select=*`;
+      } else if (userId) {
+        profileQuery = `${SUPABASE_URL}/rest/v1/profiles?or=(id.eq.${encodeURIComponent(userId)},role.ilike.*${encodeURIComponent(userId)}*,phone.eq.${encodeURIComponent(userId)})&select=*`;
+      } else if (email) {
+        profileQuery = `${SUPABASE_URL}/rest/v1/profiles?or=(role.ilike.*${encodeURIComponent(email)}*,phone.eq.${encodeURIComponent(email)})&select=*`;
       }
       const profRes = await fetch(profileQuery, {
         headers: {
@@ -115,28 +119,45 @@ module.exports = async (req, res) => {
         if (Array.isArray(pRows)) {
           pRows.forEach(p => {
             let extra = {};
-            if (p.role && typeof p.role === 'string' && (p.role.trim().startsWith('{') || p.role.includes('kyc'))) {
+            if (p.role && typeof p.role === 'string' && (p.role.trim().startsWith('{') || p.role.includes('kyc') || p.role.includes('dl_'))) {
               try { extra = JSON.parse(p.role); } catch (e) {}
             }
-            if (extra.kyc_status || extra.dl_number) {
-              const matched = allSubmissions.find(s => s.user_id === p.id || s.id === p.id);
+            const pEmail = extra.email || (p.phone && p.phone.includes('@') ? p.phone : '');
+            const isAdmin = isSuperAdminEmail(pEmail) || isSuperAdminEmail(p.phone) || isSuperAdminEmail(email);
+            if (extra.kyc_status || extra.dl_number || p.is_verified || isAdmin) {
+              const matched = allSubmissions.find(s => s.user_id === p.id || s.id === p.id || (pEmail && s.driver_email === pEmail));
+              const computedStatus = isAdmin ? 'approved' : (extra.kyc_status || (p.is_verified ? 'approved' : 'pending'));
               if (!matched) {
                 allSubmissions.push({
                   id: p.id,
                   user_id: p.id,
-                  driver_name: extra.driver_name || p.name,
+                  driver_name: extra.driver_name || p.name || (isAdmin ? 'Shanthan Kolupula (Super Admin)' : 'Driver'),
                   driver_phone: p.phone,
-                  driver_email: extra.driver_email || (p.phone && p.phone.includes('@') ? p.phone : ''),
+                  driver_email: pEmail || email || '',
                   driver_photo: extra.driver_photo || p.avatar_url,
-                  dl_number: extra.dl_number || '',
+                  dl_number: extra.dl_number || (isAdmin ? 'ADMIN-DL-001' : ''),
                   dl_front_photo: extra.dl_front_photo || '',
                   dl_back_photo: extra.dl_back_photo || '',
                   aadhaar_number: extra.aadhaar_number || '',
                   aadhaar_front_photo: extra.aadhaar_front_photo || '',
                   aadhaar_back_photo: extra.aadhaar_back_photo || '',
-                  vehicle_number: extra.vehicle_number || '',
+                  vehicle_number: extra.vehicle_number || (isAdmin ? 'TS08-RM-0001' : ''),
+                  vehicle_name: extra.vehicle_name || (isAdmin ? 'Super Admin Vehicle' : ''),
+                  vehicle_color: extra.vehicle_color || (isAdmin ? 'Black' : ''),
+                  vehicle_type: extra.vehicle_type || (isAdmin ? 'car' : 'bike'),
                   rc_photo: extra.rc_photo || '',
-                  status: extra.kyc_status || (p.is_verified ? 'approved' : 'pending'),
+                  status: computedStatus,
+                  wallet_balance: extra.wallet_balance !== undefined ? extra.wallet_balance : (computedStatus === 'approved' ? 100 : 0),
+                  welcome_bonus_credited: computedStatus === 'approved',
+                  wallet_transactions: extra.wallet_transactions || (computedStatus === 'approved' ? [
+                    {
+                      id: 'tx_bonus_' + p.id,
+                      type: 'credit',
+                      amount: 100.00,
+                      description: '🎁 Routemate ₹100 Welcome Bonus Credited',
+                      timestamp: p.created_at || new Date().toISOString()
+                    }
+                  ] : []),
                   submitted_at: extra.submitted_at || p.created_at || new Date().toISOString()
                 });
               }
@@ -213,24 +234,72 @@ module.exports = async (req, res) => {
 
     if (userId || email) {
       const cleanEmail = email ? String(email).trim().toLowerCase() : '';
-      const userSub = allSubmissions.find(s => 
+      const isAdmin = isSuperAdminEmail(cleanEmail) || (userId && isSuperAdminEmail(userId));
+      let userSub = allSubmissions.find(s => 
         (userId && (s.user_id === userId || s.id === userId)) ||
         (cleanEmail && s.driver_email && s.driver_email.trim().toLowerCase() === cleanEmail)
       );
+
+      // Super Admin is inherently an approved, verified driver
+      if (isAdmin) {
+        if (!userSub) {
+          userSub = {
+            id: userId || 'admin_usr',
+            user_id: userId || 'admin_usr',
+            driver_name: 'Shanthan Kolupula (Super Admin)',
+            driver_phone: '+919494285249',
+            driver_email: cleanEmail || SUPER_ADMIN_EMAIL,
+            dl_number: 'ADMIN-DL-001',
+            vehicle_number: 'TS08-RM-0001',
+            vehicle_type: 'car',
+            vehicle_name: 'Super Admin Vehicle',
+            vehicle_color: 'Black',
+            status: 'approved',
+            wallet_balance: 100.00,
+            welcome_bonus_credited: true,
+            wallet_transactions: [
+              {
+                id: 'tx_admin_bonus',
+                type: 'credit',
+                amount: 100.00,
+                description: '🎁 Routemate ₹100 Welcome Bonus Credited',
+                timestamp: new Date().toISOString()
+              }
+            ],
+            vehicles: [
+              {
+                id: 'veh_admin_01',
+                user_id: userId || 'admin_usr',
+                vehicle_number: 'TS08-RM-0001',
+                vehicle_type: 'car',
+                vehicle_name: 'Super Admin Vehicle',
+                vehicle_color: 'Black',
+                status: 'approved',
+                is_default: true,
+                submitted_at: new Date().toISOString()
+              }
+            ]
+          };
+        } else {
+          userSub.status = 'approved';
+        }
+      }
+
+      const finalStatus = isAdmin ? 'approved' : (userSub ? userSub.status : 'not_submitted');
       return res.status(200).json({
         success: true,
         submission: userSub || null,
         vehicles: userSub ? (userSub.vehicles || []) : [],
         wallet: {
-          balance: userSub ? userSub.wallet_balance : 0,
-          welcomeBonusCredited: userSub ? Boolean(userSub.welcome_bonus_credited) : false,
+          balance: userSub ? userSub.wallet_balance : (isAdmin ? 100 : 0),
+          welcomeBonusCredited: userSub ? Boolean(userSub.welcome_bonus_credited) : isAdmin,
           transactions: userSub ? (userSub.wallet_transactions || []) : []
         },
         upi: {
           id: userSub ? (userSub.upi_id || '') : '',
           qr: userSub ? (userSub.upi_qr || '') : ''
         },
-        status: userSub ? userSub.status : 'not_submitted'
+        status: finalStatus
       });
     }
 
@@ -1083,7 +1152,11 @@ module.exports = async (req, res) => {
         vehicles: submissionRecord.vehicles
       });
 
-      await fetch(`${SUPABASE_URL}/rest/v1/profiles?id=eq.${encodeURIComponent(cleanUserId)}`, {
+      let profFilter = (cleanUserId && isUUID(cleanUserId))
+        ? `id=eq.${encodeURIComponent(cleanUserId)}`
+        : `or=(phone.eq.${encodeURIComponent(submissionRecord.driver_email)},role.ilike.*${encodeURIComponent(submissionRecord.driver_email)}*)`;
+
+      await fetch(`${SUPABASE_URL}/rest/v1/profiles?${profFilter}`, {
         method: 'PATCH',
         headers: {
           'apikey': SUPABASE_KEY,

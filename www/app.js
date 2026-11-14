@@ -3893,13 +3893,37 @@
     try {
       if (forceRefresh) showToast('Checking Driver KYC verification status...', 'info');
 
+      // 1. Initial State / Cache Recovery:
+      let status = isSuperAdmin ? 'approved' : (user.kyc_status || (user.is_verified ? 'approved' : state.kyc.status));
+      let submission = state.kyc.submission || null;
+
+      if (!submission) {
+        try {
+          const cachedKyc = localStorage.getItem('routemate_driver_kyc');
+          if (cachedKyc) submission = JSON.parse(cachedKyc);
+        } catch (e) {}
+      }
+
+      // 2. Query Driver KYC status from Backend / Database:
       let kycRes = null;
       if (window.db?.kyc?.getDriverKyc) {
         kycRes = await window.db.kyc.getDriverKyc(user.id, user.email);
       }
 
-      const status = kycRes?.status || (user.is_verified ? 'approved' : 'not_submitted');
-      const submission = kycRes?.submission || null;
+      if (kycRes) {
+        if (kycRes.status && kycRes.status !== 'not_submitted') {
+          status = kycRes.status;
+        } else if (isSuperAdmin) {
+          status = 'approved';
+        }
+        if (kycRes.submission) {
+          submission = kycRes.submission;
+        }
+      }
+
+      if (isSuperAdmin) {
+        status = 'approved';
+      }
 
       state.kyc.status = status;
       state.kyc.submission = submission;
@@ -3929,6 +3953,15 @@
         if (sub.upi_id || kycRes.upi?.id) state.driverUpi.upiId = sub.upi_id || kycRes.upi?.id;
         if (sub.upi_qr || kycRes.upi?.qr) state.driverUpi.upiQr = sub.upi_qr || kycRes.upi?.qr;
         if (typeof updateWalletDisplays === 'function') updateWalletDisplays();
+      } else if (status === 'approved') {
+        state.wallet.balance = state.wallet.balance || 100;
+      }
+
+      // Persist state in memory & localStorage to stop session disconnects
+      user.kyc_status = status;
+      try { localStorage.setItem('routemate_user', JSON.stringify(user)); } catch (e) {}
+      if (submission) {
+        try { localStorage.setItem('routemate_driver_kyc', JSON.stringify(submission)); } catch (e) {}
       }
 
       if (!gateContainer) return;
@@ -4432,7 +4465,14 @@
       };
 
       if (window.db?.kyc?.submitDriverKyc) {
-        await window.db.kyc.submitDriverKyc(payload);
+        const res = await window.db.kyc.submitDriverKyc(payload);
+        state.kyc.status = 'pending';
+        state.kyc.submission = (res && res.submission) ? res.submission : payload;
+        if (state.currentUser) {
+          state.currentUser.kyc_status = 'pending';
+          try { localStorage.setItem('routemate_user', JSON.stringify(state.currentUser)); } catch (e) {}
+        }
+        try { localStorage.setItem('routemate_driver_kyc', JSON.stringify(state.kyc.submission)); } catch (e) {}
       }
 
       closeDriverKycModal();
