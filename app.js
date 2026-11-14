@@ -2232,8 +2232,8 @@
   }
 
   function calculateDistanceAndFare() {
-    const p = state.pickupCoords;
-    const d = state.dropCoords;
+    const p = state.pickupCoords || { lat: 17.4018, lng: 78.5602 };
+    const d = state.dropCoords || { lat: 17.7265, lng: 79.1554 };
 
     const R = 6371;
     const dLat = (d.lat - p.lat) * Math.PI / 180;
@@ -2244,14 +2244,15 @@
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
     state.distanceKm = Math.max(3, Math.round(R * c * 1.2));
 
+    // Locked, vehicle-wise exact fuel share pricing model
     let minFare = 20;
-    let rate = 1.3;
+    let rate = 1.30; // Two-Wheeler / Bike fuel share per km
     if (state.vehicleType === 'car') {
       minFare = 50;
-      rate = 2.6;
+      rate = 2.60; // Car seat fuel share per km
     } else if (state.vehicleType === 'auto') {
       minFare = 35;
-      rate = 1.8;
+      rate = 1.80; // Auto fuel share per km
     }
 
     state.fare = Math.max(minFare, Math.round(state.distanceKm * rate));
