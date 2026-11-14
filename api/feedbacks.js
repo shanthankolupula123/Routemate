@@ -125,7 +125,7 @@ module.exports = async (req, res) => {
       if (cleanAdmin !== SUPER_ADMIN_EMAIL) {
         return res.status(403).json({
           success: false,
-          error: 'Unauthorized: Only authorized admin (shanthankolupula123@gmail.com) can execute driver safety actions.'
+          error: 'Unauthorized: Only authorized compliance management team can execute driver safety actions.'
         });
       }
 

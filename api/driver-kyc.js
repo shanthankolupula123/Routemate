@@ -118,33 +118,44 @@ module.exports = async (req, res) => {
         const pRows = await profRes.json();
         if (Array.isArray(pRows)) {
           pRows.forEach(p => {
+            if (p.role === 'PURGED_DUMMY' || p.name === 'Purged Test Account' || p.phone === '0000000000' || p.phone === 'PURGED') return;
+
             let extra = {};
             if (p.role && typeof p.role === 'string' && (p.role.trim().startsWith('{') || p.role.includes('kyc') || p.role.includes('dl_'))) {
               try { extra = JSON.parse(p.role); } catch (e) {}
             }
             const pEmail = extra.email || (p.phone && p.phone.includes('@') ? p.phone : '');
             const isAdmin = isSuperAdminEmail(pEmail) || isSuperAdminEmail(p.phone) || isSuperAdminEmail(email);
-            if (extra.kyc_status || extra.dl_number || p.is_verified || isAdmin) {
+
+            // Strictly check if this profile actually submitted genuine driver KYC
+            const hasRealSubmission = Boolean(
+              (extra.dl_number && extra.dl_number !== 'ADMIN-DL-001') ||
+              (extra.vehicle_number && extra.vehicle_number !== 'TS08-RM-0001') ||
+              (extra.kyc_status && extra.kyc_status !== 'not_submitted') ||
+              (extra.vehicles && Array.isArray(extra.vehicles) && extra.vehicles.length > 0)
+            );
+
+            if (hasRealSubmission) {
               const matched = allSubmissions.find(s => s.user_id === p.id || s.id === p.id || (pEmail && s.driver_email === pEmail));
-              const computedStatus = isAdmin ? 'approved' : (extra.kyc_status || (p.is_verified ? 'approved' : 'pending'));
+              const computedStatus = isAdmin ? 'approved' : (extra.kyc_status || 'pending');
               if (!matched) {
                 allSubmissions.push({
                   id: p.id,
                   user_id: p.id,
-                  driver_name: extra.driver_name || p.name || (isAdmin ? 'Shanthan Kolupula (Super Admin)' : 'Driver'),
+                  driver_name: extra.driver_name || p.name || 'Driver',
                   driver_phone: p.phone,
                   driver_email: pEmail || email || '',
                   driver_photo: extra.driver_photo || p.avatar_url,
-                  dl_number: extra.dl_number || (isAdmin ? 'ADMIN-DL-001' : ''),
+                  dl_number: extra.dl_number || '',
                   dl_front_photo: extra.dl_front_photo || '',
                   dl_back_photo: extra.dl_back_photo || '',
                   aadhaar_number: extra.aadhaar_number || '',
                   aadhaar_front_photo: extra.aadhaar_front_photo || '',
                   aadhaar_back_photo: extra.aadhaar_back_photo || '',
-                  vehicle_number: extra.vehicle_number || (isAdmin ? 'TS08-RM-0001' : ''),
-                  vehicle_name: extra.vehicle_name || (isAdmin ? 'Super Admin Vehicle' : ''),
-                  vehicle_color: extra.vehicle_color || (isAdmin ? 'Black' : ''),
-                  vehicle_type: extra.vehicle_type || (isAdmin ? 'car' : 'bike'),
+                  vehicle_number: extra.vehicle_number || '',
+                  vehicle_name: extra.vehicle_name || '',
+                  vehicle_color: extra.vehicle_color || '',
+                  vehicle_type: extra.vehicle_type || 'bike',
                   rc_photo: extra.rc_photo || '',
                   status: computedStatus,
                   wallet_balance: extra.wallet_balance !== undefined ? extra.wallet_balance : (computedStatus === 'approved' ? 100 : 0),
@@ -240,20 +251,20 @@ module.exports = async (req, res) => {
         (cleanEmail && s.driver_email && s.driver_email.trim().toLowerCase() === cleanEmail)
       );
 
-      // Super Admin is inherently an approved, verified driver
+      // Super Admin is inherently authorized, but strictly uses genuine driver records (no phantom vehicles)
       if (isAdmin) {
         if (!userSub) {
           userSub = {
             id: userId || 'admin_usr',
             user_id: userId || 'admin_usr',
-            driver_name: 'Shanthan Kolupula (Super Admin)',
+            driver_name: 'Shanthan Kolupula',
             driver_phone: '+919494285249',
             driver_email: cleanEmail || SUPER_ADMIN_EMAIL,
-            dl_number: 'ADMIN-DL-001',
-            vehicle_number: 'TS08-RM-0001',
-            vehicle_type: 'car',
-            vehicle_name: 'Super Admin Vehicle',
-            vehicle_color: 'Black',
+            dl_number: '',
+            vehicle_number: '',
+            vehicle_type: 'bike',
+            vehicle_name: '',
+            vehicle_color: '',
             status: 'approved',
             wallet_balance: 100.00,
             welcome_bonus_credited: true,
@@ -266,19 +277,7 @@ module.exports = async (req, res) => {
                 timestamp: new Date().toISOString()
               }
             ],
-            vehicles: [
-              {
-                id: 'veh_admin_01',
-                user_id: userId || 'admin_usr',
-                vehicle_number: 'TS08-RM-0001',
-                vehicle_type: 'car',
-                vehicle_name: 'Super Admin Vehicle',
-                vehicle_color: 'Black',
-                status: 'approved',
-                is_default: true,
-                submitted_at: new Date().toISOString()
-              }
-            ]
+            vehicles: []
           };
         } else {
           userSub.status = 'approved';
@@ -331,7 +330,7 @@ module.exports = async (req, res) => {
       if (!isSuperAdminEmail(cleanAdmin)) {
         return res.status(403).json({
           success: false,
-          error: 'Unauthorized: Only authorized admin (shanthankolupula123@gmail.com) can review driver KYC submissions.'
+          error: 'Unauthorized: Only authorized compliance management team can review driver KYC submissions.'
         });
       }
 
@@ -639,7 +638,7 @@ module.exports = async (req, res) => {
       const { targetId, actionType, notes } = body;
       const cleanAdmin = String(body.adminEmail || body.admin_email || req.headers['x-admin-email'] || '').trim().toLowerCase();
       if (!isSuperAdminEmail(cleanAdmin)) {
-        return res.status(403).json({ success: false, error: 'Unauthorized: Only Super Admin (shanthankolupula123@gmail.com) can take safety actions.' });
+        return res.status(403).json({ success: false, error: 'Unauthorized: Only authorized compliance management team can take safety actions.' });
       }
 
       const list = getStore();
@@ -820,7 +819,7 @@ module.exports = async (req, res) => {
       if (!isSuperAdminEmail(cleanAdmin)) {
         return res.status(403).json({
           success: false,
-          error: 'Unauthorized: Only authorized admin (shanthankolupula123@gmail.com) can verify vehicles.'
+          error: 'Unauthorized: Only authorized compliance management team can verify vehicles.'
         });
       }
 
