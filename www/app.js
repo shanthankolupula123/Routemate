@@ -4226,8 +4226,9 @@
     // Validate current step before advancing forward
     if (direction > 0) {
       if (current === 1) {
-        const name = document.getElementById('kycInputDriverName')?.value.trim();
-        const phone = document.getElementById('kycInputDriverPhone')?.value.replace(/\D/g, '');
+        const name = String(document.getElementById('kycInputDriverName')?.value || '').trim();
+        const phone = String(document.getElementById('kycInputDriverPhone')?.value || '').replace(/\D/g, '');
+        const upi = String(document.getElementById('kycInputUpiId')?.value || '').trim();
         if (!name || name.length < 2) {
           showKycError('Please enter your full legal name as per government ID.');
           return;
@@ -4240,9 +4241,13 @@
           showKycError('Please upload your selfie / passport photo.');
           return;
         }
+        if (!upi) {
+          showKycError('Please enter your personal UPI ID (e.g. name@oksbi).');
+          return;
+        }
       } else if (current === 2) {
-        const dlNum = document.getElementById('kycInputDlNumber')?.value.trim();
-        if (!dlNum || dlNum.length < 8) {
+        const dlNum = String(document.getElementById('kycInputDlNumber')?.value || '').trim();
+        if (!dlNum || dlNum.length < 5) {
           showKycError('Please enter a valid Driving License (DL) Number.');
           return;
         }
@@ -4255,7 +4260,7 @@
           return;
         }
       } else if (current === 3) {
-        const aadhaar = document.getElementById('kycInputAadhaarNumber')?.value.replace(/\D/g, '');
+        const aadhaar = String(document.getElementById('kycInputAadhaarNumber')?.value || '').replace(/\D/g, '');
         if (!aadhaar || aadhaar.length !== 12) {
           showKycError('Please enter a valid 12-digit Aadhaar Card Number.');
           return;
@@ -4387,6 +4392,7 @@
 
   window.handleDriverKycFormSubmit = async function (e) {
     if (e && e.preventDefault) e.preventDefault();
+    if (e && e.stopPropagation) e.stopPropagation();
 
     const user = state.currentUser;
     if (!user) {
@@ -4394,52 +4400,120 @@
       return;
     }
 
-    const vehNum = document.getElementById('kycInputVehicleNumber')?.value.trim();
-    const vehChassis = document.getElementById('kycInputChassisNumber')?.value.trim().toUpperCase();
-    const vehName = document.getElementById('kycInputVehicleName')?.value.trim();
-    const vehColor = document.getElementById('kycInputVehicleColor')?.value.trim();
-    const vehType = document.getElementById('kycSelectVehicleType')?.value || 'bike';
-    const declaration = document.getElementById('kycCheckboxDeclaration')?.checked;
-
-    if (!vehNum || vehNum.length < 5) {
-      showKycError('Please enter a valid Vehicle Registration Number (e.g. TG 09 EA 1234).');
-      return;
-    }
-    if (!vehChassis || vehChassis.length < 5) {
-      showKycError('Please enter a valid Vehicle Chassis Number (from your RC).');
-      return;
-    }
-    if (!vehName) {
-      showKycError('Please enter your Vehicle / Bike Name (e.g. Honda Activa 6G).');
-      return;
-    }
-    if (!vehColor) {
-      showKycError('Please enter your Vehicle Colour (e.g. Black / Matte Red).');
-      return;
-    }
-    if (!state.kyc.formData.rc_photo) {
-      showKycError('Please upload your Vehicle Registration Certificate (RC) photo.');
-      return;
-    }
-    if (!declaration) {
-      showKycError('Please certify the declaration checkbox to proceed.');
-      return;
-    }
-
     const btnSubmit = document.getElementById('btnKycSubmit');
     const btnText = document.getElementById('btnKycSubmitText');
-    if (btnSubmit) btnSubmit.disabled = true;
-    if (btnText) btnText.textContent = 'Submitting KYC...';
 
     try {
+      // 1. Cross-step validation for Step 1
+      const driverName = String(document.getElementById('kycInputDriverName')?.value || user.name || '').trim();
+      const rawPhone = String(document.getElementById('kycInputDriverPhone')?.value || user.phone || '').replace(/\D/g, '').slice(-10);
+      const upiId = String(document.getElementById('kycInputUpiId')?.value || state.driverUpi?.upiId || '').trim();
+
+      if (!driverName || driverName.length < 2) {
+        state.kyc.currentStep = 1;
+        updateKycStepUI();
+        showKycError('Please enter your full legal name on Step 1.');
+        return;
+      }
+      if (!rawPhone || rawPhone.length !== 10) {
+        state.kyc.currentStep = 1;
+        updateKycStepUI();
+        showKycError('Please enter a valid 10-digit mobile number on Step 1.');
+        return;
+      }
+      if (!state.kyc.formData.driver_photo) {
+        state.kyc.currentStep = 1;
+        updateKycStepUI();
+        showKycError('Please upload your Selfie / Photo on Step 1.');
+        return;
+      }
+      if (!upiId) {
+        state.kyc.currentStep = 1;
+        updateKycStepUI();
+        showKycError('Please enter your personal UPI ID (e.g. name@oksbi) on Step 1.');
+        return;
+      }
+
+      // 2. Cross-step validation for Step 2
+      const dlNumber = String(document.getElementById('kycInputDlNumber')?.value || '').trim().toUpperCase();
+      if (!dlNumber || dlNumber.length < 5) {
+        state.kyc.currentStep = 2;
+        updateKycStepUI();
+        showKycError('Please enter your Driving License (DL) Number on Step 2.');
+        return;
+      }
+      if (!state.kyc.formData.dl_front) {
+        state.kyc.currentStep = 2;
+        updateKycStepUI();
+        showKycError('Please upload the front photo of your Driving License on Step 2.');
+        return;
+      }
+      if (!state.kyc.formData.dl_back) {
+        state.kyc.currentStep = 2;
+        updateKycStepUI();
+        showKycError('Please upload the back photo of your Driving License on Step 2.');
+        return;
+      }
+
+      // 3. Cross-step validation for Step 3
+      const aadhaarNumber = String(document.getElementById('kycInputAadhaarNumber')?.value || '').replace(/\D/g, '');
+      if (!aadhaarNumber || aadhaarNumber.length !== 12) {
+        state.kyc.currentStep = 3;
+        updateKycStepUI();
+        showKycError('Please enter a valid 12-digit Aadhaar Card Number on Step 3.');
+        return;
+      }
+      if (!state.kyc.formData.aadhaar_front) {
+        state.kyc.currentStep = 3;
+        updateKycStepUI();
+        showKycError('Please upload the front photo of your Aadhaar Card on Step 3.');
+        return;
+      }
+      if (!state.kyc.formData.aadhaar_back) {
+        state.kyc.currentStep = 3;
+        updateKycStepUI();
+        showKycError('Please upload the back photo of your Aadhaar Card on Step 3.');
+        return;
+      }
+
+      // 4. Validation for Step 4
+      const vehNum = String(document.getElementById('kycInputVehicleNumber')?.value || '').trim().toUpperCase();
+      const vehChassis = String(document.getElementById('kycInputChassisNumber')?.value || '').trim().toUpperCase();
+      const vehName = String(document.getElementById('kycInputVehicleName')?.value || '').trim();
+      const vehColor = String(document.getElementById('kycInputVehicleColor')?.value || '').trim();
+      const vehType = document.getElementById('kycSelectVehicleType')?.value || 'bike';
+      const declaration = Boolean(document.getElementById('kycCheckboxDeclaration')?.checked);
+
+      if (!vehNum || vehNum.length < 5) {
+        showKycError('Please enter a valid Vehicle Registration Number (e.g. TG 09 EA 1234).');
+        return;
+      }
+      if (!vehChassis || vehChassis.length < 5) {
+        showKycError('Please enter a valid Vehicle Chassis Number (from your RC).');
+        return;
+      }
+      if (!vehName) {
+        showKycError('Please enter your Vehicle / Bike Name (e.g. Honda Activa 6G).');
+        return;
+      }
+      if (!vehColor) {
+        showKycError('Please enter your Vehicle Colour (e.g. Black / Matte Red).');
+        return;
+      }
+      if (!state.kyc.formData.rc_photo) {
+        showKycError('Please upload your Vehicle Registration Certificate (RC) photo.');
+        return;
+      }
+      if (!declaration) {
+        showKycError('Please certify the declaration checkbox to proceed.');
+        return;
+      }
+
+      if (btnSubmit) btnSubmit.disabled = true;
+      if (btnText) btnText.textContent = 'Submitting KYC...';
       showToast('Submitting driver documents securely...', 'info');
 
-      const driverName = document.getElementById('kycInputDriverName')?.value.trim() || user.name;
-      const driverPhone = '+91' + document.getElementById('kycInputDriverPhone')?.value.replace(/\D/g, '');
-      const dlNumber = document.getElementById('kycInputDlNumber')?.value.trim().toUpperCase();
-      const aadhaarNumber = document.getElementById('kycInputAadhaarNumber')?.value.replace(/\D/g, '');
-      const upiId = document.getElementById('kycInputUpiId')?.value.trim() || state.driverUpi?.upiId || '';
-
+      const driverPhone = '+91' + rawPhone;
       const payload = {
         userId: user.id,
         user_id: user.id,
@@ -4467,8 +4541,8 @@
         aadhaar_front_photo: state.kyc.formData.aadhaar_front,
         aadhaarBackPhoto: state.kyc.formData.aadhaar_back,
         aadhaar_back_photo: state.kyc.formData.aadhaar_back,
-        vehicleNumber: vehNum.toUpperCase(),
-        vehicle_number: vehNum.toUpperCase(),
+        vehicleNumber: vehNum,
+        vehicle_number: vehNum,
         vehicleChassis: vehChassis,
         vehicle_chassis: vehChassis,
         chassis_number: vehChassis,
@@ -4496,7 +4570,7 @@
       closeDriverKycModal();
       showKycPendingConfirmationModal({
         driverName,
-        vehicleNumber: vehNum.toUpperCase(),
+        vehicleNumber: vehNum,
         vehicleName: vehName,
         vehicleColor: vehColor
       });

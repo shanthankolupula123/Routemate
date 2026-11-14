@@ -1386,19 +1386,19 @@
         <div id="kycStepBar-4" class="h-1.5 rounded-full bg-slate-200 transition-colors"></div>
       </div>
 
-      <form id="driverKycForm" onsubmit="handleDriverKycFormSubmit(event)" class="space-y-4">
+      <form id="driverKycForm" novalidate onsubmit="handleDriverKycFormSubmit(event)" class="space-y-4">
         <!-- STEP 1: PERSONAL & SELFIE -->
         <div id="kycStepContent-1" class="space-y-3">
           <div>
             <label class="block text-[11px] font-bold text-slate-700 mb-1">Legal Full Name (as per DL/Aadhaar) <span class="text-rose-500">*</span></label>
-            <input type="text" id="kycInputDriverName" required placeholder="Full Name" class="w-full px-3.5 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-semibold focus:outline-none focus:border-blue-600 focus:bg-white transition" />
+            <input type="text" id="kycInputDriverName" placeholder="Full Name" class="w-full px-3.5 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-semibold focus:outline-none focus:border-blue-600 focus:bg-white transition" />
           </div>
 
           <div>
             <label class="block text-[11px] font-bold text-slate-700 mb-1">Mobile Phone Number <span class="text-rose-500">*</span></label>
             <div class="relative flex items-center">
               <span class="absolute left-3.5 text-xs font-bold text-slate-500">+91</span>
-              <input type="tel" id="kycInputDriverPhone" required maxlength="10" placeholder="98480 12345" class="w-full pl-12 pr-3.5 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-semibold focus:outline-none focus:border-blue-600 focus:bg-white transition" />
+              <input type="tel" id="kycInputDriverPhone" maxlength="10" placeholder="98480 12345" class="w-full pl-12 pr-3.5 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-semibold focus:outline-none focus:border-blue-600 focus:bg-white transition" />
             </div>
           </div>
 
@@ -1424,7 +1424,7 @@
           <div class="pt-2 border-t border-slate-100 space-y-3">
             <div>
               <label class="block text-[11px] font-bold text-slate-700 mb-1">Personal UPI ID (GPay / PhonePe / Paytm) <span class="text-rose-500">*</span></label>
-              <input type="text" id="kycInputUpiId" required placeholder="e.g. yourname@oksbi or 9848012345@paytm" class="w-full px-3.5 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-semibold focus:outline-none focus:border-blue-600 focus:bg-white transition" />
+              <input type="text" id="kycInputUpiId" placeholder="e.g. yourname@oksbi or 9848012345@paytm" class="w-full px-3.5 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-semibold focus:outline-none focus:border-blue-600 focus:bg-white transition" />
               <p class="text-[10px] text-emerald-600 font-bold mt-1">✓ 100% of rider payments go directly to this UPI ID via Direct P2P (Zero platform fee deducted from your fare).</p>
             </div>
             <div>
@@ -1536,23 +1536,23 @@
         <div id="kycStepContent-4" class="space-y-3 hidden">
           <div>
             <label class="block text-[11px] font-bold text-slate-700 mb-1">Vehicle Registration Number <span class="text-rose-500">*</span></label>
-            <input type="text" id="kycInputVehicleNumber" placeholder="e.g. TG 09 EA 1234" required class="w-full px-3.5 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-semibold uppercase tracking-wider focus:outline-none focus:border-blue-600 focus:bg-white transition" />
+            <input type="text" id="kycInputVehicleNumber" placeholder="e.g. TG 09 EA 1234" class="w-full px-3.5 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-semibold uppercase tracking-wider focus:outline-none focus:border-blue-600 focus:bg-white transition" />
           </div>
 
           <div>
             <label class="block text-[11px] font-bold text-slate-700 mb-1">Vehicle Chassis Number <span class="text-rose-500">*</span></label>
-            <input type="text" id="kycInputChassisNumber" placeholder="e.g. MD625AZ94N2E01234" required class="w-full px-3.5 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-semibold uppercase tracking-wider focus:outline-none focus:border-blue-600 focus:bg-white transition font-mono" />
+            <input type="text" id="kycInputChassisNumber" placeholder="e.g. MD625AZ94N2E01234" class="w-full px-3.5 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-semibold uppercase tracking-wider focus:outline-none focus:border-blue-600 focus:bg-white transition font-mono" />
             <p class="text-[10px] text-slate-400 mt-1">Found on your Vehicle Registration Certificate (RC).</p>
           </div>
 
           <div class="grid grid-cols-2 gap-2">
             <div>
               <label class="block text-[11px] font-bold text-slate-700 mb-1">Vehicle / Bike Name <span class="text-rose-500">*</span></label>
-              <input type="text" id="kycInputVehicleName" placeholder="e.g. Honda Activa 6G" required class="w-full px-3.5 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-semibold focus:outline-none focus:border-blue-600 focus:bg-white transition" />
+              <input type="text" id="kycInputVehicleName" placeholder="e.g. Honda Activa 6G" class="w-full px-3.5 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-semibold focus:outline-none focus:border-blue-600 focus:bg-white transition" />
             </div>
             <div>
               <label class="block text-[11px] font-bold text-slate-700 mb-1">Vehicle Colour <span class="text-rose-500">*</span></label>
-              <input type="text" id="kycInputVehicleColor" placeholder="e.g. Black / Matte Red" required class="w-full px-3.5 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-semibold focus:outline-none focus:border-blue-600 focus:bg-white transition" />
+              <input type="text" id="kycInputVehicleColor" placeholder="e.g. Black / Matte Red" class="w-full px-3.5 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-semibold focus:outline-none focus:border-blue-600 focus:bg-white transition" />
             </div>
           </div>
 
@@ -1585,7 +1585,7 @@
           <!-- Declaration Banner -->
           <div class="p-3 rounded-2xl bg-slate-50 border border-slate-200/80 text-[11px] text-slate-600">
             <label class="flex items-start gap-2 cursor-pointer">
-              <input type="checkbox" id="kycCheckboxDeclaration" required class="mt-0.5 rounded text-blue-600 focus:ring-blue-500" />
+              <input type="checkbox" id="kycCheckboxDeclaration" class="mt-0.5 rounded text-blue-600 focus:ring-blue-500" />
               <span>I certify that all uploaded documents (DL, Aadhaar, RC, and Selfie) are authentic and belong to me.</span>
             </label>
           </div>
@@ -1603,7 +1603,7 @@
             <span>Next Step</span>
             <i data-lucide="arrow-right" class="w-3.5 h-3.5"></i>
           </button>
-          <button type="submit" id="btnKycSubmit" class="px-5 py-2.5 btn-pill-primary text-xs flex items-center gap-1.5 cursor-pointer shadow-md hidden">
+          <button type="button" id="btnKycSubmit" onclick="handleDriverKycFormSubmit(event)" class="px-5 py-2.5 btn-pill-primary text-xs flex items-center gap-1.5 cursor-pointer shadow-md hidden">
             <i data-lucide="check" class="w-4 h-4"></i>
             <span id="btnKycSubmitText">Submit for Verification</span>
           </button>
@@ -2316,8 +2316,8 @@
   </audio>
 
   <!-- Core Scripts -->
-  <script src="payment.js?v=20261114_clean_pricing_v73"></script>
-  <script src="supabaseClient.js?v=20261114_clean_pricing_v73"></script>
-  <script src="app.js?v=20261114_clean_pricing_v73"></script>
+  <script src="payment.js?v=20261114_kyc_submit_fix_v74"></script>
+  <script src="supabaseClient.js?v=20261114_kyc_submit_fix_v74"></script>
+  <script src="app.js?v=20261114_kyc_submit_fix_v74"></script>
 </body>
 </html>
