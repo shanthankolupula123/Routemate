@@ -1510,7 +1510,7 @@ module.exports = async (req, res) => {
           patchBody.driver_id = driver.id;
         }
 
-        const patchRes = await fetch(`${SUPABASE_URL}/rest/v1/rides?id=eq.${encodeURIComponent(existingRow.id)}`, {
+        let patchRes = await fetch(`${SUPABASE_URL}/rest/v1/rides?id=eq.${encodeURIComponent(existingRow.id)}`, {
           method: 'PATCH',
           headers: {
             'apikey': SUPABASE_KEY,
@@ -1520,7 +1520,25 @@ module.exports = async (req, res) => {
           },
           body: JSON.stringify(patchBody)
         });
-        const patchData = await patchRes.json().catch(() => []);
+        let patchData = await patchRes.json().catch(() => []);
+
+        // Safe Fallback: If status check constraint (code 23514) blocks 'accepted', retry with status: 'active'
+        if (!patchRes.ok && (patchData?.code === '23514' || String(patchData?.message || '').includes('check constraint'))) {
+          console.log('⚠️ Status check constraint detected in API, retrying with status: active and notes.status: driver_accepted');
+          patchBody.status = 'active';
+          patchRes = await fetch(`${SUPABASE_URL}/rest/v1/rides?id=eq.${encodeURIComponent(existingRow.id)}`, {
+            method: 'PATCH',
+            headers: {
+              'apikey': SUPABASE_KEY,
+              'Authorization': `Bearer ${SUPABASE_KEY}`,
+              'Content-Type': 'application/json',
+              'Prefer': 'return=representation'
+            },
+            body: JSON.stringify(patchBody)
+          });
+          patchData = await patchRes.json().catch(() => []);
+        }
+
         const finalRow = Array.isArray(patchData) && patchData[0] ? patchData[0] : { ...existingRow, ...patchBody, notes: mergedNotes };
 
         return res.status(200).json({

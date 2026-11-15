@@ -2112,21 +2112,78 @@
       let patchSuccess = false;
       let finalRow = existingRow;
 
-      const patchResp = await supabaseRest(`rides?id=eq.${encodeURIComponent(existingRow.id)}`, {
-        method: 'PATCH',
-        prefer: 'return=representation',
-        body: patchBody
-      });
-
-      if (patchResp.ok) {
-        patchSuccess = true;
-        if (Array.isArray(patchResp.data) && patchResp.data[0]) {
-          finalRow = patchResp.data[0];
-        } else {
-          finalRow = { ...existingRow, ...patchBody, notes: mergedNotes };
+      // Attempt 1: Call Atomic RPC Function (if installed in Supabase SQL editor)
+      if (isUUID(existingRow.id)) {
+        try {
+          const rpcRes = await supabaseRest('rpc/accept_ride_request', {
+            method: 'POST',
+            body: {
+              p_ride_id: existingRow.id,
+              p_driver_id: isUUID(driverUser.id) ? driverUser.id : null,
+              p_driver_name: driverUser.name || 'Verified Driver',
+              p_driver_phone: driverUser.phone || '',
+              p_driver_email: driverUser.email || '',
+              p_driver_avatar: driverPayload.avatar || '',
+              p_vehicle_number: driverPayload.vehicleNumber || 'TG 08 AB 1234',
+              p_vehicle_type: driverPayload.vehicleType || 'bike',
+              p_upi_id: resolvedUpiId,
+              p_upi_qr: resolvedUpiQr
+            }
+          });
+          if (rpcRes.ok && rpcRes.data) {
+            if (rpcRes.data.alreadyAccepted) {
+              return { success: true, alreadyAccepted: true, ride: normalizeRideData(existingRow) };
+            }
+            if (rpcRes.data.alreadyTaken) {
+              return { success: false, alreadyTaken: true, message: rpcRes.data.message };
+            }
+            if (rpcRes.data.cancelled) {
+              return { success: false, cancelled: true, message: rpcRes.data.message };
+            }
+            if (rpcRes.data.success) {
+              patchSuccess = true;
+              finalRow = { ...existingRow, ...patchBody, notes: mergedNotes };
+              console.log('✅ [ATOMIC RPC SUCCESS] Ride accepted via public.accept_ride_request');
+            }
+          }
+        } catch (rpcErr) {
+          console.warn('RPC accept notice:', rpcErr.message);
         }
-      } else {
-        // Fallback retry using backend serverless API
+      }
+
+      // Attempt 2: Direct REST PATCH with check-constraint safety
+      if (!patchSuccess) {
+        const patchResp = await supabaseRest(`rides?id=eq.${encodeURIComponent(existingRow.id)}`, {
+          method: 'PATCH',
+          prefer: 'return=representation',
+          body: patchBody
+        });
+
+        if (patchResp.ok) {
+          patchSuccess = true;
+          if (Array.isArray(patchResp.data) && patchResp.data[0]) {
+            finalRow = patchResp.data[0];
+          } else {
+            finalRow = { ...existingRow, ...patchBody, notes: mergedNotes };
+          }
+        } else if (patchResp.data?.code === '23514' || String(patchResp.data?.message || '').includes('check constraint')) {
+          // If check constraint restricts status: 'accepted', safely update with status: 'active' and notes.status: 'driver_accepted'
+          console.log('⚠️ Status check constraint hit on client, updating with status: active and notes.status: driver_accepted');
+          patchBody.status = 'active';
+          const retryPatch = await supabaseRest(`rides?id=eq.${encodeURIComponent(existingRow.id)}`, {
+            method: 'PATCH',
+            prefer: 'return=representation',
+            body: patchBody
+          });
+          if (retryPatch.ok) {
+            patchSuccess = true;
+            finalRow = (Array.isArray(retryPatch.data) && retryPatch.data[0]) ? retryPatch.data[0] : { ...existingRow, ...patchBody, notes: mergedNotes };
+          }
+        }
+      }
+
+      // Attempt 3: Fallback using backend serverless API
+      if (!patchSuccess) {
         try {
           const apiBase = (typeof window !== 'undefined' && window.location && window.location.origin) ? window.location.origin : 'https://www.routemate.pro';
           const apiRes = await fetch(`${apiBase}/api/driver-kyc`, {

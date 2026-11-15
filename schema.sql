@@ -76,10 +76,20 @@ create table if not exists public.rides (
   verified boolean default true,
   helmet_provided boolean default false,
   ac boolean default false,
-  status text not null default 'active' check (status in ('active', 'completed', 'cancelled')),
+  status text not null default 'active' check (status in ('active', 'searching', 'accepted', 'driver_assigned', 'driver_accepted', 'ride_started', 'completed', 'cancelled', 'expired')),
   notes text,
   created_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
+
+-- Idempotent check constraint upgrade for existing tables:
+do $$
+begin
+  alter table public.rides drop constraint if exists rides_status_check;
+  alter table public.rides add constraint rides_status_check 
+    check (status in ('active', 'searching', 'accepted', 'driver_assigned', 'driver_accepted', 'ride_started', 'completed', 'cancelled', 'expired'));
+exception when others then
+  null;
+end $$;
 
 -- 3. BOOKINGS TABLE
 create table if not exists public.bookings (
@@ -113,11 +123,101 @@ create policy "Allow public update to profiles" on public.profiles for update us
 create policy "Allow public read access to active rides" on public.rides for select using (true);
 create policy "Allow public insert to rides" on public.rides for insert with check (true);
 create policy "Allow public update to rides" on public.rides for update using (true);
+create policy "Allow public delete on rides" on public.rides for delete using (true);
 
 -- Bookings policies
 create policy "Allow public read access to bookings" on public.bookings for select using (true);
 create policy "Allow public insert to bookings" on public.bookings for insert with check (true);
 create policy "Allow public update to bookings" on public.bookings for update using (true);
+
+-- Atomic RPC Function for Instant Ride Claims (Race condition & Lock Resolution)
+create or replace function public.accept_ride_request(
+  p_ride_id uuid,
+  p_driver_id uuid,
+  p_driver_name text,
+  p_driver_phone text,
+  p_driver_email text,
+  p_driver_avatar text,
+  p_vehicle_number text,
+  p_vehicle_type text,
+  p_upi_id text,
+  p_upi_qr text
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_ride public.rides%rowtype;
+  v_notes jsonb;
+  v_current_status text;
+  v_assigned_driver text;
+  v_updated_notes jsonb;
+begin
+  select * into v_ride from public.rides where id = p_ride_id for update;
+  if not found then
+    return jsonb_build_object('success', false, 'notFound', true, 'message', 'Ride request not found or expired.');
+  end if;
+
+  begin
+    v_notes := coalesce(v_ride.notes::jsonb, '{}'::jsonb);
+  exception when others then
+    v_notes := '{}'::jsonb;
+  end;
+
+  v_current_status := coalesce(v_notes->>'status', v_ride.status, '');
+  v_assigned_driver := coalesce(v_ride.driver_id::text, v_notes->>'driverId', '');
+
+  if v_assigned_driver = p_driver_id::text or (p_driver_email is not null and v_notes->>'driverEmail' = p_driver_email) then
+    return jsonb_build_object('success', true, 'alreadyAccepted', true, 'message', 'Ride already accepted by you.');
+  end if;
+
+  if (v_current_status in ('accepted', 'driver_accepted', 'driver_assigned', 'ride_started')) and v_assigned_driver <> '' and v_assigned_driver <> p_driver_id::text then
+    return jsonb_build_object('success', false, 'alreadyTaken', true, 'message', 'This ride has already been accepted by another driver.');
+  end if;
+
+  if v_current_status = 'cancelled' or v_ride.status = 'cancelled' then
+    return jsonb_build_object('success', false, 'cancelled', true, 'message', 'This ride was cancelled by the commuter.');
+  end if;
+
+  v_updated_notes := v_notes || jsonb_build_object(
+    'isRequest', true,
+    'status', 'driver_accepted',
+    'driverId', p_driver_id,
+    'driverName', p_driver_name,
+    'driverPhone', p_driver_phone,
+    'driverEmail', p_driver_email,
+    'driver', jsonb_build_object(
+      'id', p_driver_id,
+      'name', p_driver_name,
+      'phone', p_driver_phone,
+      'email', p_driver_email,
+      'avatar', p_driver_avatar,
+      'vehicleNumber', p_vehicle_number,
+      'vehicleType', p_vehicle_type,
+      'upiId', p_upi_id,
+      'upi_id', p_upi_id,
+      'upiQr', p_upi_qr,
+      'upi_qr', p_upi_qr
+    ),
+    'acceptedAt', now()
+  );
+
+  update public.rides
+  set
+    status = 'accepted',
+    driver_id = p_driver_id,
+    driver_name = p_driver_name,
+    driver_role = 'Driver',
+    notes = v_updated_notes::text
+  where id = p_ride_id;
+
+  return jsonb_build_object('success', true, 'message', 'Ride accepted successfully', 'ride_id', p_ride_id);
+end;
+$$;
+
+grant execute on function public.accept_ride_request to anon, authenticated, service_role;
 
 -- ==============================================================================
 -- Seed Initial Highway Corridor Rides
