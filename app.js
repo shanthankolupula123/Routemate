@@ -356,9 +356,13 @@
           if (parsed.gender && !user.gender) user.gender = parsed.gender;
           if (parsed.dob && !user.dob) user.dob = parsed.dob;
           if (parsed.role && !user.role) user.role = parsed.role;
-          if (parsed.upi_id) {
-            user.upi_id = parsed.upi_id;
-            state.driverUpi.upiId = parsed.upi_id;
+          if (parsed.upi_id || parsed.vpa || parsed.upiId) {
+            const pUpi = parsed.upi_id || parsed.vpa || parsed.upiId;
+            user.upi_id = pUpi;
+            user.vpa = pUpi;
+            user.upiId = pUpi;
+            state.driverUpi.upiId = pUpi;
+            state.driverUpi.vpa = pUpi;
           }
           if (parsed.kyc_status) {
             user.kyc_status = parsed.kyc_status;
@@ -398,9 +402,13 @@
           if (dbProfile.dob && !user.dob) user.dob = dbProfile.dob;
           if (dbProfile.role) user.role = dbProfile.role;
           if (dbProfile.avatar_url && (!user.avatar || user.avatar.includes('routemate.local'))) user.avatar = dbProfile.avatar_url;
-          if (dbProfile.upi_id) {
-            user.upi_id = dbProfile.upi_id;
-            state.driverUpi.upiId = dbProfile.upi_id;
+          if (dbProfile.upi_id || dbProfile.vpa || dbProfile.upiId) {
+            const dbUpi = dbProfile.upi_id || dbProfile.vpa || dbProfile.upiId;
+            user.upi_id = dbUpi;
+            user.vpa = dbUpi;
+            user.upiId = dbUpi;
+            state.driverUpi.upiId = dbUpi;
+            state.driverUpi.vpa = dbUpi;
           }
           if (dbProfile.kyc_status) {
             user.kyc_status = dbProfile.kyc_status;
@@ -440,9 +448,13 @@
         if (kSub?.driver_name && (!user.name || user.name === 'User' || user.name.includes('@'))) {
           user.name = kSub.driver_name;
         }
-        if (kSub?.upi_id || kycCheck?.upi?.id) {
-          user.upi_id = kSub?.upi_id || kycCheck?.upi?.id;
-          state.driverUpi.upiId = user.upi_id;
+        if (kSub?.upi_id || kSub?.vpa || kycCheck?.upi?.id) {
+          const kUpi = kSub?.upi_id || kSub?.vpa || kycCheck?.upi?.id;
+          user.upi_id = kUpi;
+          user.vpa = kUpi;
+          user.upiId = kUpi;
+          state.driverUpi.upiId = kUpi;
+          state.driverUpi.vpa = kUpi;
         }
         if (kSub?.status || kycCheck?.status) {
           user.kyc_status = kSub?.status || kycCheck?.status;
@@ -802,6 +814,213 @@
     if (nav) nav.classList.add('hidden');
   }
 
+  // =========================================================================
+  // DYNAMIC UPI ID RESOLUTION & REAL-TIME UI BINDING ENGINE
+  // =========================================================================
+  function escapeHtml(str) {
+    if (!str) return '';
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  function getResolvedUserUpiId() {
+    // 1. In-memory driverUpi
+    if (state.driverUpi?.upiId && String(state.driverUpi.upiId).trim()) return String(state.driverUpi.upiId).trim();
+    if (state.driverUpi?.vpa && String(state.driverUpi.vpa).trim()) return String(state.driverUpi.vpa).trim();
+
+    // 2. In-memory currentUser
+    if (state.currentUser?.upi_id && String(state.currentUser.upi_id).trim()) return String(state.currentUser.upi_id).trim();
+    if (state.currentUser?.vpa && String(state.currentUser.vpa).trim()) return String(state.currentUser.vpa).trim();
+    if (state.currentUser?.upiId && String(state.currentUser.upiId).trim()) return String(state.currentUser.upiId).trim();
+
+    // 3. KYC submission in memory
+    if (state.kyc?.submission?.upi_id && String(state.kyc.submission.upi_id).trim()) return String(state.kyc.submission.upi_id).trim();
+    if (state.kyc?.submission?.vpa && String(state.kyc.submission.vpa).trim()) return String(state.kyc.submission.vpa).trim();
+    if (state.kyc?.formData?.upi_id && String(state.kyc.formData.upi_id).trim()) return String(state.kyc.formData.upi_id).trim();
+
+    // 4. LocalStorage caches
+    try {
+      const storedUpi = JSON.parse(localStorage.getItem('routemate_driver_upi') || '{}');
+      if (storedUpi.upiId && String(storedUpi.upiId).trim()) return String(storedUpi.upiId).trim();
+      if (storedUpi.vpa && String(storedUpi.vpa).trim()) return String(storedUpi.vpa).trim();
+      if (storedUpi.upi_id && String(storedUpi.upi_id).trim()) return String(storedUpi.upi_id).trim();
+    } catch (e) {}
+
+    try {
+      const storedKyc = JSON.parse(localStorage.getItem('routemate_driver_kyc') || '{}');
+      if (storedKyc.upi_id && String(storedKyc.upi_id).trim()) return String(storedKyc.upi_id).trim();
+      if (storedKyc.vpa && String(storedKyc.vpa).trim()) return String(storedKyc.vpa).trim();
+    } catch (e) {}
+
+    try {
+      const storedUser = JSON.parse(localStorage.getItem('routemate_user') || '{}');
+      if (storedUser.upi_id && String(storedUser.upi_id).trim()) return String(storedUser.upi_id).trim();
+      if (storedUser.vpa && String(storedUser.vpa).trim()) return String(storedUser.vpa).trim();
+      if (storedUser.upiId && String(storedUser.upiId).trim()) return String(storedUser.upiId).trim();
+    } catch (e) {}
+
+    return '';
+  }
+  window.getResolvedUserUpiId = getResolvedUserUpiId;
+
+  function renderAllUpiDisplays() {
+    const upiId = getResolvedUserUpiId();
+
+    // Keep state in sync with resolved UPI ID
+    if (upiId) {
+      if (!state.driverUpi) state.driverUpi = { upiId: '', upiQr: '' };
+      state.driverUpi.upiId = upiId;
+      state.driverUpi.vpa = upiId;
+      if (!state.driverUpi.upiQr) {
+        state.driverUpi.upiQr = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(`upi://pay?pa=${upiId}&pn=${encodeURIComponent(state.currentUser?.name || 'Driver')}&cu=INR`)}`;
+      }
+      if (state.currentUser) {
+        state.currentUser.upi_id = upiId;
+        state.currentUser.vpa = upiId;
+        state.currentUser.upiId = upiId;
+      }
+      if (state.kyc?.submission) {
+        state.kyc.submission.upi_id = upiId;
+        state.kyc.submission.vpa = upiId;
+      }
+    }
+
+    // 1. Profile screen UPI display
+    const profileUpiEl = document.getElementById('profileDriverUpiDisplay');
+    if (profileUpiEl) {
+      if (upiId) {
+        profileUpiEl.innerHTML = `<span class="inline-flex items-center gap-1.5 text-emerald-700 font-mono font-bold text-xs"><i data-lucide="check-circle" class="w-3.5 h-3.5 text-emerald-600"></i><span>${escapeHtml(upiId)}</span></span>`;
+      } else {
+        profileUpiEl.innerHTML = `<span class="text-slate-400 font-sans italic text-xs">Not Set (Tap "Set UPI ID")</span>`;
+      }
+    }
+
+    // 2. Drive dashboard operational UPI display
+    const driveDashboardUpiEl = document.getElementById('driveDashboardUpiDisplay');
+    if (driveDashboardUpiEl) {
+      if (upiId) {
+        driveDashboardUpiEl.innerHTML = `<span class="inline-flex items-center gap-1.5 text-emerald-800 font-mono font-black text-xs"><i data-lucide="check-circle" class="w-3.5 h-3.5 text-emerald-600"></i><span>${escapeHtml(upiId)}</span></span>`;
+      } else {
+        driveDashboardUpiEl.innerHTML = `<span class="text-amber-600 font-sans font-bold text-[11px]">⚠️ Not Set (Tap Set UPI ID)</span>`;
+      }
+    }
+
+    // 3. KYC Step 4 review display
+    const kycReviewUpi = document.getElementById('kycReviewUpiDisplay');
+    if (kycReviewUpi) {
+      kycReviewUpi.textContent = upiId || 'Not Set';
+    }
+
+    // 4. Modal inputs pre-fill
+    const updateModalInput = document.getElementById('inputUpdateUpiId');
+    if (updateModalInput && upiId && !updateModalInput.value) {
+      updateModalInput.value = upiId;
+    }
+
+    const kycUpiInput = document.getElementById('kycInputUpiId');
+    if (kycUpiInput && upiId && !kycUpiInput.value) {
+      kycUpiInput.value = upiId;
+    }
+
+    const completionInput = document.getElementById('completionUpiInput');
+    if (completionInput && upiId && !completionInput.value) {
+      completionInput.value = upiId;
+    }
+
+    if (window.lucide && typeof lucide.createIcons === 'function') {
+      try { lucide.createIcons(); } catch (e) {}
+    }
+  }
+  window.renderAllUpiDisplays = renderAllUpiDisplays;
+
+  let isRevalidatingUser = false;
+  async function revalidateUserProfileAndUpi(silent = false) {
+    const user = state.currentUser;
+    if (!user || !user.id || isRevalidatingUser) return;
+    isRevalidatingUser = true;
+
+    try {
+      if (!silent) showToast('Syncing profile & payment credentials...', 'info');
+
+      // 1. Fetch fresh user profile from Supabase profiles table
+      if (window.db?.auth?.getUserProfile) {
+        const dbProfile = await window.db.auth.getUserProfile(user.id, user.email);
+        if (dbProfile) {
+          if (dbProfile.name && (!user.name || user.name === 'User' || user.name.includes('@'))) user.name = dbProfile.name;
+          if (dbProfile.phone && !user.phone) user.phone = dbProfile.phone;
+          const upi = dbProfile.upi_id || dbProfile.vpa || dbProfile.upiId;
+          if (upi) {
+            user.upi_id = upi;
+            user.vpa = upi;
+            user.upiId = upi;
+            state.driverUpi.upiId = upi;
+            state.driverUpi.vpa = upi;
+          }
+          if (dbProfile.kyc_status) {
+            user.kyc_status = dbProfile.kyc_status;
+            state.kyc.status = dbProfile.kyc_status;
+          }
+          if (dbProfile.wallet_balance !== undefined) {
+            user.wallet_balance = Number(dbProfile.wallet_balance);
+            state.wallet.balance = Number(dbProfile.wallet_balance);
+          }
+        }
+      }
+
+      // 2. Fetch fresh Driver KYC & UPI from database
+      if (window.db?.kyc?.getDriverKyc) {
+        const kycRes = await window.db.kyc.getDriverKyc(user.id, user.email);
+        if (kycRes) {
+          const sub = kycRes.submission || kycRes;
+          const upi = sub.upi_id || sub.vpa || kycRes.upi?.id;
+          if (upi) {
+            user.upi_id = upi;
+            user.vpa = upi;
+            user.upiId = upi;
+            state.driverUpi.upiId = upi;
+            state.driverUpi.vpa = upi;
+          }
+          if (kycRes.status) {
+            user.kyc_status = kycRes.status;
+            state.kyc.status = kycRes.status;
+          }
+          const w = kycRes.wallet || {};
+          const bal = (w.balance !== undefined) ? w.balance : (sub.wallet_balance !== undefined ? sub.wallet_balance : undefined);
+          if (bal !== undefined) {
+            state.wallet.balance = Number(bal);
+            user.wallet_balance = Number(bal);
+          }
+        }
+      }
+
+      // 3. Persist updated profile & UPI caches
+      try { localStorage.setItem('routemate_user', JSON.stringify(user)); } catch (e) {}
+      if (state.driverUpi?.upiId) {
+        try {
+          localStorage.setItem('routemate_driver_upi', JSON.stringify({
+            upiId: state.driverUpi.upiId,
+            vpa: state.driverUpi.upiId,
+            upi_id: state.driverUpi.upiId,
+            upiQr: state.driverUpi.upiQr
+          }));
+        } catch (e) {}
+      }
+
+      renderAllUpiDisplays();
+      if (typeof updateProfileUI === 'function') updateProfileUI();
+      if (typeof updateWalletDisplays === 'function') updateWalletDisplays();
+    } catch (err) {
+      console.warn('Revalidate user profile & UPI notice:', err);
+    } finally {
+      isRevalidatingUser = false;
+    }
+  }
+  window.revalidateUserProfileAndUpi = revalidateUserProfileAndUpi;
+
   function updateProfileUI() {
     const nameEl = document.getElementById('headerUserName');
     const avatarEl = document.getElementById('headerUserAvatar');
@@ -868,10 +1087,9 @@
       renderProfileVehicles();
     }
 
-    // Populate Driver UPI ID display in profile
-    const profileUpiEl = document.getElementById('profileDriverUpiDisplay');
-    if (profileUpiEl) {
-      profileUpiEl.textContent = state.driverUpi?.upiId || (state.kyc?.submission?.upi_id || 'Not Set (Tap "Set UPI ID")');
+    // Populate Driver UPI ID display across profile and drive dashboard
+    if (typeof renderAllUpiDisplays === 'function') {
+      renderAllUpiDisplays();
     }
 
     // Update Location Preferences display in profile & quick chips
@@ -2470,12 +2688,14 @@
       switchMode('rider');
     } else if (tabName === 'drive') {
       switchMode('driver');
+      if (typeof revalidateUserProfileAndUpi === 'function') revalidateUserProfileAndUpi(true);
     } else {
       if (screens[tabName]) screens[tabName].classList.remove('hidden');
       if (tabName === 'activity') {
         renderActivityList();
       } else if (tabName === 'profile') {
         updateProfileUI();
+        if (typeof revalidateUserProfileAndUpi === 'function') revalidateUserProfileAndUpi(true);
       }
     }
   };
@@ -4309,8 +4529,18 @@
         }
         state.wallet.transactions = txs;
 
-        if (sub.upi_id || kycRes.upi?.id) state.driverUpi.upiId = sub.upi_id || kycRes.upi?.id;
+        if (sub.upi_id || sub.vpa || kycRes.upi?.id) {
+          const kUpi = sub.upi_id || sub.vpa || kycRes.upi?.id;
+          state.driverUpi.upiId = kUpi;
+          state.driverUpi.vpa = kUpi;
+          if (user) {
+            user.upi_id = kUpi;
+            user.vpa = kUpi;
+            user.upiId = kUpi;
+          }
+        }
         if (sub.upi_qr || kycRes.upi?.qr) state.driverUpi.upiQr = sub.upi_qr || kycRes.upi?.qr;
+        if (typeof renderAllUpiDisplays === 'function') renderAllUpiDisplays();
         if (typeof updateWalletDisplays === 'function') updateWalletDisplays();
       } else if (status === 'approved') {
         state.wallet.balance = state.wallet.balance || 100;
@@ -5081,6 +5311,7 @@
         if (state.currentUser) {
           state.currentUser.kyc_status = 'pending';
           state.currentUser.upi_id = upiId;
+          state.currentUser.vpa = upiId;
           state.currentUser.upiId = upiId;
           if (state.kyc.formData.upi_qr) {
             state.currentUser.upi_qr = state.kyc.formData.upi_qr;
@@ -5088,10 +5319,14 @@
           }
           try { localStorage.setItem('routemate_user', JSON.stringify(state.currentUser)); } catch (e) {}
         }
-        state.driverUpi = { upiId, upiQr: state.kyc.formData.upi_qr || '' };
+        state.driverUpi = { upiId, vpa: upiId, upiQr: state.kyc.formData.upi_qr || '' };
         try { localStorage.setItem('routemate_driver_upi', JSON.stringify(state.driverUpi)); } catch (e) {}
         try { localStorage.setItem('routemate_driver_kyc', JSON.stringify(state.kyc.submission)); } catch (e) {}
       }
+
+      renderAllUpiDisplays();
+      updateProfileUI();
+      updateWalletDisplays();
 
       closeDriverKycModal();
       showKycPendingConfirmationModal({
@@ -5882,8 +6117,8 @@
       else negAlert.classList.add('hidden');
     }
 
-    if (profileUpi) {
-      profileUpi.textContent = state.driverUpi?.upiId || (state.kyc?.submission?.upi_id || 'Not Set (Tap "Set UPI ID")');
+    if (typeof renderAllUpiDisplays === 'function') {
+      renderAllUpiDisplays();
     }
 
     if (bonusBadge) {
@@ -6053,9 +6288,12 @@
   window.openUpdateUpiModal = function () {
     const modal = document.getElementById('updateUpiModal');
     const input = document.getElementById('inputUpdateUpiId');
-    if (input) input.value = state.driverUpi.upiId || (state.kyc?.submission?.upi_id || '');
+    const resolved = (typeof getResolvedUserUpiId === 'function') ? getResolvedUserUpiId() : (state.driverUpi.upiId || state.kyc?.submission?.upi_id || '');
+    if (input) input.value = resolved || '';
     if (modal) modal.classList.remove('hidden');
-    if (window.lucide) lucide.createIcons();
+    if (window.lucide && typeof lucide.createIcons === 'function') {
+      try { lucide.createIcons(); } catch (e) {}
+    }
   };
 
   window.closeUpdateUpiModal = function () {
@@ -6083,22 +6321,44 @@
     if (btn) btn.disabled = true;
 
     try {
-      showToast('Updating personal UPI ID...', 'info');
+      showToast('Updating personal UPI ID across profiles & drivers...', 'info');
 
       if (window.db?.kyc?.updateDriverUpi) {
         await window.db.kyc.updateDriverUpi(user.id, upiId);
       }
 
       state.driverUpi.upiId = upiId;
+      state.driverUpi.vpa = upiId;
       state.driverUpi.upiQr = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(`upi://pay?pa=${upiId}&pn=${encodeURIComponent(user.name || 'Driver')}&cu=INR`)}`;
-      if (state.kyc?.submission) {
-        state.kyc.submission.upi_id = upiId;
-        state.kyc.submission.upi_qr = state.driverUpi.upiQr;
+
+      if (state.currentUser) {
+        state.currentUser.upi_id = upiId;
+        state.currentUser.vpa = upiId;
+        state.currentUser.upiId = upiId;
+        try { localStorage.setItem('routemate_user', JSON.stringify(state.currentUser)); } catch (e) {}
       }
 
+      if (state.kyc?.submission) {
+        state.kyc.submission.upi_id = upiId;
+        state.kyc.submission.vpa = upiId;
+        state.kyc.submission.upi_qr = state.driverUpi.upiQr;
+        try { localStorage.setItem('routemate_driver_kyc', JSON.stringify(state.kyc.submission)); } catch (e) {}
+      }
+
+      try {
+        localStorage.setItem('routemate_driver_upi', JSON.stringify({
+          upiId: upiId,
+          vpa: upiId,
+          upi_id: upiId,
+          upiQr: state.driverUpi.upiQr
+        }));
+      } catch (e) {}
+
+      renderAllUpiDisplays();
+      updateProfileUI();
       updateWalletDisplays();
       closeUpdateUpiModal();
-      showToast(`✅ UPI ID updated to ${upiId}! 100% of rider payments will go directly to your account.`, 'success');
+      showToast(`✅ UPI ID updated to ${upiId}! 100% of rider payments will route directly to your account.`, 'success');
     } catch (err) {
       console.error('Update UPI ID error:', err);
       showToast('Failed to update UPI ID: ' + err.message, 'danger');
@@ -7383,7 +7643,7 @@
   };
 
   // =========================================================================
-  // BOOTSTRAP ON LOAD
+  // BOOTSTRAP ON LOAD & REAL-TIME REVALIDATION
   // =========================================================================
   document.addEventListener('DOMContentLoaded', async () => {
     initGoogleIdentityServices();
@@ -7395,7 +7655,25 @@
 
     initMapWidget('riderInteractiveMap', 'rider');
     await checkAuthSession();
-    console.log('✨ [ROUTEMATE] Commuter & Driver Maps Live.');
+
+    if (typeof renderAllUpiDisplays === 'function') {
+      renderAllUpiDisplays();
+    }
+
+    // Real-time automatic revalidation on tab focus and app visibility
+    window.addEventListener('focus', () => {
+      if (typeof revalidateUserProfileAndUpi === 'function') {
+        revalidateUserProfileAndUpi(true);
+      }
+    });
+
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible' && typeof revalidateUserProfileAndUpi === 'function') {
+        revalidateUserProfileAndUpi(true);
+      }
+    });
+
+    console.log('✨ [ROUTEMATE] Commuter & Driver Maps Live with Real-time Profile & UPI Synchronization.');
   });
 
 })();

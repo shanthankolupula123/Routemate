@@ -464,9 +464,9 @@ module.exports = async (req, res) => {
     // ACTION: Driver Updates Personal UPI ID & QR Code
     // -----------------------------------------------------------------------
     if (action === 'update_upi') {
-      const { userId, upiId, upiQr } = body;
+      const { userId, upiId, upiQr, vpa } = body;
       const cleanUserId = userId || body.user_id;
-      const cleanUpi = String(upiId || body.upi_id || '').trim();
+      const cleanUpi = String(upiId || vpa || body.upi_id || '').trim();
       const cleanEmail = String(body.email || body.driver_email || '').toLowerCase().trim();
 
       if ((!cleanUserId && !cleanEmail) || !cleanUpi) {
@@ -477,11 +477,121 @@ module.exports = async (req, res) => {
       const idx = list.findIndex(s => (cleanUserId && (s.id === cleanUserId || s.user_id === cleanUserId)) || (cleanEmail && (s.driver_email || '').toLowerCase() === cleanEmail));
       if (idx !== -1) {
         list[idx].upi_id = cleanUpi;
+        list[idx].vpa = cleanUpi;
         if (upiQr || body.upi_qr) list[idx].upi_qr = upiQr || body.upi_qr;
         saveStore(list);
       }
 
-      // Update Supabase `driver_kyc` & `profiles`
+      // 1. Update Supabase `profiles` table against auth.uid()
+      try {
+        let profFilter = (cleanUserId && isUUID(cleanUserId))
+          ? `id=eq.${encodeURIComponent(cleanUserId)}`
+          : (cleanEmail ? `or=(role.ilike.*${encodeURIComponent(cleanEmail)}*,phone.eq.${encodeURIComponent(cleanEmail)})` : `id=eq.${encodeURIComponent(cleanUserId)}`);
+
+        // Fetch existing role JSON to avoid overwriting metadata
+        let existingRole = {};
+        const profGet = await fetch(`${SUPABASE_URL}/rest/v1/profiles?${profFilter}&select=*&limit=1`, {
+          headers: {
+            'apikey': SUPABASE_KEY,
+            'Authorization': `Bearer ${SUPABASE_KEY}`
+          }
+        });
+        if (profGet.ok) {
+          const profRows = await profGet.json();
+          if (profRows && profRows[0]) {
+            try {
+              if (profRows[0].role && typeof profRows[0].role === 'string' && profRows[0].role.includes('{')) {
+                existingRole = JSON.parse(profRows[0].role);
+              }
+            } catch (e) {}
+          }
+        }
+
+        existingRole.upi_id = cleanUpi;
+        existingRole.vpa = cleanUpi;
+        if (upiQr || body.upi_qr) existingRole.upi_qr = upiQr || body.upi_qr;
+
+        await fetch(`${SUPABASE_URL}/rest/v1/profiles?${profFilter}`, {
+          method: 'PATCH',
+          headers: {
+            'apikey': SUPABASE_KEY,
+            'Authorization': `Bearer ${SUPABASE_KEY}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            role: JSON.stringify(existingRole)
+          })
+        });
+
+        // Also attempt direct column update in case upi_id/vpa columns exist
+        try {
+          await fetch(`${SUPABASE_URL}/rest/v1/profiles?${profFilter}`, {
+            method: 'PATCH',
+            headers: {
+              'apikey': SUPABASE_KEY,
+              'Authorization': `Bearer ${SUPABASE_KEY}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              upi_id: cleanUpi,
+              vpa: cleanUpi
+            })
+          });
+        } catch (colErr) {}
+      } catch (profErr) {
+        console.warn('[Driver KYC API] profiles table UPI sync notice:', profErr.message);
+      }
+
+      // 2. Update Supabase `drivers` table against auth.uid()
+      try {
+        let drvFilter = (cleanUserId && isUUID(cleanUserId))
+          ? `or=(id.eq.${encodeURIComponent(cleanUserId)},user_id.eq.${encodeURIComponent(cleanUserId)})`
+          : (cleanEmail ? `or=(email.eq.${encodeURIComponent(cleanEmail)},user_id.eq.${encodeURIComponent(cleanUserId)})` : `user_id.eq.${encodeURIComponent(cleanUserId)}`);
+
+        const drvPatch = await fetch(`${SUPABASE_URL}/rest/v1/drivers?${drvFilter}`, {
+          method: 'PATCH',
+          headers: {
+            'apikey': SUPABASE_KEY,
+            'Authorization': `Bearer ${SUPABASE_KEY}`,
+            'Content-Type': 'application/json',
+            'Prefer': 'return=representation'
+          },
+          body: JSON.stringify({
+            upi_id: cleanUpi,
+            vpa: cleanUpi,
+            ...((upiQr || body.upi_qr) ? { upi_qr: upiQr || body.upi_qr } : {}),
+            updated_at: new Date().toISOString()
+          })
+        });
+
+        // If no rows updated or table exists, try upserting
+        if (drvPatch.ok) {
+          const drvRows = await drvPatch.json().catch(() => []);
+          if (!drvRows || drvRows.length === 0) {
+            await fetch(`${SUPABASE_URL}/rest/v1/drivers`, {
+              method: 'POST',
+              headers: {
+                'apikey': SUPABASE_KEY,
+                'Authorization': `Bearer ${SUPABASE_KEY}`,
+                'Content-Type': 'application/json',
+                'Prefer': 'resolution=merge-duplicates,return=representation'
+              },
+              body: JSON.stringify({
+                id: cleanUserId,
+                user_id: cleanUserId,
+                upi_id: cleanUpi,
+                vpa: cleanUpi,
+                ...((upiQr || body.upi_qr) ? { upi_qr: upiQr || body.upi_qr } : {}),
+                updated_at: new Date().toISOString()
+              })
+            });
+          }
+        }
+      } catch (drvErr) {
+        console.warn('[Driver KYC API] drivers table UPI sync notice:', drvErr.message);
+      }
+
+      // 3. Update Supabase `driver_kyc` table if available
       try {
         let kycFilter = cleanUserId && cleanEmail
           ? `or=(user_id.eq.${encodeURIComponent(cleanUserId)},driver_email.eq.${encodeURIComponent(cleanEmail)})`
@@ -495,24 +605,7 @@ module.exports = async (req, res) => {
           },
           body: JSON.stringify({
             upi_id: cleanUpi,
-            ...((upiQr || body.upi_qr) ? { upi_qr: upiQr || body.upi_qr } : {})
-          })
-        });
-      } catch (e) {}
-
-      try {
-        let profFilter = cleanUserId && cleanEmail
-          ? `or=(id.eq.${encodeURIComponent(cleanUserId)},email.eq.${encodeURIComponent(cleanEmail)})`
-          : (cleanUserId ? `id=eq.${encodeURIComponent(cleanUserId)}` : `email=eq.${encodeURIComponent(cleanEmail)}`);
-        await fetch(`${SUPABASE_URL}/rest/v1/profiles?${profFilter}`, {
-          method: 'PATCH',
-          headers: {
-            'apikey': SUPABASE_KEY,
-            'Authorization': `Bearer ${SUPABASE_KEY}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            upi_id: cleanUpi,
+            vpa: cleanUpi,
             ...((upiQr || body.upi_qr) ? { upi_qr: upiQr || body.upi_qr } : {})
           })
         });
@@ -521,7 +614,8 @@ module.exports = async (req, res) => {
       return res.status(200).json({
         success: true,
         message: 'Direct P2P UPI ID saved successfully!',
-        upiId: cleanUpi
+        upiId: cleanUpi,
+        vpa: cleanUpi
       });
     }
 
@@ -1435,6 +1529,7 @@ module.exports = async (req, res) => {
         vehicle_type: submissionRecord.vehicle_type,
         rc_photo: submissionRecord.rc_photo,
         upi_id: cleanUpiId,
+        vpa: cleanUpiId,
         upi_qr: cleanUpiQr,
         submitted_at: submissionRecord.submitted_at,
         vehicles: submissionRecord.vehicles
@@ -1456,6 +1551,61 @@ module.exports = async (req, res) => {
       });
     } catch (profErr) {
       console.warn('[Driver KYC API] profiles table sync notice:', profErr.message);
+    }
+
+    // 2b. Sync to Supabase `drivers` table against auth.uid()
+    try {
+      let drvFilter = (cleanUserId && isUUID(cleanUserId))
+        ? `or=(id.eq.${encodeURIComponent(cleanUserId)},user_id.eq.${encodeURIComponent(cleanUserId)})`
+        : `user_id.eq.${encodeURIComponent(cleanUserId)}`;
+
+      const drvPatch = await fetch(`${SUPABASE_URL}/rest/v1/drivers?${drvFilter}`, {
+        method: 'PATCH',
+        headers: {
+          'apikey': SUPABASE_KEY,
+          'Authorization': `Bearer ${SUPABASE_KEY}`,
+          'Content-Type': 'application/json',
+          'Prefer': 'return=representation'
+        },
+        body: JSON.stringify({
+          upi_id: cleanUpiId,
+          vpa: cleanUpiId,
+          upi_qr: cleanUpiQr,
+          status: 'pending',
+          updated_at: new Date().toISOString()
+        })
+      });
+
+      if (drvPatch.ok) {
+        const drvRows = await drvPatch.json().catch(() => []);
+        if (!drvRows || drvRows.length === 0) {
+          await fetch(`${SUPABASE_URL}/rest/v1/drivers`, {
+            method: 'POST',
+            headers: {
+              'apikey': SUPABASE_KEY,
+              'Authorization': `Bearer ${SUPABASE_KEY}`,
+              'Content-Type': 'application/json',
+              'Prefer': 'resolution=merge-duplicates,return=representation'
+            },
+            body: JSON.stringify({
+              id: cleanUserId,
+              user_id: cleanUserId,
+              upi_id: cleanUpiId,
+              vpa: cleanUpiId,
+              upi_qr: cleanUpiQr,
+              name: submissionRecord.driver_name,
+              phone: submissionRecord.driver_phone,
+              email: submissionRecord.driver_email,
+              vehicle_number: submissionRecord.vehicle_number,
+              vehicle_type: submissionRecord.vehicle_type,
+              status: 'pending',
+              updated_at: new Date().toISOString()
+            })
+          });
+        }
+      }
+    } catch (drvErr) {
+      console.warn('[Driver KYC API] drivers table sync notice on submit:', drvErr.message);
     }
 
     // 3. Save to persistent store

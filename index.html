@@ -499,6 +499,26 @@
           </div>
         </div>
 
+        <!-- DRIVER P2P UPI SETTLEMENT CARD (DIRECT COMMUTER PAYMENTS) -->
+        <div id="driverUpiCard" class="routemate-card p-3.5 bg-white border border-slate-200/90 flex items-center justify-between gap-3 shadow-xs">
+          <div class="flex items-center gap-2.5 min-w-0">
+            <div class="w-9 h-9 rounded-xl bg-emerald-50 text-emerald-700 border border-emerald-200 flex items-center justify-center font-black flex-shrink-0">
+              <i data-lucide="smartphone" class="w-4 h-4"></i>
+            </div>
+            <div class="min-w-0">
+              <div class="flex items-center gap-1.5">
+                <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Direct P2P Settlement UPI</span>
+                <span class="px-1.5 py-0.2 rounded text-[9px] font-black bg-emerald-100 text-emerald-800">100% to Driver</span>
+              </div>
+              <span id="driveDashboardUpiDisplay" class="text-xs font-mono font-black text-slate-800 truncate block">Checking...</span>
+            </div>
+          </div>
+          <button type="button" onclick="openUpdateUpiModal()" class="px-3 py-1.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 text-xs font-bold transition cursor-pointer flex-shrink-0 active:scale-95 flex items-center gap-1">
+            <i data-lucide="edit-3" class="w-3.5 h-3.5"></i>
+            <span>Set UPI ID</span>
+          </button>
+        </div>
+
         <!-- Driver Online Status Switcher -->
         <div class="routemate-card p-4 flex items-center justify-between">
           <div class="flex items-center gap-3">
@@ -2534,8 +2554,8 @@
   </audio>
 
   <!-- Core Scripts -->
-  <script src="payment.js?v=20261115_broadcast_notification_system_v81"></script>
-  <script src="supabaseClient.js?v=20261115_dual_activity_logging_v82"></script>
-  <script src="app.js?v=20261115_dual_activity_logging_v82"></script>
+  <script src="payment.js?v=20261115_upi_sync_realtime_v83"></script>
+  <script src="supabaseClient.js?v=20261115_upi_sync_realtime_v83"></script>
+  <script src="app.js?v=20261115_upi_sync_realtime_v83"></script>
 </body>
 </html>
