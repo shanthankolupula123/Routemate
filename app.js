@@ -2587,24 +2587,6 @@
         renderRiderActiveHUD(result.request);
         showToast('📡 Realtime Radar Active! Searching for nearby verified drivers...', 'info');
 
-        // Persist to user ride activity history
-        try {
-          const stored = JSON.parse(localStorage.getItem('routemate_user_rides') || '[]');
-          const item = {
-            id: result.request.id,
-            pickup: result.request.pickup,
-            drop: result.request.drop,
-            fare: result.request.fare,
-            vehicleType: result.request.vehicleType || 'bike',
-            status: 'searching',
-            userRole: 'commuter',
-            createdAt: new Date().toISOString()
-          };
-          const filtered = stored.filter(r => r.id !== result.request.id);
-          filtered.unshift(item);
-          localStorage.setItem('routemate_user_rides', JSON.stringify(filtered.slice(0, 30)));
-        } catch (e) {}
-
         window.db.matching.startRiderPolling(result.request.id, (statusData) => {
           handleRiderStatusUpdate(statusData);
         });
@@ -2800,6 +2782,35 @@
         card.innerHTML = '';
       }
       playNotificationSound();
+
+      // Dual-user permanent activity logging: save completed ride locally for commuter
+      try {
+        const commuterActivityRecord = {
+          id: completedRide.id || statusData.requestId || ('REQ-' + Date.now()),
+          dbId: statusData.dbId || completedRide.dbId,
+          userRole: 'commuter',
+          roleLabel: 'Completed Trip as Commuter',
+          status: 'completed',
+          pickup: completedRide.pickup || statusData.pickup || 'Pickup Location',
+          drop: completedRide.drop || statusData.drop || statusData.drop_location || 'Drop Location',
+          fare: Math.round(Number(statusData.fare || completedRide.fare || 110)),
+          distance: Math.round(Number(statusData.distance || completedRide.distance || 0)),
+          vehicleType: statusData.vehicleType || completedRide.vehicleType || 'bike',
+          paymentMethod: statusData.paymentMethod || 'upi',
+          driverId: statusData.driverId || (statusData.driver && statusData.driver.id) || '',
+          driverName: statusData.driverName || (statusData.driver && statusData.driver.name) || 'Verified Driver',
+          driverPhone: statusData.driverPhone || (statusData.driver && statusData.driver.phone) || '',
+          riderId: state.currentUser?.id || '',
+          riderName: state.currentUser?.name || 'Commuter',
+          createdAt: new Date().toISOString()
+        };
+        if (typeof saveActivityRecordLocally === 'function') {
+          saveActivityRecordLocally(commuterActivityRecord);
+        }
+      } catch (actErr) {
+        console.warn('Commuter activity recording notice:', actErr);
+      }
+
       showRidePaymentAndRatingModal(completedRide);
     }
   }
@@ -3377,19 +3388,64 @@
         }
       }
 
-      // 2. Broadcast ride completion to matching engine & commuter
-      await window.db.matching.completeRide(trip.id, {
-        upiId: state.driverUpi?.upiId || state.kyc?.submission?.upi_id || '',
+      // 2. Broadcast ride completion to matching engine & commuter with dual activity logging
+      const completePayload = {
+        driverId: state.currentUser?.id,
         driverName: state.currentUser?.name || 'Verified Driver',
+        driverPhone: state.currentUser?.phone || '',
+        driverEmail: state.currentUser?.email || '',
+        driverAvatar: state.currentUser?.avatar || state.currentUser?.avatar_url || '',
+        riderId: trip.riderId || trip.rider_id || '',
+        riderName: trip.riderName || trip.rider_name || 'Commuter',
+        riderPhone: trip.riderPhone || trip.rider_phone || '',
+        riderEmail: trip.riderEmail || trip.rider_email || '',
+        pickup: trip.pickup,
+        drop: trip.drop || trip.drop_location,
         fare,
         distance,
         vehicleType,
         commissionDeducted: commissionFee,
         commissionSlab: commInfo.slab,
-        vehicleNumber: state.kyc?.submission?.vehicle_number || '',
+        vehicleNumber: state.kyc?.submission?.vehicle_number || trip.vehicleNumber || '',
         paymentMethod,
-        paymentVerifiedByDriver: true
-      });
+        paymentVerifiedByDriver: true,
+        driver: {
+          id: state.currentUser?.id,
+          name: state.currentUser?.name,
+          phone: state.currentUser?.phone,
+          email: state.currentUser?.email,
+          upiId: state.driverUpi?.upiId || state.kyc?.submission?.upi_id || '',
+          vehicleNumber: state.kyc?.submission?.vehicle_number || ''
+        }
+      };
+      await window.db.matching.completeRide(trip.id, completePayload);
+
+      // Record completed activity permanently for Driver
+      try {
+        const driverActivityRecord = {
+          id: trip.id,
+          dbId: trip.dbId || trip.id,
+          userRole: 'driver',
+          roleLabel: 'Completed Ride as Driver',
+          status: 'completed',
+          pickup: trip.pickup,
+          drop: trip.drop || trip.drop_location,
+          fare: fare,
+          distance: distance,
+          vehicleType: vehicleType,
+          paymentMethod: paymentMethod,
+          driverId: state.currentUser?.id,
+          driverName: state.currentUser?.name || 'Verified Driver',
+          riderId: trip.riderId || trip.rider_id || '',
+          riderName: trip.riderName || trip.rider_name || 'Commuter',
+          createdAt: new Date().toISOString()
+        };
+        if (typeof saveActivityRecordLocally === 'function') {
+          saveActivityRecordLocally(driverActivityRecord);
+        }
+      } catch (actErr) {
+        console.warn('Driver activity recording notice:', actErr);
+      }
 
       // 3. Clear driver route markers
       if (state.maps.driver) {
@@ -3483,8 +3539,26 @@
   };
 
   // =========================================================================
-  // ACTIVITY & SOS
+  // ACTIVITY & DUAL-USER RIDE LOGGING
   // =========================================================================
+
+  function saveActivityRecordLocally(record) {
+    if (!record || !record.id) return;
+    try {
+      const stored = JSON.parse(localStorage.getItem('routemate_user_rides') || '[]');
+      const filtered = Array.isArray(stored) ? stored.filter(r => r.id !== record.id) : [];
+      filtered.unshift(record);
+      localStorage.setItem('routemate_user_rides', JSON.stringify(filtered.slice(0, 50)));
+    } catch (e) {}
+
+    if (Array.isArray(state.activities)) {
+      state.activities = [record, ...state.activities.filter(a => a.id !== record.id)];
+    } else {
+      state.activities = [record];
+    }
+  }
+  window.saveActivityRecordLocally = saveActivityRecordLocally;
+
   function formatRideTimestamp(isoString) {
     if (!isoString) return 'Recent';
     try {
@@ -3555,7 +3629,8 @@
         'accepted',
         'ride_started',
         'in_progress',
-        'completed'
+        'completed',
+        'ride_completed'
       ]);
 
       const clearedAtMs = parseInt(localStorage.getItem('routemate_activity_cleared_at') || '0', 10);
@@ -3564,10 +3639,10 @@
       const userRides = [];
       const seenIds = new Set();
 
-      // 1. Check current in-memory active rider request (strictly confirmed only)
+      // 1. Check current in-memory active rider request (strictly confirmed only - NEVER searching)
       if (state.activeRiderRequest) {
         const reqStatus = String(state.activeRiderRequest.status || '').toLowerCase();
-        if (CONFIRMED_STATUSES.has(reqStatus)) {
+        if (CONFIRMED_STATUSES.has(reqStatus) && reqStatus !== 'searching') {
           const createdAt = state.activeRiderRequest.createdAt || new Date().toISOString();
           if (new Date(createdAt).getTime() > clearedAtMs) {
             userRides.push({
@@ -3575,9 +3650,13 @@
               pickup: state.activeRiderRequest.pickup,
               drop: state.activeRiderRequest.drop,
               fare: state.activeRiderRequest.fare,
+              distance: state.activeRiderRequest.distance || 0,
               vehicleType: state.activeRiderRequest.vehicleType || 'bike',
               status: reqStatus,
               userRole: 'commuter',
+              roleLabel: reqStatus === 'completed' ? 'Completed Trip as Commuter' : 'Active Commuter Ride',
+              driverName: state.activeRiderRequest.driver?.name || 'Verified Driver',
+              paymentMethod: state.activeRiderRequest.paymentMethod || 'upi',
               createdAt: createdAt,
               isActiveMemory: true
             });
@@ -3589,7 +3668,7 @@
       // 2. Check current in-memory active driver trip (strictly confirmed only)
       if (state.activeDriverTrip) {
         const tripStatus = String(state.activeDriverTrip.status || 'accepted').toLowerCase();
-        if (CONFIRMED_STATUSES.has(tripStatus)) {
+        if (CONFIRMED_STATUSES.has(tripStatus) && tripStatus !== 'searching') {
           const createdAt = state.activeDriverTrip.createdAt || new Date().toISOString();
           if (new Date(createdAt).getTime() > clearedAtMs) {
             userRides.push({
@@ -3597,9 +3676,13 @@
               pickup: state.activeDriverTrip.pickup,
               drop: state.activeDriverTrip.drop,
               fare: state.activeDriverTrip.fare,
+              distance: state.activeDriverTrip.distance || 0,
               vehicleType: state.activeDriverTrip.vehicleType || 'bike',
               status: tripStatus,
               userRole: 'driver',
+              roleLabel: tripStatus === 'completed' ? 'Completed Ride as Driver' : 'Active Driver Trip',
+              riderName: state.activeDriverTrip.riderName || 'Verified Commuter',
+              paymentMethod: state.activeDriverTrip.paymentMethod || 'upi',
               createdAt: createdAt,
               isActiveMemory: true
             });
@@ -3608,23 +3691,44 @@
         }
       }
 
-      // 3. Check locally cached user rides (strictly confirmed only and after cleared timestamp)
+      // 3. Check Supabase profile recent_rides if stored
+      if (user.recent_rides && Array.isArray(user.recent_rides)) {
+        for (const pr of user.recent_rides) {
+          const prId = String(pr.id || '').trim();
+          const prStatus = String(pr.status || 'completed').toLowerCase();
+          const prCreatedAt = pr.createdAt || new Date().toISOString();
+          if (prId && !seenIds.has(prId) && CONFIRMED_STATUSES.has(prStatus) && prStatus !== 'searching') {
+            if (new Date(prCreatedAt).getTime() > clearedAtMs) {
+              seenIds.add(prId);
+              userRides.push({
+                ...pr,
+                id: prId,
+                status: prStatus,
+                createdAt: prCreatedAt
+              });
+            }
+          }
+        }
+      }
+
+      // 4. Check locally cached user rides (strictly confirmed only and after cleared timestamp)
       try {
         const localList = JSON.parse(localStorage.getItem('routemate_user_rides') || '[]');
         if (Array.isArray(localList)) {
           for (const lr of localList) {
             const lrId = String(lr.id || '').trim();
-            const lrUserId = String(lr.userId || lr.riderId || '').trim();
-            const lrUserEmail = String(lr.userEmail || lr.riderEmail || '').toLowerCase().trim();
-            const lrUserPhone = String(lr.userPhone || lr.riderPhone || '').replace(/\D/g, '').slice(-10);
+            const lrUserId = String(lr.userId || lr.riderId || lr.driverId || '').trim();
+            const lrUserEmail = String(lr.userEmail || lr.riderEmail || lr.driverEmail || '').toLowerCase().trim();
+            const lrUserPhone = String(lr.userPhone || lr.riderPhone || lr.driverPhone || '').replace(/\D/g, '').slice(-10);
             const lrStatus = String(lr.status || '').toLowerCase();
             const lrCreatedAt = lr.createdAt || new Date().toISOString();
 
             const isOwn = (userId && lrUserId === userId) ||
                           (userEmail && lrUserEmail === userEmail) ||
-                          (userPhoneDigits && userPhoneDigits.length >= 10 && lrUserPhone === userPhoneDigits);
+                          (userPhoneDigits && userPhoneDigits.length >= 10 && lrUserPhone === userPhoneDigits) ||
+                          (!lrUserId && !lrUserEmail);
 
-            if (isOwn && lrId && !seenIds.has(lrId) && CONFIRMED_STATUSES.has(lrStatus)) {
+            if (isOwn && lrId && !seenIds.has(lrId) && CONFIRMED_STATUSES.has(lrStatus) && lrStatus !== 'searching') {
               if (new Date(lrCreatedAt).getTime() > clearedAtMs) {
                 seenIds.add(lrId);
                 userRides.push({
@@ -3632,9 +3736,14 @@
                   pickup: lr.pickup || 'Uppal Metro, Hyderabad',
                   drop: lr.drop || 'Jangaon Bus Depot',
                   fare: Math.round(Number(lr.fare || 110)),
+                  distance: lr.distance || 0,
                   vehicleType: lr.vehicleType || 'bike',
                   status: lrStatus,
                   userRole: lr.userRole || 'commuter',
+                  roleLabel: lr.roleLabel || (lr.userRole === 'driver' ? 'Completed Ride as Driver' : 'Completed Trip as Commuter'),
+                  driverName: lr.driverName || 'Verified Driver',
+                  riderName: lr.riderName || 'Verified Commuter',
+                  paymentMethod: lr.paymentMethod || 'upi',
                   createdAt: lrCreatedAt
                 });
               }
@@ -3643,7 +3752,7 @@
         }
       } catch (e) {}
 
-      // 4. Process Supabase database rows (Strict matching & strictly confirmed only)
+      // 5. Process Supabase database rows (Strict matching & strictly confirmed only)
       for (const row of rides) {
         let notes = {};
         if (typeof row.notes === 'string') {
@@ -3655,14 +3764,14 @@
         const rideId = String(row.vehicle_number || notes.id || row.id || '').trim();
         if (seenIds.has(rideId)) continue;
 
-        const riderId = String(notes.riderId || notes.rider_id || row.rider_id || '').trim();
+        const riderId = String(notes.riderId || notes.rider_id || '').trim();
         const riderEmail = String(notes.riderEmail || notes.rider_email || '').toLowerCase().trim();
         const riderPhone = String(notes.riderPhone || notes.rider_phone || '').replace(/\D/g, '').slice(-10);
 
         const driverObj = notes.driver || {};
-        const driverId = String(driverObj.id || row.driver_id || '').trim();
-        const driverEmail = String(driverObj.email || '').toLowerCase().trim();
-        const driverPhone = String(driverObj.phone || '').replace(/\D/g, '').slice(-10);
+        const driverId = String(driverObj.id || notes.driverId || row.driver_id || '').trim();
+        const driverEmail = String(driverObj.email || notes.driverEmail || '').toLowerCase().trim();
+        const driverPhone = String(driverObj.phone || notes.driverPhone || '').replace(/\D/g, '').slice(-10);
 
         let userRole = null;
         if (
@@ -3680,9 +3789,10 @@
         }
 
         const rowStatus = String(notes.status || row.status || 'completed').toLowerCase();
-        const rowCreatedAt = row.created_at || notes.createdAt || new Date().toISOString();
+        const rowCreatedAt = row.created_at || notes.createdAt || notes.completedAt || new Date().toISOString();
 
-        if (userRole && CONFIRMED_STATUSES.has(rowStatus)) {
+        // Strictly exclude pure 'searching' or incomplete requests
+        if (userRole && CONFIRMED_STATUSES.has(rowStatus) && rowStatus !== 'searching') {
           if (new Date(rowCreatedAt).getTime() > clearedAtMs) {
             seenIds.add(rideId);
             userRides.push({
@@ -3691,11 +3801,14 @@
               pickup: row.pickup || notes.pickup || 'Uppal Metro, Hyderabad',
               drop: row.drop_location || notes.drop || 'Jangaon Bus Depot',
               fare: Math.round(Number(row.per_seat_price || notes.fare || 110)),
+              distance: notes.distance || 0,
               vehicleType: notes.vehicleType || row.vehicle_type || 'bike',
               status: rowStatus,
               userRole: userRole,
-              driverName: driverObj.name || (row.driver_name ? String(row.driver_name).replace(/\s*\([^)]*\)/g, '').trim() : ''),
-              riderName: notes.riderName || 'Commuter',
+              roleLabel: userRole === 'driver' ? 'Completed Ride as Driver' : 'Completed Trip as Commuter',
+              driverName: driverObj.name || notes.driverName || (row.driver_name ? String(row.driver_name).replace(/\s*\([^)]*\)/g, '').trim() : 'Verified Driver'),
+              riderName: notes.riderName || 'Verified Commuter',
+              paymentMethod: notes.paymentMethod || 'upi',
               createdAt: rowCreatedAt
             });
           }
@@ -3731,44 +3844,28 @@
       // Render actual user ride activity records
       list.innerHTML = userRides.map(ride => {
         const status = String(ride.status || 'completed').toLowerCase();
+        const isCompleted = status === 'completed' || status === 'ride_completed';
+        const isDriver = ride.userRole === 'driver';
 
         let badgeHtml = '';
-        if (status === 'searching') {
+        if (isCompleted) {
           badgeHtml = `
-            <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-black bg-amber-100 text-amber-800 border border-amber-200">
-              <span class="w-1.5 h-1.5 rounded-full bg-amber-500 animate-ping"></span>
-              <span>Searching</span>
+            <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-black bg-emerald-100 text-emerald-800 border border-emerald-200 shadow-xs">
+              <i data-lucide="check-check" class="w-3 h-3 text-emerald-600"></i>
+              <span>Completed ✓</span>
             </span>
           `;
-        } else if (status === 'active') {
+        } else if (status === 'ride_started' || status === 'in_progress') {
           badgeHtml = `
-            <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-black bg-blue-100 text-blue-800 border border-blue-200">
-              <span class="w-1.5 h-1.5 rounded-full bg-blue-600 animate-ping"></span>
-              <span>Active Request</span>
+            <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-black bg-indigo-100 text-indigo-800 border border-indigo-200">
+              <span class="w-1.5 h-1.5 rounded-full bg-indigo-600 animate-ping"></span>
+              <span>Trip in Progress</span>
             </span>
           `;
         } else if (status === 'driver_accepted' || status === 'accepted') {
           badgeHtml = `
             <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-black bg-cyan-100 text-cyan-800 border border-cyan-200">
               <span>Driver Accepted</span>
-            </span>
-          `;
-        } else if (status === 'ride_started' || status === 'in_progress') {
-          badgeHtml = `
-            <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-black bg-indigo-100 text-indigo-800 border border-indigo-200">
-              <span>Ride in Progress</span>
-            </span>
-          `;
-        } else if (status === 'completed') {
-          badgeHtml = `
-            <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-black bg-emerald-100 text-emerald-800 border border-emerald-200">
-              <span>Completed ✓</span>
-            </span>
-          `;
-        } else if (status === 'cancelled') {
-          badgeHtml = `
-            <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-black bg-slate-100 text-slate-600 border border-slate-200">
-              <span>Cancelled</span>
             </span>
           `;
         } else {
@@ -3781,8 +3878,12 @@
 
         const vehEmoji = ride.vehicleType === 'car' ? '🚗' : (ride.vehicleType === 'auto' ? '🛺' : '🛵');
         const vehLabel = ride.vehicleType === 'car' ? 'Car Seat' : (ride.vehicleType === 'auto' ? 'Auto' : 'Bike');
-        const roleLabel = ride.userRole === 'driver' ? '🛵 Driver' : '🚗 Commuter';
-        const roleBg = ride.userRole === 'driver' ? 'bg-emerald-50 text-emerald-800 border-emerald-200' : 'bg-blue-50 text-blue-800 border-blue-200';
+        const roleLabel = isDriver ? '🛵 Completed Ride as Driver' : '🚗 Completed Trip as Commuter';
+        const roleBg = isDriver ? 'bg-emerald-50 text-emerald-800 border-emerald-200' : 'bg-blue-50 text-blue-800 border-blue-200';
+        const rolePartnerLabel = isDriver
+          ? (ride.riderName ? `Passenger: ${ride.riderName}` : 'Passenger: Verified Commuter')
+          : (ride.driverName ? `Driver: ${ride.driverName}` : 'Driver: Verified Driver');
+        const paymentLabel = ride.paymentMethod === 'cash' ? 'Cash in Hand' : 'Direct UPI';
         const formattedDate = formatRideTimestamp(ride.createdAt);
 
         return `
@@ -3790,7 +3891,7 @@
             <div class="flex items-start justify-between gap-2">
               <div class="space-y-1 min-w-0">
                 <div class="flex items-center gap-1.5 flex-wrap">
-                  <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[9px] font-black border ${roleBg}">
+                  <span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-black border ${roleBg}">
                     ${roleLabel}
                   </span>
                   <span class="text-[10px] text-slate-400 font-medium">${formattedDate}</span>
@@ -3798,6 +3899,9 @@
                 <h4 class="text-xs font-black text-slate-900 truncate">
                   ${ride.pickup} ➔ ${ride.drop}
                 </h4>
+                <p class="text-[11px] text-slate-500 font-medium">
+                  ${rolePartnerLabel}
+                </p>
               </div>
               <div class="flex-shrink-0">
                 ${badgeHtml}
@@ -3811,16 +3915,16 @@
                   <span>${vehLabel}</span>
                 </span>
                 <span class="text-slate-300">•</span>
-                <span class="text-[11px] text-slate-500 font-semibold">Direct UPI</span>
+                <span class="text-[11px] text-slate-500 font-semibold">${paymentLabel}</span>
               </div>
               <div class="text-right">
                 <span class="text-xs font-black text-blue-700">₹${ride.fare}</span>
               </div>
             </div>
 
-            ${(status === 'searching' || status === 'driver_accepted' || status === 'ride_started') ? `
+            ${(!isCompleted) ? `
               <div class="pt-1">
-                <button type="button" onclick="navigateToTab('${ride.userRole === 'driver' ? 'drive' : 'book'}')" class="w-full py-2 rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer">
+                <button type="button" onclick="navigateToTab('${isDriver ? 'drive' : 'book'}')" class="w-full py-2 rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer">
                   <i data-lucide="radio" class="w-3.5 h-3.5"></i>
                   <span>View Live HUD & Tracking</span>
                 </button>
@@ -3848,8 +3952,19 @@
   window.renderActivityList = renderActivityList;
 
   window.clearUserActivityHistory = async function () {
-    if (!confirm('Are you sure you want to clear your ride activity history?')) return;
+    if (!confirm('Are you sure you want to clear your ride activity history? This will permanently delete your ride history from the database.')) return;
     const user = state.currentUser;
+    const list = document.getElementById('activityList');
+
+    if (list) {
+      list.innerHTML = `
+        <div class="p-8 text-center text-slate-400 space-y-2">
+          <div class="w-6 h-6 border-2 border-red-600 border-t-transparent rounded-full animate-spin mx-auto"></div>
+          <p class="text-xs font-semibold text-slate-600">Permanently deleting ride history from database...</p>
+        </div>
+      `;
+    }
+
     try {
       localStorage.setItem('routemate_activity_cleared_at', String(Date.now()));
       localStorage.removeItem('routemate_user_rides');
@@ -3859,15 +3974,16 @@
     state.activeDriverTrip = null;
     state.activities = [];
 
-    if (user?.id && window.db?.supabaseRest) {
+    // Trigger secure database delete queries in Supabase
+    if (user && window.db?.matching?.deleteUserActivities) {
       try {
-        await window.db.supabaseRest(`rides?or=(driver_id.eq.${encodeURIComponent(user.id)},rider_id.eq.${encodeURIComponent(user.id)})`, {
-          method: 'DELETE'
-        });
-      } catch (e) {}
+        await window.db.matching.deleteUserActivities(user);
+      } catch (dbErr) {
+        console.warn('Database activity delete notice:', dbErr);
+      }
     }
 
-    showToast('Ride activity cleared successfully.', 'success');
+    showToast('Ride activity permanently deleted from database ✓', 'success');
     renderActivityList();
   };
 

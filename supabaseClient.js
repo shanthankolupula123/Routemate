@@ -1318,6 +1318,31 @@
     };
   }
 
+  // -------------------------------------------------------------------------
+  // USER PROFILE RECENT RIDES ACTIVITY SYNC HELPER
+  // -------------------------------------------------------------------------
+  async function appendProfileRecentRide(userId, rideItem) {
+    if (!userId || !rideItem) return;
+    try {
+      const resp = await supabaseRest(`profiles?id=eq.${encodeURIComponent(userId)}&select=*&limit=1`);
+      if (resp.ok && Array.isArray(resp.data) && resp.data[0]) {
+        const p = resp.data[0];
+        let extra = {};
+        try { extra = JSON.parse(p.role || '{}'); } catch(e){}
+        const existingList = Array.isArray(extra.recent_rides) ? extra.recent_rides : [];
+        const deduped = [rideItem, ...existingList.filter(r => r.id !== rideItem.id)].slice(0, 30);
+        extra.recent_rides = deduped;
+        await supabaseRest(`profiles?id=eq.${encodeURIComponent(userId)}`, {
+          method: 'PATCH',
+          body: { role: JSON.stringify(extra) }
+        });
+        console.log('✅ [SUPABASE PROFILES] Appended completed ride activity for user:', userId);
+      }
+    } catch (err) {
+      console.warn('appendProfileRecentRide notice:', err);
+    }
+  }
+
   // =========================================================================
   // REALTIME MATCHING ENGINE (REALTIME CHANNELS + 1S POLLING FAILSAFE)
   // =========================================================================
@@ -1749,12 +1774,33 @@
         rating: driverUser.rating || 4.95
       };
 
-      const updateNotes = JSON.stringify({
+      // Fetch existing row & notes to ensure rider metadata is never lost
+      let existingNotes = {};
+      let existingRow = null;
+      try {
+        const fetchResp = await supabaseRest(`rides?vehicle_number=eq.${encodeURIComponent(requestId)}&select=*&limit=1`);
+        if (fetchResp.ok && Array.isArray(fetchResp.data) && fetchResp.data[0]) {
+          existingRow = fetchResp.data[0];
+          if (typeof existingRow.notes === 'string') {
+            try { existingNotes = JSON.parse(existingRow.notes || '{}'); } catch (e) {}
+          } else if (existingRow.notes && typeof existingRow.notes === 'object') {
+            existingNotes = existingRow.notes;
+          }
+        }
+      } catch (e) {}
+
+      const isUUID = (str) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(str || ''));
+      const mergedNotes = {
+        ...existingNotes,
         isRequest: true,
         status: 'driver_accepted',
+        driverId: driverUser.id,
+        driverName: driverUser.name,
+        driverPhone: driverUser.phone,
+        driverEmail: driverUser.email,
         driver: driverPayload,
         acceptedAt: new Date().toISOString()
-      });
+      };
 
       // 1. Broadcast immediate acceptance to Rider via WebSocket
       const client = getSupabase();
@@ -1766,7 +1812,9 @@
             event: 'driver_accepted',
             payload: {
               status: 'driver_accepted',
-              driver: driverPayload
+              requestId,
+              driver: driverPayload,
+              ...mergedNotes
             }
           });
 
@@ -1780,13 +1828,19 @@
         } catch (e) {}
       }
 
-      // 3. Persist update in database
+      // 3. Persist update in database without wiping out rider metadata
+      const patchBody = {
+        status: 'accepted',
+        driver_name: driverUser.name || 'Verified Driver',
+        notes: JSON.stringify(mergedNotes)
+      };
+      if (isUUID(driverUser.id)) {
+        patchBody.driver_id = driverUser.id;
+      }
+
       const resp = await supabaseRest(`rides?vehicle_number=eq.${encodeURIComponent(requestId)}`, {
         method: 'PATCH',
-        body: {
-          status: 'completed',
-          notes: updateNotes
-        }
+        body: patchBody
       });
 
       return { success: resp.ok };
@@ -1818,10 +1872,24 @@
     },
 
     async startRide(requestId) {
-      const updateNotes = JSON.stringify({
+      let existingNotes = {};
+      try {
+        const fetchResp = await supabaseRest(`rides?vehicle_number=eq.${encodeURIComponent(requestId)}&select=*&limit=1`);
+        if (fetchResp.ok && Array.isArray(fetchResp.data) && fetchResp.data[0]) {
+          const r = fetchResp.data[0];
+          if (typeof r.notes === 'string') {
+            try { existingNotes = JSON.parse(r.notes || '{}'); } catch (e) {}
+          } else if (r.notes && typeof r.notes === 'object') {
+            existingNotes = r.notes;
+          }
+        }
+      } catch (e) {}
+
+      const mergedNotes = {
+        ...existingNotes,
         status: 'ride_started',
         startedAt: new Date().toISOString()
-      });
+      };
 
       const client = getSupabase();
       if (client) {
@@ -1830,18 +1898,40 @@
           riderDirect.send({
             type: 'broadcast',
             event: 'ride_started',
-            payload: { status: 'ride_started', requestId }
+            payload: { status: 'ride_started', requestId, ...mergedNotes }
           });
         } catch (e) {}
       }
 
       return await supabaseRest(`rides?vehicle_number=eq.${encodeURIComponent(requestId)}`, {
         method: 'PATCH',
-        body: { notes: updateNotes }
+        body: { status: 'in_progress', notes: JSON.stringify(mergedNotes) }
       });
     },
 
     async notifyDriverPayment(requestId, paymentInfo = {}) {
+      let existingNotes = {};
+      try {
+        const fetchResp = await supabaseRest(`rides?vehicle_number=eq.${encodeURIComponent(requestId)}&select=*&limit=1`);
+        if (fetchResp.ok && Array.isArray(fetchResp.data) && fetchResp.data[0]) {
+          const r = fetchResp.data[0];
+          if (typeof r.notes === 'string') {
+            try { existingNotes = JSON.parse(r.notes || '{}'); } catch (e) {}
+          } else if (r.notes && typeof r.notes === 'object') {
+            existingNotes = r.notes;
+          }
+        }
+      } catch (e) {}
+
+      const mergedNotes = {
+        ...existingNotes,
+        isRequest: true,
+        paymentSettled: true,
+        paymentMethod: paymentInfo.paymentMethod || 'upi',
+        settledAt: new Date().toISOString(),
+        ...paymentInfo
+      };
+
       const client = getSupabase();
       if (client) {
         try {
@@ -1852,7 +1942,7 @@
             payload: {
               status: 'rider_payment_ready',
               requestId,
-              ...paymentInfo
+              ...mergedNotes
             }
           });
         } catch (e) {}
@@ -1863,13 +1953,7 @@
         await supabaseRest(`rides?vehicle_number=eq.${encodeURIComponent(requestId)}`, {
           method: 'PATCH',
           body: {
-            notes: JSON.stringify({
-              isRequest: true,
-              paymentSettled: true,
-              paymentMethod: paymentInfo.paymentMethod || 'upi',
-              settledAt: new Date().toISOString(),
-              ...paymentInfo
-            })
+            notes: JSON.stringify(mergedNotes)
           }
         });
       } catch (e) {}
@@ -1878,13 +1962,71 @@
     },
 
     async completeRide(requestId, completedData = {}) {
-      const updateNotes = JSON.stringify({
+      let existingNotes = {};
+      let existingRow = null;
+      try {
+        const fetchResp = await supabaseRest(`rides?vehicle_number=eq.${encodeURIComponent(requestId)}&select=*&limit=1`);
+        if (fetchResp.ok && Array.isArray(fetchResp.data) && fetchResp.data[0]) {
+          existingRow = fetchResp.data[0];
+          if (typeof existingRow.notes === 'string') {
+            try { existingNotes = JSON.parse(existingRow.notes || '{}'); } catch (e) {}
+          } else if (existingRow.notes && typeof existingRow.notes === 'object') {
+            existingNotes = existingRow.notes;
+          }
+        }
+      } catch (e) {}
+
+      const isUUID = (str) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(str || ''));
+      const completedAt = new Date().toISOString();
+
+      const mergedNotes = {
+        ...existingNotes,
         isRequest: true,
-        status: 'ride_completed',
-        completedAt: new Date().toISOString(),
-        ...completedData
+        status: 'completed',
+        completedAt: completedAt,
+        paymentVerifiedByDriver: true,
+        riderId: completedData.riderId || existingNotes.riderId || '',
+        riderName: completedData.riderName || existingNotes.riderName || 'Commuter',
+        riderEmail: completedData.riderEmail || existingNotes.riderEmail || '',
+        riderPhone: completedData.riderPhone || existingNotes.riderPhone || '',
+        driverId: completedData.driverId || existingNotes.driverId || (existingNotes.driver && existingNotes.driver.id) || '',
+        driverName: completedData.driverName || existingNotes.driverName || (existingNotes.driver && existingNotes.driver.name) || 'Verified Driver',
+        driverPhone: completedData.driverPhone || existingNotes.driverPhone || (existingNotes.driver && existingNotes.driver.phone) || '',
+        driverEmail: completedData.driverEmail || existingNotes.driverEmail || (existingNotes.driver && existingNotes.driver.email) || '',
+        driver: {
+          ...(existingNotes.driver || {}),
+          ...(completedData.driver || {})
+        },
+        pickup: completedData.pickup || existingNotes.pickup || existingRow?.pickup || 'Pickup Location',
+        drop: completedData.drop || existingNotes.drop || existingRow?.drop_location || 'Drop Location',
+        fare: completedData.fare !== undefined ? completedData.fare : (existingNotes.fare !== undefined ? existingNotes.fare : existingRow?.per_seat_price || 110),
+        distance: completedData.distance !== undefined ? completedData.distance : (existingNotes.distance !== undefined ? existingNotes.distance : 0),
+        vehicleType: completedData.vehicleType || existingNotes.vehicleType || existingRow?.vehicle_type || 'bike',
+        paymentMethod: completedData.paymentMethod || existingNotes.paymentMethod || 'upi',
+        commissionDeducted: completedData.commissionDeducted !== undefined ? completedData.commissionDeducted : existingNotes.commissionDeducted,
+        commissionSlab: completedData.commissionSlab || existingNotes.commissionSlab || 'standard',
+        vehicleNumber: completedData.vehicleNumber || existingNotes.vehicleNumber || existingRow?.vehicle_number || ''
+      };
+
+      const patchBody = {
+        status: 'completed',
+        driver_name: mergedNotes.driverName,
+        per_seat_price: mergedNotes.fare,
+        pickup: mergedNotes.pickup,
+        drop_location: mergedNotes.drop,
+        notes: JSON.stringify(mergedNotes)
+      };
+      if (isUUID(mergedNotes.driverId)) {
+        patchBody.driver_id = mergedNotes.driverId;
+      }
+
+      // Update Supabase rides table
+      const resp = await supabaseRest(`rides?vehicle_number=eq.${encodeURIComponent(requestId)}`, {
+        method: 'PATCH',
+        body: patchBody
       });
 
+      // Broadcast ride completion across Realtime WebSockets to Commuter
       const client = getSupabase();
       if (client) {
         try {
@@ -1895,16 +2037,102 @@
             payload: {
               status: 'ride_completed',
               requestId,
-              ...completedData
+              ...mergedNotes
             }
           });
         } catch (e) {}
       }
 
-      return await supabaseRest(`rides?vehicle_number=eq.${encodeURIComponent(requestId)}`, {
-        method: 'PATCH',
-        body: { status: 'completed', notes: updateNotes }
-      });
+      // Automatically insert dual-user permanent activity records in Supabase profiles
+      const driverActivityRecord = {
+        id: requestId,
+        dbId: existingRow?.id || requestId,
+        userRole: 'driver',
+        roleLabel: 'Completed Ride as Driver',
+        status: 'completed',
+        pickup: mergedNotes.pickup,
+        drop: mergedNotes.drop,
+        fare: mergedNotes.fare,
+        distance: mergedNotes.distance,
+        vehicleType: mergedNotes.vehicleType,
+        paymentMethod: mergedNotes.paymentMethod,
+        driverId: mergedNotes.driverId,
+        driverName: mergedNotes.driverName,
+        riderId: mergedNotes.riderId,
+        riderName: mergedNotes.riderName,
+        createdAt: completedAt
+      };
+
+      const commuterActivityRecord = {
+        ...driverActivityRecord,
+        userRole: 'commuter',
+        roleLabel: 'Completed Trip as Commuter'
+      };
+
+      if (isUUID(mergedNotes.driverId)) {
+        appendProfileRecentRide(mergedNotes.driverId, driverActivityRecord).catch(() => {});
+      }
+      if (isUUID(mergedNotes.riderId)) {
+        appendProfileRecentRide(mergedNotes.riderId, commuterActivityRecord).catch(() => {});
+      }
+
+      return resp;
+    },
+
+    /**
+     * Permanent Activity History Deletion from Supabase database
+     */
+    async deleteUserActivities(user) {
+      if (!user) return { success: false };
+      const userId = user.id ? String(user.id).trim() : '';
+      const userEmail = user.email ? String(user.email).trim().toLowerCase() : '';
+      const userPhoneDigits = String(user.phone || '').replace(/\D/g, '').slice(-10);
+      const isUUID = (str) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(str || ''));
+
+      console.log('🗑️ [SUPABASE RIDES] Permanently clearing activity records for user:', userId, userEmail);
+
+      // 1. Delete rows from rides table where user was driver
+      if (userId && isUUID(userId)) {
+        try {
+          await supabaseRest(`rides?driver_id=eq.${encodeURIComponent(userId)}`, { method: 'DELETE' });
+        } catch (e) {}
+      }
+
+      // 2. Delete rows from rides table where user was rider (or in notes)
+      if (userId) {
+        try {
+          await supabaseRest(`rides?notes=ilike.*${encodeURIComponent(userId)}*`, { method: 'DELETE' });
+        } catch (e) {}
+      }
+      if (userEmail) {
+        try {
+          await supabaseRest(`rides?notes=ilike.*${encodeURIComponent(userEmail)}*`, { method: 'DELETE' });
+        } catch (e) {}
+      }
+      if (userPhoneDigits && userPhoneDigits.length >= 10) {
+        try {
+          await supabaseRest(`rides?notes=ilike.*${encodeURIComponent(userPhoneDigits)}*`, { method: 'DELETE' });
+        } catch (e) {}
+      }
+
+      // 3. Clear recent_rides from user's Supabase profiles role JSON
+      try {
+        if (userId && isUUID(userId)) {
+          const profResp = await supabaseRest(`profiles?id=eq.${encodeURIComponent(userId)}&select=*&limit=1`);
+          if (profResp.ok && Array.isArray(profResp.data) && profResp.data[0]) {
+            const p = profResp.data[0];
+            let extra = {};
+            try { extra = JSON.parse(p.role || '{}'); } catch (e) {}
+            extra.recent_rides = [];
+            await supabaseRest(`profiles?id=eq.${encodeURIComponent(userId)}`, {
+              method: 'PATCH',
+              body: { role: JSON.stringify(extra) }
+            });
+          }
+        }
+      } catch (e) {}
+
+      return { success: true };
     }
   };
 
