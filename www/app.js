@@ -99,9 +99,11 @@
     admin: {
       submissions: [],
       feedbacks: [],
+      broadcasts: [],
+      activeBroadcastAudience: 'all',
       activeFilter: 'pending', // 'pending' | 'approved' | 'rejected' | 'all'
       activeSafetyFilter: 'alerts', // 'alerts' | 'low' | 'all'
-      activeSection: 'kyc', // 'kyc' | 'safety'
+      activeSection: 'kyc', // 'kyc' | 'safety' | 'broadcast'
       isLoading: false
     }
   };
@@ -6306,20 +6308,26 @@
     state.admin.activeSection = sec;
     const btnKyc = document.getElementById('adminSecBtn-kyc');
     const btnSafety = document.getElementById('adminSecBtn-safety');
+    const btnBroadcast = document.getElementById('adminSecBtn-broadcast');
     const secKyc = document.getElementById('adminSectionKyc');
     const secSafety = document.getElementById('adminSectionSafety');
+    const secBroadcast = document.getElementById('adminSectionBroadcast');
 
-    if (sec === 'kyc') {
-      if (btnKyc) btnKyc.className = 'flex-1 py-2 rounded-xl bg-white text-slate-900 shadow-sm transition cursor-pointer text-center flex items-center justify-center gap-1.5';
-      if (btnSafety) btnSafety.className = 'flex-1 py-2 rounded-xl text-slate-600 hover:text-slate-900 transition cursor-pointer text-center flex items-center justify-center gap-1.5';
-      if (secKyc) secKyc.classList.remove('hidden');
-      if (secSafety) secSafety.classList.add('hidden');
-    } else {
-      if (btnSafety) btnSafety.className = 'flex-1 py-2 rounded-xl bg-white text-slate-900 shadow-sm transition cursor-pointer text-center flex items-center justify-center gap-1.5';
-      if (btnKyc) btnKyc.className = 'flex-1 py-2 rounded-xl text-slate-600 hover:text-slate-900 transition cursor-pointer text-center flex items-center justify-center gap-1.5';
-      if (secSafety) secSafety.classList.remove('hidden');
-      if (secKyc) secKyc.classList.add('hidden');
+    const activeClasses = 'flex-1 py-2 rounded-xl bg-white text-slate-900 shadow-sm transition cursor-pointer text-center flex items-center justify-center gap-1.5';
+    const inactiveClasses = 'flex-1 py-2 rounded-xl text-slate-600 hover:text-slate-900 transition cursor-pointer text-center flex items-center justify-center gap-1.5';
+
+    if (btnKyc) btnKyc.className = (sec === 'kyc') ? activeClasses : inactiveClasses;
+    if (btnSafety) btnSafety.className = (sec === 'safety') ? activeClasses : inactiveClasses;
+    if (btnBroadcast) btnBroadcast.className = (sec === 'broadcast') ? activeClasses : inactiveClasses;
+
+    if (secKyc) secKyc.classList.toggle('hidden', sec !== 'kyc');
+    if (secSafety) secSafety.classList.toggle('hidden', sec !== 'safety');
+    if (secBroadcast) secBroadcast.classList.toggle('hidden', sec !== 'broadcast');
+
+    if (sec === 'safety') {
       loadAdminSafetyData();
+    } else if (sec === 'broadcast') {
+      loadAdminBroadcastsHistory();
     }
     if (window.lucide) lucide.createIcons();
   };
@@ -6570,7 +6578,152 @@
   window.handleRefreshAdminData = async function (showToastMsg = false) {
     await loadAdminKycSubmissions(showToastMsg);
     await loadAdminSafetyData(false);
+    await loadAdminBroadcastsHistory();
   };
+
+  // -------------------------------------------------------------------------
+  // SUPER ADMIN BROADCAST DISPATCH & PROMOTIONAL NOTICE ENGINE
+  // -------------------------------------------------------------------------
+  window.selectBroadcastAudience = function (audience) {
+    state.admin.activeBroadcastAudience = audience;
+    const audiences = ['all', 'drivers', 'commuters'];
+    audiences.forEach(a => {
+      const btn = document.getElementById(`btnAudience-${a}`);
+      if (btn) {
+        if (a === audience) {
+          btn.className = 'py-2.5 px-3 rounded-2xl border-2 border-purple-600 bg-purple-50 text-purple-900 text-xs font-black transition text-center cursor-pointer shadow-sm';
+        } else {
+          btn.className = 'py-2.5 px-3 rounded-2xl border-2 border-slate-200 bg-slate-50 text-slate-600 text-xs font-bold transition text-center cursor-pointer';
+        }
+      }
+    });
+  };
+
+  window.handleAdminBroadcastSubmit = async function (e) {
+    if (e && e.preventDefault) e.preventDefault();
+    const user = state.currentUser;
+    if (!isAuthorizedSuperAdmin(user)) {
+      showToast('Unauthorized: Super Admin access required.', 'danger');
+      return;
+    }
+
+    const titleInput = document.getElementById('broadcastTitle');
+    const msgInput = document.getElementById('broadcastMessage');
+    const catInput = document.getElementById('broadcastCategory');
+    const actionInput = document.getElementById('broadcastActionTab');
+    const btn = document.getElementById('btnSubmitBroadcast');
+    const btnText = document.getElementById('btnSubmitBroadcastText');
+
+    const title = String(titleInput?.value || '').trim();
+    const message = String(msgInput?.value || '').trim();
+    const audience = state.admin.activeBroadcastAudience || 'all';
+    const category = catInput?.value || 'promo';
+    const actionTab = actionInput?.value || null;
+
+    if (!title || !message) {
+      showToast('Please enter both title and message.', 'warning');
+      return;
+    }
+
+    if (btn) btn.disabled = true;
+    if (btnText) btnText.innerHTML = `<span class="animate-spin inline-block mr-2">⚙️</span> Dispatching Broadcast...`;
+
+    try {
+      showToast('Broadcasting notification & writing to database...', 'info');
+
+      if (!window.db?.broadcast?.sendBroadcast) {
+        throw new Error('Broadcast service not ready.');
+      }
+
+      const res = await window.db.broadcast.sendBroadcast({
+        adminEmail: 'shanthankolupula123@gmail.com',
+        title,
+        message,
+        audience,
+        category,
+        actionTab,
+        actionLabel: actionTab === 'drive' ? 'Open Driver Radar' : (actionTab === 'rider' ? 'Book Ride' : 'View Details')
+      });
+
+      if (!res || !res.success) {
+        throw new Error(res?.error || 'Failed to dispatch broadcast notice.');
+      }
+
+      showToast(`🎉 Notification successfully broadcasted to ${res.deliveredCount || 'all'} users!`, 'success');
+
+      // Clear form inputs
+      if (titleInput) titleInput.value = '';
+      if (msgInput) msgInput.value = '';
+
+      // Immediately display in current admin's bell notification center too
+      if (typeof pushUserNotification === 'function' && res.broadcast) {
+        pushUserNotification(res.broadcast);
+      }
+
+      await loadAdminBroadcastsHistory();
+    } catch (err) {
+      console.error('Broadcast dispatch error:', err);
+      showToast('Broadcast failed: ' + err.message, 'danger');
+    } finally {
+      if (btn) btn.disabled = false;
+      if (btnText) btnText.textContent = 'Broadcast Notification Now';
+    }
+  };
+
+  window.loadAdminBroadcastsHistory = async function () {
+    const container = document.getElementById('adminBroadcastHistoryContainer');
+    if (!container) return;
+
+    try {
+      if (window.db?.broadcast?.getBroadcasts) {
+        const broadcasts = await window.db.broadcast.getBroadcasts();
+        state.admin.broadcasts = broadcasts || [];
+        renderAdminBroadcastHistory();
+      }
+    } catch (err) {
+      console.warn('Load broadcasts error:', err);
+    }
+  };
+
+  function renderAdminBroadcastHistory() {
+    const container = document.getElementById('adminBroadcastHistoryContainer');
+    if (!container) return;
+
+    const list = state.admin.broadcasts || [];
+    if (list.length === 0) {
+      container.innerHTML = `
+        <div class="py-6 text-center text-slate-400 text-xs">
+          <p class="font-bold">No broadcasts dispatched yet</p>
+          <p class="text-[10px]">Send promotional notices or route updates above.</p>
+        </div>
+      `;
+      return;
+    }
+
+    container.innerHTML = list.map(b => {
+      const timeStr = formatRelativeTime(b.sentAt);
+      const audLabel = b.audience === 'drivers' ? '🛵 Drivers Only' : (b.audience === 'commuters' ? '🚗 Commuters Only' : '👥 All Users');
+
+      return `
+        <div class="p-3 rounded-2xl border border-slate-200 bg-slate-50 space-y-1.5 text-xs">
+          <div class="flex items-start justify-between gap-2">
+            <div>
+              <div class="flex items-center gap-1.5 flex-wrap">
+                <span class="font-black text-slate-900">${b.title}</span>
+                <span class="px-2 py-0.5 rounded-full bg-purple-100 text-purple-800 text-[9px] font-black uppercase">${b.category || 'promo'}</span>
+                <span class="px-2 py-0.5 rounded-full bg-slate-200 text-slate-700 text-[9px] font-bold">${audLabel}</span>
+              </div>
+              <p class="text-[10px] text-slate-400 mt-0.5">Dispatched: <strong class="text-slate-600">${timeStr}</strong> • Delivered to: <strong class="text-purple-700">${b.deliveredCount || 1} users</strong></p>
+            </div>
+            <span class="text-[9px] font-mono text-slate-400">${String(b.id || '').slice(-6).toUpperCase()}</span>
+          </div>
+          <p class="text-[11px] text-slate-600 italic bg-white p-2 rounded-xl border border-slate-100">"${b.message}"</p>
+        </div>
+      `;
+    }).join('');
+
+    if (window.lucide) lucide.createIcons();
+  }
 
   // -------------------------------------------------------------------------
   // IMAGE LIGHTBOX PREVIEW HELPER
@@ -6780,6 +6933,26 @@
       action: { label: 'Verify UPI ID', tab: 'profile' }
     });
 
+    // 5. Database Fan-Out Broadcast Notifications (from User Profile role JSON)
+    let profileBroadcasts = [];
+    try {
+      if (user?.role && typeof user.role === 'string' && user.role.includes('{')) {
+        const parsed = JSON.parse(user.role);
+        if (Array.isArray(parsed.broadcast_notifications)) profileBroadcasts = parsed.broadcast_notifications;
+      } else if (user?.role && typeof user.role === 'object' && Array.isArray(user.role.broadcast_notifications)) {
+        profileBroadcasts = user.role.broadcast_notifications;
+      }
+    } catch (e) {}
+
+    profileBroadcasts.forEach(bn => {
+      if (!items.some(it => it.id === bn.id)) {
+        items.push({
+          ...bn,
+          read: readSet.has(bn.id)
+        });
+      }
+    });
+
     // Merge any stored custom notifications
     const customNotifs = getStoredCustomNotifs(userId);
     customNotifs.forEach(c => {
@@ -6802,6 +6975,70 @@
     state.notifications.items = items;
     updateNotificationBadge();
     renderNotifications();
+
+    // 6. Background Async Fetch of Active Broadcasts
+    if (window.db?.broadcast?.getBroadcasts) {
+      window.db.broadcast.getBroadcasts().then(bcs => {
+        if (Array.isArray(bcs) && bcs.length > 0) {
+          let updated = false;
+          bcs.forEach(b => {
+            const isDriver = state.currentUser?.kyc_status === 'approved' || !!state.currentUser?.vehicleNumber;
+            if (b.audience === 'drivers' && !isDriver) return;
+            if (b.audience === 'commuters' && isDriver && state.activeTab === 'drive') return;
+
+            if (!state.notifications.items.some(it => it.id === b.id)) {
+              state.notifications.items.unshift({
+                id: b.id,
+                type: b.category || 'promo',
+                title: b.title,
+                message: b.message,
+                timestamp: b.sentAt,
+                icon: b.icon || 'megaphone',
+                iconBg: b.iconBg || 'bg-purple-100 text-purple-800',
+                action: b.actionTab ? { label: b.actionLabel || 'View Details', tab: b.actionTab } : null,
+                read: state.notifications.readIds.has(b.id)
+              });
+              updated = true;
+            }
+          });
+          if (updated) {
+            updateNotificationBadge();
+            renderNotifications();
+          }
+        }
+      }).catch(() => {});
+    }
+
+    // 7. Subscribe to Supabase Realtime Broadcast Channel for Live Updates
+    const client = window.db?.getSupabase?.();
+    if (client && !window._routemateBroadcastSubscribed) {
+      window._routemateBroadcastSubscribed = true;
+      try {
+        const bcChannel = client.channel('routemate-broadcasts');
+        bcChannel.on('broadcast', { event: 'new_broadcast' }, (msg) => {
+          const p = msg.payload || {};
+          console.log('⚡ [REALTIME BROADCAST RECEIVED]', p);
+          if (p && p.id) {
+            const isDriver = state.currentUser?.kyc_status === 'approved' || !!state.currentUser?.vehicleNumber;
+            if (p.audience === 'drivers' && !isDriver) return;
+            if (p.audience === 'commuters' && isDriver && state.activeTab === 'drive') return;
+
+            pushUserNotification({
+              id: p.id,
+              type: p.category || 'promo',
+              title: p.title,
+              message: p.message,
+              timestamp: p.sentAt || new Date().toISOString(),
+              icon: p.icon || 'megaphone',
+              iconBg: p.iconBg || 'bg-purple-100 text-purple-800',
+              action: p.actionTab ? { label: p.actionLabel || 'View Details', tab: p.actionTab } : null
+            });
+          }
+        }).subscribe();
+      } catch (rtErr) {
+        console.warn('Realtime broadcast subscribe notice:', rtErr);
+      }
+    }
   }
   window.initNotificationSystem = initNotificationSystem;
 

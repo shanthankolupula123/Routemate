@@ -1908,12 +1908,63 @@
     }
   };
 
+  // -------------------------------------------------------------------------
+  // BROADCAST NOTIFICATION SERVICE (SUPER ADMIN DISPATCH & REALTIME DELIVERY)
+  // -------------------------------------------------------------------------
+  const broadcast = {
+    async getBroadcasts() {
+      const apiBase = (typeof window !== 'undefined' && window.location && window.location.origin)
+        ? window.location.origin
+        : 'https://www.routemate.pro';
+      try {
+        const resp = await fetch(`${apiBase}/api/broadcast`);
+        const data = await resp.json().catch(() => ({}));
+        return data?.broadcasts || [];
+      } catch (e) {
+        return [];
+      }
+    },
+
+    async sendBroadcast(payload) {
+      const apiBase = (typeof window !== 'undefined' && window.location && window.location.origin)
+        ? window.location.origin
+        : 'https://www.routemate.pro';
+
+      const resp = await fetch(`${apiBase}/api/broadcast`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const data = await resp.json().catch(() => ({}));
+
+      // Broadcast over Supabase Realtime channel for live active users
+      if (data?.success && data?.broadcast) {
+        try {
+          const client = getSupabase();
+          if (client) {
+            const ch = client.channel('routemate-broadcasts');
+            await ch.send({
+              type: 'broadcast',
+              event: 'new_broadcast',
+              payload: data.broadcast
+            });
+          }
+        } catch (rtErr) {
+          console.warn('[Broadcast Realtime Notice]:', rtErr.message);
+        }
+      }
+
+      return data;
+    }
+  };
+
   // Export clean global database object
   window.db = {
     getSupabase,
     auth,
     kyc,
     feedbacks,
+    broadcast,
     supabaseRest,
     matching,
     isSelfBookedRide,
