@@ -1227,7 +1227,7 @@ module.exports = async (req, res) => {
     }
 
     // -----------------------------------------------------------------------
-    // ACTION: Delete Account & Associated Data
+    // ACTION: Delete Account & Associated Data (Database-Level Purge)
     // -----------------------------------------------------------------------
     if (action === 'delete_account') {
       const { userId, email } = body;
@@ -1238,7 +1238,7 @@ module.exports = async (req, res) => {
         return res.status(400).json({ success: false, error: 'User ID or Email is required to delete account.' });
       }
 
-      console.log('🗑️ [DELETE ACCOUNT REQUEST] Deleting user data for:', cleanUserId, cleanEmail);
+      console.log('🗑️ [DELETE ACCOUNT REQUEST] Database-level purge for user:', cleanUserId, cleanEmail);
 
       // 1. Remove from local file store fallback
       try {
@@ -1253,57 +1253,137 @@ module.exports = async (req, res) => {
         console.warn('Store delete notice:', storeErr);
       }
 
-      // 2. Delete from Supabase `driver_kyc`
+      // 2. Delete from Supabase `profiles` table using auth.uid() & email match
       try {
-        let kycFilter = cleanUserId && cleanEmail
-          ? `or=(user_id.eq.${encodeURIComponent(cleanUserId)},driver_email.eq.${encodeURIComponent(cleanEmail)})`
-          : (cleanUserId ? `or=(id.eq.${encodeURIComponent(cleanUserId)},user_id.eq.${encodeURIComponent(cleanUserId)})` : `driver_email.eq.${encodeURIComponent(cleanEmail)}`);
-        await fetch(`${SUPABASE_URL}/rest/v1/driver_kyc?${kycFilter}`, {
-          method: 'DELETE',
-          headers: {
-            'apikey': SUPABASE_KEY,
-            'Authorization': `Bearer ${SUPABASE_KEY}`
-          }
-        });
-      } catch (e) {
-        console.warn('KYC delete error:', e);
+        if (cleanUserId && isUUID(cleanUserId)) {
+          await fetch(`${SUPABASE_URL}/rest/v1/profiles?id=eq.${encodeURIComponent(cleanUserId)}`, {
+            method: 'DELETE',
+            headers: {
+              'apikey': SUPABASE_KEY,
+              'Authorization': `Bearer ${SUPABASE_KEY}`
+            }
+          });
+        }
+        if (cleanEmail) {
+          await fetch(`${SUPABASE_URL}/rest/v1/profiles?role.ilike.*${encodeURIComponent(cleanEmail)}*`, {
+            method: 'DELETE',
+            headers: {
+              'apikey': SUPABASE_KEY,
+              'Authorization': `Bearer ${SUPABASE_KEY}`
+            }
+          });
+        }
+      } catch (profErr) {
+        console.warn('Profiles delete notice:', profErr.message);
       }
 
-      // 3. Delete from Supabase `profiles`
+      // 3. Delete from Supabase `drivers` table using auth.uid() & email
       try {
-        let profFilter = cleanUserId && cleanEmail
-          ? `or=(id.eq.${encodeURIComponent(cleanUserId)},email.eq.${encodeURIComponent(cleanEmail)})`
-          : (cleanUserId ? `id=eq.${encodeURIComponent(cleanUserId)}` : `email=eq.${encodeURIComponent(cleanEmail)}`);
-        await fetch(`${SUPABASE_URL}/rest/v1/profiles?${profFilter}`, {
-          method: 'DELETE',
-          headers: {
-            'apikey': SUPABASE_KEY,
-            'Authorization': `Bearer ${SUPABASE_KEY}`
-          }
-        });
-      } catch (e) {
-        console.warn('Profile delete error:', e);
+        if (cleanUserId) {
+          await fetch(`${SUPABASE_URL}/rest/v1/drivers?or=(id.eq.${encodeURIComponent(cleanUserId)},user_id.eq.${encodeURIComponent(cleanUserId)})`, {
+            method: 'DELETE',
+            headers: {
+              'apikey': SUPABASE_KEY,
+              'Authorization': `Bearer ${SUPABASE_KEY}`
+            }
+          });
+        }
+        if (cleanEmail) {
+          await fetch(`${SUPABASE_URL}/rest/v1/drivers?or=(email.eq.${encodeURIComponent(cleanEmail)},driver_email.eq.${encodeURIComponent(cleanEmail)})`, {
+            method: 'DELETE',
+            headers: {
+              'apikey': SUPABASE_KEY,
+              'Authorization': `Bearer ${SUPABASE_KEY}`
+            }
+          });
+        }
+      } catch (drvErr) {
+        console.warn('Drivers delete notice:', drvErr.message);
       }
 
-      // 4. Delete user rides
+      // 4. Delete from Supabase `vehicles` table using auth.uid()
       try {
-        let ridesFilter = cleanUserId && cleanEmail
-          ? `or=(rider_id.eq.${encodeURIComponent(cleanUserId)},rider_email.eq.${encodeURIComponent(cleanEmail)},driver_id.eq.${encodeURIComponent(cleanUserId)})`
-          : (cleanUserId ? `or=(rider_id.eq.${encodeURIComponent(cleanUserId)},driver_id.eq.${encodeURIComponent(cleanUserId)})` : `rider_email.eq.${encodeURIComponent(cleanEmail)}`);
-        await fetch(`${SUPABASE_URL}/rest/v1/rides?${ridesFilter}`, {
-          method: 'DELETE',
-          headers: {
-            'apikey': SUPABASE_KEY,
-            'Authorization': `Bearer ${SUPABASE_KEY}`
-          }
-        });
-      } catch (e) {
-        console.warn('Rides delete error:', e);
+        if (cleanUserId) {
+          await fetch(`${SUPABASE_URL}/rest/v1/vehicles?or=(user_id.eq.${encodeURIComponent(cleanUserId)},driver_id.eq.${encodeURIComponent(cleanUserId)})`, {
+            method: 'DELETE',
+            headers: {
+              'apikey': SUPABASE_KEY,
+              'Authorization': `Bearer ${SUPABASE_KEY}`
+            }
+          });
+        }
+      } catch (vehErr) {
+        console.warn('Vehicles delete notice:', vehErr.message);
+      }
+
+      // 5. Delete from Supabase `driver_kyc` table
+      try {
+        if (cleanUserId) {
+          await fetch(`${SUPABASE_URL}/rest/v1/driver_kyc?or=(id.eq.${encodeURIComponent(cleanUserId)},user_id.eq.${encodeURIComponent(cleanUserId)})`, {
+            method: 'DELETE',
+            headers: {
+              'apikey': SUPABASE_KEY,
+              'Authorization': `Bearer ${SUPABASE_KEY}`
+            }
+          });
+        }
+        if (cleanEmail) {
+          await fetch(`${SUPABASE_URL}/rest/v1/driver_kyc?driver_email.eq.${encodeURIComponent(cleanEmail)}`, {
+            method: 'DELETE',
+            headers: {
+              'apikey': SUPABASE_KEY,
+              'Authorization': `Bearer ${SUPABASE_KEY}`
+            }
+          });
+        }
+      } catch (kycErr) {
+        console.warn('Driver KYC delete notice:', kycErr.message);
+      }
+
+      // 6. Delete user rides
+      try {
+        if (cleanUserId) {
+          await fetch(`${SUPABASE_URL}/rest/v1/rides?or=(rider_id.eq.${encodeURIComponent(cleanUserId)},driver_id.eq.${encodeURIComponent(cleanUserId)})`, {
+            method: 'DELETE',
+            headers: {
+              'apikey': SUPABASE_KEY,
+              'Authorization': `Bearer ${SUPABASE_KEY}`
+            }
+          });
+        }
+        if (cleanEmail) {
+          await fetch(`${SUPABASE_URL}/rest/v1/rides?rider_email.eq.${encodeURIComponent(cleanEmail)}`, {
+            method: 'DELETE',
+            headers: {
+              'apikey': SUPABASE_KEY,
+              'Authorization': `Bearer ${SUPABASE_KEY}`
+            }
+          });
+        }
+      } catch (ridesErr) {
+        console.warn('Rides delete notice:', ridesErr.message);
+      }
+
+      // 7. If Supabase Service Role Key is configured, purge user from auth.users
+      const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+      if (serviceRoleKey && cleanUserId && isUUID(cleanUserId)) {
+        try {
+          await fetch(`${SUPABASE_URL}/auth/v1/admin/users/${encodeURIComponent(cleanUserId)}`, {
+            method: 'DELETE',
+            headers: {
+              'apikey': serviceRoleKey,
+              'Authorization': `Bearer ${serviceRoleKey}`
+            }
+          });
+          console.log('✅ [ADMIN AUTH PURGE] User deleted from auth.users:', cleanUserId);
+        } catch (authPurgeErr) {
+          console.warn('Auth admin user purge notice:', authPurgeErr.message);
+        }
       }
 
       return res.status(200).json({
         success: true,
-        message: 'Account and associated records have been permanently deleted.'
+        message: 'Account, profile, driver records, vehicles, and all associated data have been permanently deleted.'
       });
     }
 

@@ -263,14 +263,7 @@
 
           await handleAuthUserFlow(userObj, event === 'SIGNED_IN');
         } else if (event === 'SIGNED_OUT') {
-          try {
-            const saved = localStorage.getItem('routemate_user');
-            if (!saved) {
-              lockAppToAuthScreen();
-            }
-          } catch (e) {
-            lockAppToAuthScreen();
-          }
+          lockAppToAuthScreen();
         }
       });
     }
@@ -778,8 +771,26 @@
   }
 
   function lockAppToAuthScreen() {
+    // 1. Reset in-memory application state
     state.currentUser = null;
     state.pendingCompletionUser = null;
+    state.activeRiderRequest = null;
+    state.activeDriverTrip = null;
+    state.activities = [];
+    state.incomingRides = [];
+    state.declinedRideIds = new Set();
+    state.wallet = { balance: 0, transactions: [], welcomeBonusCredited: false };
+    state.driverUpi = { upiId: '', upiQr: '', vpa: '' };
+    state.locationPreferences = { home: '', work: '', defaultRoute: '', autoGps: true };
+    state.kyc = { status: 'not_submitted', submission: null, currentStep: 1, formData: {} };
+    state.ratingState = { activeRide: null, selectedStars: 5, selectedTags: new Set(['Smooth & Safe Ride', 'Polite Driver']), chosenPaymentMethod: 'upi' };
+    state.notifications = { items: [], filter: 'all', activeDetail: null, readIds: new Set() };
+
+    // 2. Stop any active real-time matching or driver polling
+    if (window.db?.matching?.stopDriverPolling) window.db.matching.stopDriverPolling();
+    if (window.db?.matching?.stopRiderPolling) window.db.matching.stopRiderPolling();
+
+    // 3. Close all open modals & drawers
     closeProfileCompletionModal();
     closeDeleteAccountModal();
     closeLocationPreferencesModal();
@@ -787,8 +798,12 @@
     if (typeof closePrivacyModal === 'function') closePrivacyModal();
     if (typeof closeNotificationDrawer === 'function') closeNotificationDrawer();
     if (typeof closeNotificationDetailModal === 'function') closeNotificationDetailModal();
+    if (typeof closeUpdateUpiModal === 'function') closeUpdateUpiModal();
+    if (typeof closeRechargeModal === 'function') closeRechargeModal();
+    if (typeof closeDriverKycModal === 'function') closeDriverKycModal();
+    if (typeof closeAddVehicleModal === 'function') closeAddVehicleModal();
 
-    // Hide Super Admin controls
+    // 4. Hide Super Admin controls
     const adminPill = document.getElementById('headerAdminPill');
     const adminNav = document.getElementById('navTab-admin');
     const profileAdminCard = document.getElementById('profileAdminAccessCard');
@@ -799,19 +814,39 @@
     if (adminNav) adminNav.classList.add('hidden');
     if (profileAdminCard) profileAdminCard.classList.add('hidden');
 
-    // Show Auth Screen & reset to Step 1
+    // 5. Reset Auth form inputs & errors to a completely clean slate
+    const emailInput = document.getElementById('authEmailInput');
+    const nameInput = document.getElementById('authNameInput');
+    const phoneInput = document.getElementById('authPhoneInput');
+    const dobInput = document.getElementById('authDobInput');
+    const otpInput = document.getElementById('authOtpInput');
+    const emailErr = document.getElementById('authEmailErrorMsg');
+    const otpErr = document.getElementById('authOtpErrorMsg');
+    if (emailInput) emailInput.value = '';
+    if (nameInput) nameInput.value = '';
+    if (phoneInput) phoneInput.value = '';
+    if (dobInput) dobInput.value = '';
+    if (otpInput) otpInput.value = '';
+    if (emailErr) { emailErr.textContent = ''; emailErr.classList.add('hidden'); }
+    if (otpErr) { otpErr.textContent = ''; otpErr.classList.add('hidden'); }
+
+    if (typeof setAuthTab === 'function') setAuthTab('signin');
+    if (typeof backToEmailStep === 'function') backToEmailStep();
+
+    // 6. Show Auth Screen & Hide Main App Elements
     const authScreen = document.getElementById('authScreen');
     if (authScreen) authScreen.classList.remove('hidden');
 
-    backToEmailStep();
-
-    // Hide Main App Elements
     const header = document.getElementById('appHeader');
     const main = document.getElementById('appMain');
     const nav = document.getElementById('appBottomNav');
     if (header) header.classList.add('hidden');
     if (main) main.classList.add('hidden');
     if (nav) nav.classList.add('hidden');
+
+    // 7. Update UI displays
+    if (typeof renderAllUpiDisplays === 'function') renderAllUpiDisplays();
+    if (typeof updateNotificationBadge === 'function') updateNotificationBadge();
   }
 
   // =========================================================================
@@ -1589,7 +1624,28 @@
 
   window.handleSignOut = async function () {
     if (confirm('Are you sure you want to sign out?')) {
-      await window.db.auth.signOut();
+      showToast('Signing out...', 'info');
+
+      // 1. Explicitly invoke supabase.auth.signOut() and clear storages via client
+      try {
+        if (window.db?.auth?.signOut) {
+          await window.db.auth.signOut();
+        } else {
+          const client = window.getSupabase ? window.getSupabase() : null;
+          if (client?.auth?.signOut) await client.auth.signOut().catch(() => {});
+        }
+      } catch (err) {
+        console.warn('Sign-out client warning:', err);
+      }
+
+      // 2. Clear all local storage, session storage, and disable Google GIS auto-select
+      try { localStorage.clear(); } catch (e) {}
+      try { sessionStorage.clear(); } catch (e) {}
+      if (window.google?.accounts?.id?.disableAutoSelect) {
+        try { window.google.accounts.id.disableAutoSelect(); } catch (e) {}
+      }
+
+      // 3. Reset application state and lock app to clean fresh auth screen
       lockAppToAuthScreen();
       showToast('Signed out of Routemate', 'info');
     }
@@ -1844,40 +1900,36 @@
     if (errEl) errEl.classList.add('hidden');
     if (btn) {
       btn.disabled = true;
-      btn.innerHTML = `<i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i><span>Deleting...</span>`;
+      btn.innerHTML = `<i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i><span>Purging Account...</span>`;
       if (window.lucide) lucide.createIcons();
     }
 
-    showToast('Permanently deleting your Routemate account and records...', 'warning');
+    showToast('Permanently purging your account and records from database...', 'warning');
 
     try {
-      // 1. Delete user from Supabase and backend stores via API
+      // 1. Delete user from Supabase tables (profiles, drivers, vehicles, driver_kyc, rides) and serverless backend
       if (window.db?.auth?.deleteAccount) {
         await window.db.auth.deleteAccount(user.id, user.email);
       }
 
-      // 2. Clear all local storage records
-      const keysToRemove = [
-        'routemate_user',
-        'routemate_location_preferences',
-        'routemate_driver_kyc',
-        'routemate_admin_authorized',
-        'routemate_active_ride',
-        'routemate_rides'
-      ];
-      keysToRemove.forEach(k => {
-        try { localStorage.removeItem(k); } catch (e) {}
-      });
+      // 2. Explicitly sign out from Supabase Auth
+      try {
+        if (window.db?.auth?.signOut) {
+          await window.db.auth.signOut();
+        } else {
+          const client = window.getSupabase ? window.getSupabase() : null;
+          if (client?.auth?.signOut) await client.auth.signOut().catch(() => {});
+        }
+      } catch (e) {}
 
-      // 3. Reset application state
-      state.currentUser = null;
-      state.pendingCompletionUser = null;
-      state.locationPreferences = { home: '', work: '', defaultRoute: '', autoGps: true };
-      state.wallet = { balance: 0, transactions: [], welcomeBonusCredited: false };
-      state.driverUpi = { upiId: '', upiQr: '' };
-      state.kyc = { status: 'not_submitted', submission: null, currentStep: 1, formData: {} };
+      // 3. Clear all local storage, session storage, and disable Google GIS auto-select
+      try { localStorage.clear(); } catch (e) {}
+      try { sessionStorage.clear(); } catch (e) {}
+      if (window.google?.accounts?.id?.disableAutoSelect) {
+        try { window.google.accounts.id.disableAutoSelect(); } catch (e) {}
+      }
 
-      // 4. Close modal and lock app to auth screen
+      // 4. Close modal and lock app to 100% clean, fresh sign-in / registration screen
       closeDeleteAccountModal();
       lockAppToAuthScreen();
 

@@ -328,15 +328,39 @@
     },
 
     /**
-     * Sign Out
+     * Complete Session & Local Storage Clear on Sign Out
      */
     async signOut() {
       const client = getSupabase();
-      if (client) {
-        await client.auth.signOut().catch(() => {});
+      if (client?.auth) {
+        try {
+          await client.auth.signOut();
+        } catch (e) {
+          console.warn('Supabase client signOut warning:', e);
+        }
       }
-      localStorage.removeItem('routemate_user');
-      localStorage.removeItem('routemate_auth_token');
+      try {
+        localStorage.clear();
+      } catch (e) {
+        const keys = [
+          'routemate_user',
+          'routemate_auth_token',
+          'routemate_driver_kyc',
+          'routemate_driver_upi',
+          'routemate_location_preferences',
+          'routemate_user_rides',
+          'routemate_activity_cleared_at',
+          'routemate_admin_authorized',
+          'routemate_active_ride'
+        ];
+        keys.forEach(k => { try { localStorage.removeItem(k); } catch (_) {} });
+      }
+      try {
+        sessionStorage.clear();
+      } catch (e) {}
+      if (typeof window !== 'undefined' && window.google?.accounts?.id?.disableAutoSelect) {
+        try { window.google.accounts.id.disableAutoSelect(); } catch (e) {}
+      }
     },
 
     /**
@@ -692,51 +716,87 @@
     },
 
     /**
-     * Delete user account and all associated data
+     * Delete user account, database-level purge (profiles, drivers, vehicles), and clean sign-out
      */
     async deleteAccount(userId, email = null) {
       if (!userId && !email) throw new Error('User ID or Email is required');
+      const cleanUserId = userId;
+      const cleanEmail = email ? String(email).trim().toLowerCase() : null;
+
+      // 1. Direct Supabase PostgREST table deletions using auth.uid()
+      try {
+        if (cleanUserId) {
+          await supabaseRest(`profiles?id=eq.${encodeURIComponent(cleanUserId)}`, { method: 'DELETE' });
+        }
+        if (cleanEmail) {
+          await supabaseRest(`profiles?role.ilike.*${encodeURIComponent(cleanEmail)}*`, { method: 'DELETE' });
+        }
+      } catch (profErr) {
+        console.warn('profiles delete notice:', profErr.message);
+      }
+
+      try {
+        if (cleanUserId) {
+          await supabaseRest(`drivers?or=(id.eq.${encodeURIComponent(cleanUserId)},user_id.eq.${encodeURIComponent(cleanUserId)})`, { method: 'DELETE' });
+        }
+        if (cleanEmail) {
+          await supabaseRest(`drivers?or=(email.eq.${encodeURIComponent(cleanEmail)},driver_email.eq.${encodeURIComponent(cleanEmail)})`, { method: 'DELETE' });
+        }
+      } catch (drvErr) {
+        console.warn('drivers delete notice:', drvErr.message);
+      }
+
+      try {
+        if (cleanUserId) {
+          await supabaseRest(`vehicles?or=(user_id.eq.${encodeURIComponent(cleanUserId)},driver_id.eq.${encodeURIComponent(cleanUserId)})`, { method: 'DELETE' });
+        }
+      } catch (vehErr) {
+        console.warn('vehicles delete notice:', vehErr.message);
+      }
+
+      try {
+        if (cleanUserId) {
+          await supabaseRest(`driver_kyc?or=(id.eq.${encodeURIComponent(cleanUserId)},user_id.eq.${encodeURIComponent(cleanUserId)})`, { method: 'DELETE' });
+        }
+        if (cleanEmail) {
+          await supabaseRest(`driver_kyc?driver_email.eq.${encodeURIComponent(cleanEmail)}`, { method: 'DELETE' });
+        }
+      } catch (kycErr) {
+        console.warn('driver_kyc delete notice:', kycErr.message);
+      }
+
+      try {
+        if (cleanUserId) {
+          await supabaseRest(`rides?or=(driver_id.eq.${encodeURIComponent(cleanUserId)},rider_id.eq.${encodeURIComponent(cleanUserId)})`, { method: 'DELETE' });
+        }
+        if (cleanEmail) {
+          await supabaseRest(`rides?rider_email.eq.${encodeURIComponent(cleanEmail)}`, { method: 'DELETE' });
+        }
+      } catch (ridesErr) {
+        console.warn('rides delete notice:', ridesErr.message);
+      }
+
+      // 2. Serverless API sync & local fallback purge
       const apiBase = (typeof window !== 'undefined' && window.location && window.location.origin)
         ? window.location.origin
         : 'https://www.routemate.pro';
 
-      let apiSuccess = false;
       try {
-        const resp = await fetch(`${apiBase}/api/driver-kyc`, {
+        await fetch(`${apiBase}/api/driver-kyc`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             action: 'delete_account',
-            userId,
-            email
+            userId: cleanUserId,
+            email: cleanEmail
           })
         });
-        const data = await resp.json().catch(() => ({}));
-        if (resp.ok && data.success) {
-          apiSuccess = true;
-        }
       } catch (e) {
         console.warn('API delete account error:', e);
       }
 
-      // Direct fallback deletion on Supabase REST
-      try {
-        let profFilter = userId && email
-          ? `or=(id.eq.${encodeURIComponent(userId)},email.eq.${encodeURIComponent(email)})`
-          : (userId ? `id=eq.${encodeURIComponent(userId)}` : `email=eq.${encodeURIComponent(email)}`);
-        await fetch(`${SUPABASE_CONFIG.url}/rest/v1/profiles?${profFilter}`, {
-          method: 'DELETE',
-          headers: {
-            'apikey': SUPABASE_CONFIG.publishableKey,
-            'Authorization': `Bearer ${SUPABASE_CONFIG.publishableKey}`
-          }
-        });
-      } catch (e) {}
-
-      // Sign out from Supabase Auth
-      try {
-        await auth.signOut();
-      } catch (e) {}
+      // 3. Complete Sign-Out & Session Clear
+      await auth.signOut();
 
       return { success: true };
     }
