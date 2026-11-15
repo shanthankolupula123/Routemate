@@ -1243,6 +1243,21 @@ module.exports = async (req, res) => {
       });
     }
 
+    if (!cleanUpiId) {
+      return res.status(400).json({
+        success: false,
+        error: 'Direct P2P UPI ID (VPA) is mandatory so commuter payments route directly to you from day one.'
+      });
+    }
+
+    const upiRegex = /^[a-zA-Z0-9.\-_]{2,64}@[a-zA-Z0-9.\-_]{2,32}$/;
+    if (!upiRegex.test(cleanUpiId)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Please enter a valid personal UPI ID format (e.g. yourname@oksbi or 9848012345@paytm).'
+      });
+    }
+
     if (!cleanDlFront || !cleanDlBack) {
       return res.status(400).json({
         success: false,
@@ -1419,6 +1434,8 @@ module.exports = async (req, res) => {
         vehicle_color: submissionRecord.vehicle_color,
         vehicle_type: submissionRecord.vehicle_type,
         rc_photo: submissionRecord.rc_photo,
+        upi_id: cleanUpiId,
+        upi_qr: cleanUpiQr,
         submitted_at: submissionRecord.submitted_at,
         vehicles: submissionRecord.vehicles
       };

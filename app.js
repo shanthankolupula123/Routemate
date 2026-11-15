@@ -4522,8 +4522,9 @@
       const cleanPhone = String(state.currentUser.phone).replace(/\D/g, '').slice(-10);
       phoneInput.value = cleanPhone;
     }
-    if (upiInput && (state.driverUpi?.upiId || state.kyc?.submission?.upi_id)) {
-      upiInput.value = state.driverUpi?.upiId || state.kyc?.submission?.upi_id;
+    if (upiInput) {
+      const existingUpi = state.driverUpi?.upiId || state.kyc?.submission?.upi_id || state.currentUser?.upi_id || state.currentUser?.upiId || '';
+      if (existingUpi) upiInput.value = existingUpi;
     }
 
     const errBox = document.getElementById('kycFormErrorMsg');
@@ -4568,7 +4569,12 @@
           return;
         }
         if (!upi) {
-          showKycError('Please enter your personal UPI ID (e.g. name@oksbi).');
+          showKycError('Direct P2P UPI ID is mandatory. Please enter your personal UPI ID (e.g. name@oksbi).');
+          return;
+        }
+        const upiRegex = /^[a-zA-Z0-9.\-_]{2,64}@[a-zA-Z0-9.\-_]{2,32}$/;
+        if (!upiRegex.test(upi)) {
+          showKycError('Please enter a valid personal UPI ID format (e.g. yourname@oksbi or 9848012345@paytm).');
           return;
         }
       } else if (current === 2) {
@@ -4605,6 +4611,9 @@
     const nextStep = current + direction;
     if (nextStep >= 1 && nextStep <= 4) {
       state.kyc.currentStep = nextStep;
+      const curUpi = String(document.getElementById('kycInputUpiId')?.value || '').trim();
+      const revUpiEl = document.getElementById('kycReviewUpiDisplay');
+      if (revUpiEl && curUpi) revUpiEl.textContent = curUpi;
       updateKycStepUI();
       refreshKycPreviews();
     }
@@ -4756,7 +4765,14 @@
       if (!upiId) {
         state.kyc.currentStep = 1;
         updateKycStepUI();
-        showKycError('Please enter your personal UPI ID (e.g. name@oksbi) on Step 1.');
+        showKycError('Direct P2P UPI ID is mandatory. Please enter your active UPI ID (e.g. name@oksbi) on Step 1.');
+        return;
+      }
+      const upiRegex = /^[a-zA-Z0-9.\-_]{2,64}@[a-zA-Z0-9.\-_]{2,32}$/;
+      if (!upiRegex.test(upiId)) {
+        state.kyc.currentStep = 1;
+        updateKycStepUI();
+        showKycError('Please enter a valid personal UPI ID format (e.g. yourname@oksbi or 9848012345@paytm) on Step 1.');
         return;
       }
 
@@ -4888,8 +4904,16 @@
         state.kyc.submission = (res && res.submission) ? res.submission : payload;
         if (state.currentUser) {
           state.currentUser.kyc_status = 'pending';
+          state.currentUser.upi_id = upiId;
+          state.currentUser.upiId = upiId;
+          if (state.kyc.formData.upi_qr) {
+            state.currentUser.upi_qr = state.kyc.formData.upi_qr;
+            state.currentUser.upiQr = state.kyc.formData.upi_qr;
+          }
           try { localStorage.setItem('routemate_user', JSON.stringify(state.currentUser)); } catch (e) {}
         }
+        state.driverUpi = { upiId, upiQr: state.kyc.formData.upi_qr || '' };
+        try { localStorage.setItem('routemate_driver_upi', JSON.stringify(state.driverUpi)); } catch (e) {}
         try { localStorage.setItem('routemate_driver_kyc', JSON.stringify(state.kyc.submission)); } catch (e) {}
       }
 
