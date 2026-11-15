@@ -125,6 +125,36 @@ module.exports = async (req, res) => {
     };
 
     // -----------------------------------------------------------------------
+    // DATABASE INSERT: Write to Supabase `notifications` table for target audience
+    // -----------------------------------------------------------------------
+    try {
+      await fetch(`${SUPABASE_URL}/rest/v1/notifications`, {
+        method: 'POST',
+        headers: {
+          'apikey': SUPABASE_KEY,
+          'Authorization': `Bearer ${SUPABASE_KEY}`,
+          'Content-Type': 'application/json',
+          'Prefer': 'return=representation'
+        },
+        body: JSON.stringify({
+          recipient_role: audience,
+          type: category || 'promo',
+          title: broadcastRecord.title,
+          message: broadcastRecord.message,
+          data: {
+            broadcastId: broadcastRecord.id,
+            actionTab: broadcastRecord.actionTab,
+            actionLabel: broadcastRecord.actionLabel,
+            icon: broadcastRecord.icon,
+            iconBg: broadcastRecord.iconBg
+          }
+        })
+      });
+    } catch (notifErr) {
+      console.warn('[Broadcast Notifications Table Insert Warning]:', notifErr.message);
+    }
+
+    // -----------------------------------------------------------------------
     // DATABASE FAN-OUT: Write to Supabase `profiles` table for target audience
     // -----------------------------------------------------------------------
     let deliveredCount = 0;

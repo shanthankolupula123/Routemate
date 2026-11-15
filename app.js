@@ -226,46 +226,54 @@
       }
 
       // Supabase Auth State Change Listener (e.g. for Google OAuth redirect / OTP verify)
-      window.db.auth.onAuthStateChange(async (event, session) => {
-        console.log('👤 [AUTH EVENT]:', event);
-        if (session && session.user) {
-          // If session token refreshed and user is already active, do not interrupt UI
-          if (event === 'TOKEN_REFRESHED' && state.currentUser && (state.currentUser.id === session.user.id || (state.currentUser.email && state.currentUser.email.toLowerCase() === (session.user.email || '').toLowerCase()))) {
-            console.log('🔄 [AUTH] Token refreshed smoothly for active session:', session.user.email);
-            return;
+      if (!window._supabaseAuthStateListenerAttached) {
+        window._supabaseAuthStateListenerAttached = true;
+        window.db.auth.onAuthStateChange(async (event, session) => {
+          console.log('👤 [AUTH EVENT]:', event);
+          if (session && session.user) {
+            window._isUserExplicitSignOut = false;
+            // If session token refreshed and user is already active, do not interrupt UI
+            if (event === 'TOKEN_REFRESHED' && state.currentUser && (state.currentUser.id === session.user.id || (state.currentUser.email && state.currentUser.email.toLowerCase() === (session.user.email || '').toLowerCase()))) {
+              console.log('🔄 [AUTH] Token refreshed smoothly for active session:', session.user.email);
+              return;
+            }
+
+            const userObj = normalizeAuthUser(session.user);
+            // Recover existing profile data from current state or localStorage
+            const cached = state.currentUser || null;
+            let savedUser = null;
+            try {
+              const saved = localStorage.getItem('routemate_user');
+              if (saved) savedUser = JSON.parse(saved);
+            } catch (e) {}
+
+            const source = (cached && (cached.id === userObj.id || (cached.email && cached.email.toLowerCase() === (userObj.email || '').toLowerCase())))
+              ? cached
+              : ((savedUser && (savedUser.id === userObj.id || (savedUser.email && savedUser.email.toLowerCase() === (userObj.email || '').toLowerCase()))) ? savedUser : null);
+
+            if (source) {
+              if (source.phone && !userObj.phone) userObj.phone = source.phone;
+              if (source.name && (!userObj.name || userObj.name === 'User')) userObj.name = source.name;
+              if (source.gender && !userObj.gender) userObj.gender = source.gender;
+              if (source.dob && !userObj.dob) userObj.dob = source.dob;
+              if (source.role && !userObj.role) userObj.role = source.role;
+              if (source.upi_id && !userObj.upi_id) userObj.upi_id = source.upi_id;
+              if (source.kyc_status && !userObj.kyc_status) userObj.kyc_status = source.kyc_status;
+              if (source.wallet_balance !== undefined && userObj.wallet_balance === undefined) userObj.wallet_balance = source.wallet_balance;
+              if (source.wallet_transactions && !userObj.wallet_transactions) userObj.wallet_transactions = source.wallet_transactions;
+              if (source.vehicles && !userObj.vehicles) userObj.vehicles = source.vehicles;
+            }
+
+            await handleAuthUserFlow(userObj, event === 'SIGNED_IN');
+          } else if (event === 'SIGNED_OUT') {
+            if (window._isUserExplicitSignOut || !localStorage.getItem('routemate_user')) {
+              lockAppToAuthScreen();
+            } else {
+              console.log('ℹ️ [AUTH] Preserving active session across refresh; ignoring transient SDK SIGNED_OUT event.');
+            }
           }
-
-          const userObj = normalizeAuthUser(session.user);
-          // Recover existing profile data from current state or localStorage
-          const cached = state.currentUser || null;
-          let savedUser = null;
-          try {
-            const saved = localStorage.getItem('routemate_user');
-            if (saved) savedUser = JSON.parse(saved);
-          } catch (e) {}
-
-          const source = (cached && (cached.id === userObj.id || (cached.email && cached.email.toLowerCase() === (userObj.email || '').toLowerCase())))
-            ? cached
-            : ((savedUser && (savedUser.id === userObj.id || (savedUser.email && savedUser.email.toLowerCase() === (userObj.email || '').toLowerCase()))) ? savedUser : null);
-
-          if (source) {
-            if (source.phone && !userObj.phone) userObj.phone = source.phone;
-            if (source.name && (!userObj.name || userObj.name === 'User')) userObj.name = source.name;
-            if (source.gender && !userObj.gender) userObj.gender = source.gender;
-            if (source.dob && !userObj.dob) userObj.dob = source.dob;
-            if (source.role && !userObj.role) userObj.role = source.role;
-            if (source.upi_id && !userObj.upi_id) userObj.upi_id = source.upi_id;
-            if (source.kyc_status && !userObj.kyc_status) userObj.kyc_status = source.kyc_status;
-            if (source.wallet_balance !== undefined && userObj.wallet_balance === undefined) userObj.wallet_balance = source.wallet_balance;
-            if (source.wallet_transactions && !userObj.wallet_transactions) userObj.wallet_transactions = source.wallet_transactions;
-            if (source.vehicles && !userObj.vehicles) userObj.vehicles = source.vehicles;
-          }
-
-          await handleAuthUserFlow(userObj, event === 'SIGNED_IN');
-        } else if (event === 'SIGNED_OUT') {
-          lockAppToAuthScreen();
-        }
-      });
+        });
+      }
     }
 
     // 2. Check LocalStorage Cached User
@@ -1624,6 +1632,7 @@
 
   window.handleSignOut = async function () {
     if (confirm('Are you sure you want to sign out?')) {
+      window._isUserExplicitSignOut = true;
       showToast('Signing out...', 'info');
 
       // 1. Explicitly invoke supabase.auth.signOut() and clear storages via client
@@ -1905,6 +1914,7 @@
     }
 
     showToast('Permanently purging your account and records from database...', 'warning');
+    window._isUserExplicitSignOut = true;
 
     try {
       // 1. Delete user from Supabase tables (profiles, drivers, vehicles, driver_kyc, rides) and serverless backend
@@ -7516,7 +7526,10 @@
     const readSet = getStoredReadNotifIds(userId);
     state.notifications.readIds = readSet;
 
-    const items = [];
+    const clearedAtStr = localStorage.getItem('routemate_notifs_cleared_' + userId);
+    const clearedAt = clearedAtStr ? parseInt(clearedAtStr, 10) : 0;
+
+    let items = [];
 
     // 1. Admin Safety Alerts & Warnings
     if (user?.warning_alert && user.warning_alert.notes) {
@@ -7683,6 +7696,14 @@
       it.read = readSet.has(it.id);
     });
 
+    // Filter out notifications cleared previously by the user
+    if (clearedAt > 0) {
+      items = items.filter(it => {
+        const t = new Date(it.timestamp || 0).getTime();
+        return t > clearedAt;
+      });
+    }
+
     // Sort: unread first, then by timestamp descending
     items.sort((a, b) => {
       if (a.read !== b.read) return a.read ? 1 : -1;
@@ -7693,7 +7714,7 @@
     updateNotificationBadge();
     renderNotifications();
 
-    // 6. Background Async Fetch of Active Broadcasts
+    // 6a. Background Async Fetch of Active Broadcasts
     if (window.db?.broadcast?.getBroadcasts) {
       window.db.broadcast.getBroadcasts().then(bcs => {
         if (Array.isArray(bcs) && bcs.length > 0) {
@@ -7702,6 +7723,9 @@
             const isDriver = state.currentUser?.kyc_status === 'approved' || !!state.currentUser?.vehicleNumber;
             if (b.audience === 'drivers' && !isDriver) return;
             if (b.audience === 'commuters' && isDriver && state.activeTab === 'drive') return;
+
+            const itemTime = new Date(b.sentAt || 0).getTime();
+            if (clearedAt > 0 && itemTime <= clearedAt) return;
 
             if (!state.notifications.items.some(it => it.id === b.id)) {
               state.notifications.items.unshift({
@@ -7714,6 +7738,43 @@
                 iconBg: b.iconBg || 'bg-purple-100 text-purple-800',
                 action: b.actionTab ? { label: b.actionLabel || 'View Details', tab: b.actionTab } : null,
                 read: state.notifications.readIds.has(b.id)
+              });
+              updated = true;
+            }
+          });
+          if (updated) {
+            updateNotificationBadge();
+            renderNotifications();
+          }
+        }
+      }).catch(() => {});
+    }
+
+    // 6b. Background Async Fetch of Database Notifications from Supabase `notifications` table
+    if (window.db?.notifications?.getNotifications) {
+      const isDriver = state.currentUser?.kyc_status === 'approved' || !!state.currentUser?.vehicleNumber;
+      window.db.notifications.getNotifications({
+        userId: userId,
+        userRole: isDriver ? 'driver' : 'commuter'
+      }).then(dbNotifs => {
+        if (Array.isArray(dbNotifs) && dbNotifs.length > 0) {
+          let updated = false;
+          dbNotifs.forEach(dbn => {
+            const itemTime = new Date(dbn.created_at || 0).getTime();
+            if (clearedAt > 0 && itemTime <= clearedAt) return;
+
+            const notifId = dbn.id;
+            if (!state.notifications.items.some(it => it.id === notifId)) {
+              state.notifications.items.unshift({
+                id: notifId,
+                type: dbn.type || 'info',
+                title: dbn.title,
+                message: dbn.message,
+                timestamp: dbn.created_at,
+                icon: dbn.data?.icon || (dbn.type === 'safety' ? 'shield-alert' : 'bell'),
+                iconBg: dbn.data?.iconBg || (dbn.type === 'safety' ? 'bg-amber-100 text-amber-800' : 'bg-slate-100 text-slate-800'),
+                action: dbn.data?.actionTab ? { label: dbn.data?.actionLabel || 'View Details', tab: dbn.data?.actionTab } : null,
+                read: dbn.is_read || state.notifications.readIds.has(notifId)
               });
               updated = true;
             }
@@ -7955,15 +8016,44 @@
     showToast('All notifications marked as read ✓', 'info');
   };
 
-  window.clearAllReadNotifications = function () {
-    state.notifications.items = state.notifications.items.filter(n => !n.read);
+  window.clearAllNotifications = async function () {
+    const userId = state.currentUser?.id || 'guest';
+    state.notifications.items = [];
+    state.notifications.activeDetail = null;
+
+    // Save cleared timestamp locally so cleared state persists cleanly across reloads
+    try {
+      localStorage.setItem('routemate_notifs_cleared_' + userId, Date.now().toString());
+      localStorage.removeItem('routemate_custom_notifs_' + userId);
+    } catch (e) {}
+
     renderNotifications();
     updateNotificationBadge();
-    showToast('Cleared read notifications', 'info');
+
+    // Securely trigger database delete & profile purge in Supabase
+    try {
+      if (window.db?.notifications?.clearNotifications) {
+        await window.db.notifications.clearNotifications(userId);
+      }
+    } catch (e) {
+      console.warn('clearAllNotifications warning:', e);
+    }
+
+    showToast('All notifications cleared ✓', 'info');
+  };
+
+  window.clearAllReadNotifications = function () {
+    window.clearAllNotifications();
   };
 
   window.pushUserNotification = function (notif) {
     if (!notif || !notif.id) return;
+    const userId = state.currentUser?.id || 'guest';
+    const clearedAtStr = localStorage.getItem('routemate_notifs_cleared_' + userId);
+    const clearedAt = clearedAtStr ? parseInt(clearedAtStr, 10) : 0;
+    const itemTime = new Date(notif.timestamp || 0).getTime();
+    if (clearedAt > 0 && itemTime <= clearedAt) return;
+
     const exists = state.notifications.items.findIndex(n => n.id === notif.id);
     if (exists !== -1) {
       state.notifications.items[exists] = { ...state.notifications.items[exists], ...notif };
@@ -7972,7 +8062,6 @@
     }
 
     // Save to custom notifs storage
-    const userId = state.currentUser?.id || 'guest';
     const list = getStoredCustomNotifs(userId);
     const cIdx = list.findIndex(c => c.id === notif.id);
     if (cIdx !== -1) list[cIdx] = notif;

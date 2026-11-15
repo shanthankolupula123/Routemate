@@ -967,6 +967,29 @@ module.exports = async (req, res) => {
                   is_verified: false
                 })
               });
+
+              // Insert suspension notice into public.notifications
+              try {
+                await fetch(`${SUPABASE_URL}/rest/v1/notifications`, {
+                  method: 'POST',
+                  headers: {
+                    'apikey': SUPABASE_KEY,
+                    'Authorization': `Bearer ${SUPABASE_KEY}`,
+                    'Content-Type': 'application/json'
+                  },
+                  body: JSON.stringify({
+                    user_id: pRow.id,
+                    recipient_role: 'driver',
+                    type: 'safety',
+                    title: '🚫 Driver Account Suspended',
+                    message: notes || 'Driver account suspended due to passenger safety report.',
+                    data: {
+                      suspendedBy: cleanAdmin,
+                      suspendedAt: new Date().toISOString()
+                    }
+                  })
+                });
+              } catch (nErr) {}
             } else if (actionType === 'warning') {
               const warningObj = {
                 id: 'warn_' + Date.now().toString(36),
@@ -990,6 +1013,30 @@ module.exports = async (req, res) => {
                   role: JSON.stringify(meta)
                 })
               });
+
+              // Insert warning alert into public.notifications
+              try {
+                await fetch(`${SUPABASE_URL}/rest/v1/notifications`, {
+                  method: 'POST',
+                  headers: {
+                    'apikey': SUPABASE_KEY,
+                    'Authorization': `Bearer ${SUPABASE_KEY}`,
+                    'Content-Type': 'application/json'
+                  },
+                  body: JSON.stringify({
+                    user_id: pRow.id,
+                    recipient_role: 'driver',
+                    type: 'safety',
+                    title: '⚠️ Safety & Compliance Notice',
+                    message: warningObj.notes,
+                    data: {
+                      warningId: warningObj.id,
+                      issuedBy: cleanAdmin,
+                      issuedAt: warningObj.issuedAt
+                    }
+                  })
+                });
+              } catch (nErr) {}
             } else if (actionType === 'unblock' || actionType === 'unsuspend') {
               meta.kyc_status = 'approved';
               meta.is_suspended = false;
@@ -1017,6 +1064,82 @@ module.exports = async (req, res) => {
       return res.status(200).json({
         success: true,
         message: `Safety action '${actionType}' completed successfully.`
+      });
+    }
+
+    // -----------------------------------------------------------------------
+    // ACTION: Clear User Notifications & Safety Alerts
+    // -----------------------------------------------------------------------
+    if (action === 'clear_notifications') {
+      const cleanUserId = String(body.userId || body.user_id || '').trim();
+      if (!cleanUserId) {
+        return res.status(400).json({ success: false, error: 'User ID is required' });
+      }
+
+      // 1. Delete user-specific rows in Supabase notifications table
+      try {
+        await fetch(`${SUPABASE_URL}/rest/v1/notifications?user_id=eq.${encodeURIComponent(cleanUserId)}`, {
+          method: 'DELETE',
+          headers: {
+            'apikey': SUPABASE_KEY,
+            'Authorization': `Bearer ${SUPABASE_KEY}`
+          }
+        });
+      } catch (err) {
+        console.warn('[clear_notifications] delete notifications table warning:', err.message);
+      }
+
+      // 2. Clear warnings, warning_alert, broadcast_notifications in profiles.role
+      try {
+        const profRes = await fetch(`${SUPABASE_URL}/rest/v1/profiles?id=eq.${encodeURIComponent(cleanUserId)}`, {
+          headers: {
+            'apikey': SUPABASE_KEY,
+            'Authorization': `Bearer ${SUPABASE_KEY}`
+          }
+        });
+        if (profRes.ok) {
+          const profData = await profRes.json();
+          const pRow = profData?.[0];
+          if (pRow) {
+            let meta = {};
+            try {
+              if (typeof pRow.role === 'string' && pRow.role.includes('{')) {
+                meta = JSON.parse(pRow.role);
+              }
+            } catch (e) {}
+
+            meta.warnings = [];
+            meta.warning_count = 0;
+            meta.warning_alert = null;
+            meta.broadcast_notifications = [];
+
+            await fetch(`${SUPABASE_URL}/rest/v1/profiles?id=eq.${encodeURIComponent(cleanUserId)}`, {
+              method: 'PATCH',
+              headers: {
+                'apikey': SUPABASE_KEY,
+                'Authorization': `Bearer ${SUPABASE_KEY}`,
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({ role: JSON.stringify(meta) })
+            });
+          }
+        }
+      } catch (pErr) {
+        console.warn('[clear_notifications] profile patch warning:', pErr.message);
+      }
+
+      // 3. Clear from in-memory submissions store
+      const list = getStore();
+      const sIdx = list.findIndex(item => item.user_id === cleanUserId || item.id === cleanUserId);
+      if (sIdx !== -1) {
+        list[sIdx].warning_alert = null;
+        list[sIdx].warning_count = 0;
+        saveStore(list);
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: 'Notifications cleared successfully.'
       });
     }
 

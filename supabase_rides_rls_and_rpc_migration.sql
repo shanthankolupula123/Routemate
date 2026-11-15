@@ -160,3 +160,46 @@ $$;
 
 -- Grant execution permission to public/anon/authenticated roles
 GRANT EXECUTE ON FUNCTION public.accept_ride_request TO anon, authenticated, service_role;
+
+-- ==============================================================================
+-- 4. NOTIFICATIONS TABLE (DATABASE-BACKED NOTIFICATION & BROADCAST SYSTEM)
+-- ==============================================================================
+CREATE TABLE IF NOT EXISTS public.notifications (
+  id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id text,
+  recipient_role text DEFAULT 'all', -- 'all', 'drivers', 'commuters', 'driver', 'rider'
+  type text DEFAULT 'info', -- 'warning', 'safety', 'broadcast', 'trip', 'account', 'promo', 'info', 'wallet'
+  title text NOT NULL,
+  message text NOT NULL,
+  data jsonb DEFAULT '{}'::jsonb,
+  is_read boolean DEFAULT false,
+  created_at timestamp with time zone DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_notifications_user_id ON public.notifications(user_id);
+CREATE INDEX IF NOT EXISTS idx_notifications_recipient_role ON public.notifications(recipient_role);
+CREATE INDEX IF NOT EXISTS idx_notifications_created_at ON public.notifications(created_at DESC);
+
+ALTER TABLE public.notifications ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Allow public select on notifications" ON public.notifications;
+CREATE POLICY "Allow public select on notifications"
+  ON public.notifications FOR SELECT
+  USING (true);
+
+DROP POLICY IF EXISTS "Allow public insert on notifications" ON public.notifications;
+CREATE POLICY "Allow public insert on notifications"
+  ON public.notifications FOR INSERT
+  WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Allow public update on notifications" ON public.notifications;
+CREATE POLICY "Allow public update on notifications"
+  ON public.notifications FOR UPDATE
+  USING (true)
+  WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Allow public delete on notifications" ON public.notifications;
+CREATE POLICY "Allow public delete on notifications"
+  ON public.notifications FOR DELETE
+  USING (true);
+

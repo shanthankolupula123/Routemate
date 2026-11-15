@@ -16,15 +16,36 @@
   function getSupabase() {
     if (!supabase && typeof window !== 'undefined' && window.supabase && typeof window.supabase.createClient === 'function') {
       try {
+        const safeStorage = {
+          getItem: function (key) {
+            try {
+              return window.localStorage.getItem(key);
+            } catch (e) {
+              return null;
+            }
+          },
+          setItem: function (key, value) {
+            try {
+              window.localStorage.setItem(key, value);
+            } catch (e) {}
+          },
+          removeItem: function (key) {
+            try {
+              window.localStorage.removeItem(key);
+            } catch (e) {}
+          }
+        };
+
         supabase = window.supabase.createClient(SUPABASE_CONFIG.url, SUPABASE_CONFIG.publishableKey, {
           auth: {
             persistSession: true,
             autoRefreshToken: true,
             detectSessionInUrl: true,
-            storage: window.localStorage
+            storageKey: 'routemate_supabase_auth_token',
+            storage: safeStorage
           }
         });
-        console.log('✅ [SUPABASE CLIENT] Initialized with Realtime & Passwordless OTP Auth support.');
+        console.log('✅ [SUPABASE CLIENT] Initialized with Persistent Auth & Realtime support.');
       } catch (e) {
         console.warn('⚠️ [SUPABASE CLIENT] Init warning:', e);
       }
@@ -2653,6 +2674,87 @@
     }
   };
 
+  // -------------------------------------------------------------------------
+  // NOTIFICATIONS SERVICE (DATABASE-BACKED NOTIFICATIONS & CLEAR ACTIONS)
+  // -------------------------------------------------------------------------
+  const notifications = {
+    async getNotifications(options = {}) {
+      const userId = options.userId || '';
+      const userRole = (options.userRole || 'commuter').toLowerCase(); // 'driver' or 'commuter'
+
+      let items = [];
+      try {
+        const client = getSupabase();
+        if (client) {
+          const { data, error } = await client
+            .from('notifications')
+            .select('*')
+            .order('created_at', { ascending: false })
+            .limit(50);
+
+          if (!error && Array.isArray(data)) {
+            items = data;
+          }
+        }
+      } catch (e) {
+        // Fallback to REST
+        try {
+          const res = await supabaseRest('notifications?select=*&order=created_at.desc&limit=50');
+          if (Array.isArray(res)) items = res;
+        } catch (restErr) {}
+      }
+
+      // Filter by recipient role and userId
+      return items.filter(n => {
+        if (n.user_id && userId && String(n.user_id) === String(userId)) return true;
+        if (!n.user_id || n.user_id === 'all') {
+          const role = String(n.recipient_role || 'all').toLowerCase();
+          if (role === 'all') return true;
+          if (role === 'drivers' && (userRole === 'driver' || userRole === 'drivers')) return true;
+          if (role === 'commuters' && (userRole === 'commuter' || userRole === 'commuters' || userRole === 'rider')) return true;
+        }
+        return false;
+      });
+    },
+
+    async clearNotifications(userId) {
+      if (!userId) return { success: true };
+
+      // 1. Delete user-specific notification rows from Supabase `notifications` table
+      try {
+        const client = getSupabase();
+        if (client) {
+          await client.from('notifications').delete().eq('user_id', userId);
+        } else {
+          await supabaseRest(`notifications?user_id=eq.${encodeURIComponent(userId)}`, { method: 'DELETE' });
+        }
+      } catch (dbErr) {
+        console.warn('Notice: delete from public.notifications:', dbErr.message);
+      }
+
+      // 2. Call backend endpoint to purge user's warnings & broadcasts from profile role JSON
+      const apiBase = (typeof window !== 'undefined' && window.location && window.location.origin)
+        ? window.location.origin
+        : 'https://www.routemate.pro';
+
+      try {
+        const resp = await fetch(`${apiBase}/api/driver-kyc`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'clear_notifications',
+            userId: userId
+          })
+        });
+        const data = await resp.json().catch(() => ({}));
+        return { success: true, ...data };
+      } catch (apiErr) {
+        console.warn('Notice: clear_notifications API call:', apiErr.message);
+        return { success: true };
+      }
+    }
+  };
+
   // Export clean global database object
   window.db = {
     getSupabase,
@@ -2660,6 +2762,7 @@
     kyc,
     feedbacks,
     broadcast,
+    notifications,
     supabaseRest,
     matching,
     isSelfBookedRide,

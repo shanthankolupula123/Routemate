@@ -341,5 +341,35 @@ create policy "Allow public read access to ride_messages" on public.ride_message
 drop policy if exists "Allow public insert to ride_messages" on public.ride_messages;
 create policy "Allow public insert to ride_messages" on public.ride_messages for insert with check (true);
 
+-- ==============================================================================
+-- 7. NOTIFICATIONS TABLE (DATABASE-BACKED NOTIFICATIONS & BROADCAST ALERTS)
+-- ==============================================================================
+create table if not exists public.notifications (
+  id uuid primary key default uuid_generate_v4(),
+  user_id text,
+  recipient_role text default 'all',
+  type text default 'info',
+  title text not null,
+  message text not null,
+  data jsonb default '{}'::jsonb,
+  is_read boolean default false,
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
+create index if not exists idx_notifications_user_id on public.notifications(user_id);
+create index if not exists idx_notifications_recipient_role on public.notifications(recipient_role);
+create index if not exists idx_notifications_created_at on public.notifications(created_at desc);
+
+alter table public.notifications enable row level security;
+drop policy if exists "Allow public select on notifications" on public.notifications;
+create policy "Allow public select on notifications" on public.notifications for select using (true);
+drop policy if exists "Allow public insert on notifications" on public.notifications;
+create policy "Allow public insert on notifications" on public.notifications for insert with check (true);
+drop policy if exists "Allow public update on notifications" on public.notifications;
+create policy "Allow public update on notifications" on public.notifications for update using (true);
+drop policy if exists "Allow public delete on notifications" on public.notifications;
+create policy "Allow public delete on notifications" on public.notifications for delete using (true);
+
+
 
 
