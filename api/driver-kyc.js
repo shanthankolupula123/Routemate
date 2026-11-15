@@ -1388,6 +1388,37 @@ module.exports = async (req, res) => {
     }
 
     // -----------------------------------------------------------------------
+    // ACTION: Expire Ride Request (60s Expiry Timeout)
+    // -----------------------------------------------------------------------
+    if (action === 'expire_ride') {
+      const { requestId, rideId } = body;
+      const targetId = requestId || rideId || body.id;
+      if (!targetId) return res.status(400).json({ success: false, error: 'Ride ID is required' });
+
+      try {
+        const filter = isUUID(targetId)
+          ? `or=(id.eq.${encodeURIComponent(targetId)},vehicle_number.eq.${encodeURIComponent(targetId)})`
+          : `vehicle_number=eq.${encodeURIComponent(targetId)}`;
+
+        await fetch(`${SUPABASE_URL}/rest/v1/rides?${filter}`, {
+          method: 'PATCH',
+          headers: {
+            'apikey': SUPABASE_KEY,
+            'Authorization': `Bearer ${SUPABASE_KEY}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            status: 'cancelled'
+          })
+        });
+      } catch (e) {
+        console.warn('Expire ride API notice:', e.message);
+      }
+
+      return res.status(200).json({ success: true, message: 'Ride expired' });
+    }
+
+    // -----------------------------------------------------------------------
     // ACTION: Driver Document Upload & Submission
     // -----------------------------------------------------------------------
     const cleanUserId = body.user_id || body.userId;

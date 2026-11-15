@@ -2877,12 +2877,136 @@
     }
   };
 
+  // -------------------------------------------------------------------------
+  // COMMUTER ACTIVE RADAR HUD & 60-SECOND COUNTDOWN / TIMEOUT CONTROLLER
+  // -------------------------------------------------------------------------
+  let riderSearchCountdownTimer = null;
+
+  function startRiderSearchCountdown() {
+    if (riderSearchCountdownTimer) clearInterval(riderSearchCountdownTimer);
+    riderSearchCountdownTimer = setInterval(() => {
+      if (!state.activeRiderRequest || state.activeRiderRequest.status !== 'searching') {
+        clearInterval(riderSearchCountdownTimer);
+        riderSearchCountdownTimer = null;
+        return;
+      }
+
+      const createdMs = state.activeRiderRequest.createdAt ? new Date(state.activeRiderRequest.createdAt).getTime() : Date.now();
+      const elapsedSec = Math.max(0, Math.floor((Date.now() - createdMs) / 1000));
+      const remSec = Math.max(0, 60 - elapsedSec);
+
+      if (remSec <= 0) {
+        clearInterval(riderSearchCountdownTimer);
+        riderSearchCountdownTimer = null;
+        state.activeRiderRequest.searchTimedOut = true;
+        renderRiderActiveHUD(state.activeRiderRequest);
+        showToast('⏱️ Search timeout: No verified drivers accepted within 60 seconds.', 'warning');
+      } else {
+        const txtEl = document.getElementById('rider-radar-countdown-txt');
+        const barEl = document.getElementById('rider-radar-countdown-bar');
+        if (txtEl) txtEl.textContent = `${remSec}s`;
+        if (barEl) {
+          barEl.style.width = `${(remSec / 60) * 100}%`;
+          if (remSec <= 15) {
+            barEl.className = 'h-full bg-rose-400 rounded-full transition-all duration-1000 animate-pulse';
+          }
+        }
+      }
+    }, 1000);
+  }
+
+  window.retryRiderSearch = async function () {
+    if (!state.activeRiderRequest) return;
+    showToast('📡 Refreshing radar broadcast for 60 seconds...', 'info');
+
+    const req = state.activeRiderRequest;
+    req.createdAt = new Date().toISOString();
+    req.searchTimedOut = false;
+    req.status = 'searching';
+
+    if (window.db?.matching?.createRequest) {
+      try {
+        const res = await window.db.matching.createRequest({
+          ...req,
+          id: req.id,
+          pin: req.pin,
+          riderName: req.riderName,
+          riderEmail: req.riderEmail,
+          riderPhone: req.riderPhone,
+          pickup: req.pickup,
+          drop: req.drop,
+          pickupLat: req.pickupLat,
+          pickupLng: req.pickupLng,
+          dropLat: req.dropLat,
+          dropLng: req.dropLng,
+          fare: req.fare,
+          distance: req.distance,
+          vehicleType: req.vehicleType
+        });
+        if (res && res.request) {
+          state.activeRiderRequest = res.request;
+        }
+      } catch (e) {
+        console.warn('Retry createRequest error:', e);
+      }
+    }
+
+    renderRiderActiveHUD(state.activeRiderRequest);
+    startRiderSearchCountdown();
+    playNotificationSound();
+    showToast('📡 Radar search active! 60-second window restarted.', 'success');
+  };
+
   function renderRiderActiveHUD(req) {
     const card = document.getElementById('riderActiveCard');
     if (!card) return;
     card.classList.remove('hidden');
 
     if (req.status === 'searching') {
+      const createdMs = req.createdAt ? new Date(req.createdAt).getTime() : Date.now();
+      const elapsedSec = Math.max(0, Math.floor((Date.now() - createdMs) / 1000));
+      const remSec = Math.max(0, 60 - elapsedSec);
+
+      // Timeout State after 60 seconds of no acceptance
+      if (req.searchTimedOut || remSec <= 0) {
+        card.innerHTML = `
+          <div class="routemate-card p-5 bg-gradient-to-br from-amber-950 via-slate-900 to-slate-950 text-white border-amber-500/40 shadow-xl relative overflow-hidden animate-in fade-in duration-300">
+            <div class="flex items-center justify-between pb-3 border-b border-white/10">
+              <div class="flex items-center gap-2.5">
+                <div class="w-8 h-8 rounded-full bg-amber-500/20 text-amber-400 flex items-center justify-center font-black">
+                  <i data-lucide="clock" class="w-4 h-4"></i>
+                </div>
+                <div>
+                  <span class="text-[10px] font-black uppercase tracking-wider text-amber-300 block">Radar Window Elapsed (60s)</span>
+                  <h4 class="text-xs font-black text-white">No Drivers Accepted Yet</h4>
+                </div>
+              </div>
+              <span class="text-xs font-mono font-bold bg-white/10 text-amber-200 border border-white/15 px-3 py-1 rounded-full">
+                PIN: ${req.pin}
+              </span>
+            </div>
+
+            <div class="mt-3.5 p-3 rounded-2xl bg-white/5 border border-white/10 text-xs text-slate-300 space-y-1.5">
+              <p>Nearby drivers on this corridor (<strong class="text-white">${escapeHtml(req.pickup)} ➔ ${escapeHtml(req.drop)}</strong>) may currently be completing another trip.</p>
+              <p class="text-[11px] text-amber-200 font-bold">You can broadcast again for another 60-second window or adjust your pickup point.</p>
+            </div>
+
+            <div class="mt-4 grid grid-cols-2 gap-2">
+              <button type="button" onclick="cancelRiderActiveRequest()" class="py-2.5 rounded-xl btn-pill-secondary text-xs font-bold cursor-pointer active:scale-95 text-slate-300">
+                Cancel Request
+              </button>
+              <button type="button" onclick="retryRiderSearch()" class="py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-slate-950 text-xs font-black transition flex items-center justify-center gap-1.5 cursor-pointer shadow-lg active:scale-95">
+                <i data-lucide="refresh-cw" class="w-3.5 h-3.5 text-slate-950"></i>
+                <span>Retry Search (60s)</span>
+              </button>
+            </div>
+          </div>
+        `;
+        if (window.lucide) lucide.createIcons();
+        return;
+      }
+
+      // Active Searching State with visible 60s countdown
       card.innerHTML = `
         <div class="routemate-card p-5 bg-gradient-to-br from-blue-900 via-indigo-950 to-slate-900 text-white border-blue-500/30 shadow-xl relative overflow-hidden animate-in fade-in duration-300">
           <div class="flex items-center justify-between pb-3 border-b border-white/10">
@@ -2901,14 +3025,26 @@
             </span>
           </div>
 
-          <div class="mt-3.5 space-y-2 text-xs">
+          <!-- Visible 60-Second Radar Countdown Badge & Bar -->
+          <div class="mt-3 flex items-center justify-between text-xs">
+            <div class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-black ${remSec <= 15 ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40 animate-pulse' : 'bg-cyan-500/20 text-cyan-200 border border-cyan-400/30'}">
+              <i data-lucide="clock" class="w-3.5 h-3.5"></i>
+              <span>Radar Window: <strong id="rider-radar-countdown-txt">${remSec}s</strong></span>
+            </div>
+            <span class="text-[11px] text-slate-400 font-bold">Expires in 60s</span>
+          </div>
+          <div class="w-full bg-white/10 rounded-full h-1.5 overflow-hidden my-2">
+            <div id="rider-radar-countdown-bar" class="h-full ${remSec <= 15 ? 'bg-rose-400' : 'bg-cyan-400'} rounded-full transition-all duration-1000" style="width: ${(remSec / 60) * 100}%"></div>
+          </div>
+
+          <div class="mt-2 space-y-2 text-xs">
             <div class="flex items-start gap-2">
               <span class="w-2 h-2 rounded-full bg-emerald-400 mt-1 flex-shrink-0"></span>
-              <p class="text-slate-200 truncate"><strong class="text-white">Pickup:</strong> ${req.pickup}</p>
+              <p class="text-slate-200 truncate"><strong class="text-white">Pickup:</strong> ${escapeHtml(req.pickup)}</p>
             </div>
             <div class="flex items-start gap-2">
               <span class="w-2 h-2 rounded-full bg-cyan-400 mt-1 flex-shrink-0"></span>
-              <p class="text-slate-200 truncate"><strong class="text-white">Drop:</strong> ${req.drop} (${req.distance} km)</p>
+              <p class="text-slate-200 truncate"><strong class="text-white">Drop:</strong> ${escapeHtml(req.drop)} (${req.distance} km)</p>
             </div>
             <div class="pt-2 border-t border-white/10 flex items-center justify-between text-[11px]">
               <span class="text-slate-300 capitalize">${req.vehicleType} Pillion</span>
@@ -2927,7 +3063,12 @@
           </div>
         </div>
       `;
+      startRiderSearchCountdown();
     } else if (req.status === 'driver_accepted' || req.status === 'ride_started') {
+      if (riderSearchCountdownTimer) {
+        clearInterval(riderSearchCountdownTimer);
+        riderSearchCountdownTimer = null;
+      }
       const driver = req.driver || {};
       const isStarted = req.status === 'ride_started';
 
@@ -3088,6 +3229,10 @@
   }
 
   window.cancelRiderActiveRequest = async function () {
+    if (riderSearchCountdownTimer) {
+      clearInterval(riderSearchCountdownTimer);
+      riderSearchCountdownTimer = null;
+    }
     if (state.activeRiderRequest) {
       await window.db.matching.cancelRequest(state.activeRiderRequest.id);
       state.activeRiderRequest = null;
@@ -3135,16 +3280,78 @@
     });
   }
 
+  let driverIncomingTimerInterval = null;
+
+  function startDriverIncomingCountdowns() {
+    if (driverIncomingTimerInterval) clearInterval(driverIncomingTimerInterval);
+    driverIncomingTimerInterval = setInterval(() => {
+      if (!state.incomingRides || state.incomingRides.length === 0) {
+        clearInterval(driverIncomingTimerInterval);
+        driverIncomingTimerInterval = null;
+        return;
+      }
+
+      const now = Date.now();
+      let hasExpired = false;
+
+      state.incomingRides.forEach(ride => {
+        const createdMs = ride.createdMs || (ride.createdAt ? new Date(ride.createdAt).getTime() : now);
+        const elapsedSec = Math.max(0, Math.floor((now - createdMs) / 1000));
+        const remSec = Math.max(0, 60 - elapsedSec);
+
+        if (remSec <= 0) {
+          hasExpired = true;
+          if (window.db?.matching?.expireRequest) {
+            window.db.matching.expireRequest(ride.id).catch(() => {});
+          }
+        } else {
+          const txtEl = document.getElementById(`driver-ride-timer-txt-${ride.id}`);
+          const barEl = document.getElementById(`driver-ride-timer-bar-${ride.id}`);
+          if (txtEl) {
+            txtEl.textContent = `${remSec}s`;
+            if (remSec <= 15) {
+              txtEl.className = 'text-xs font-black text-rose-600 animate-pulse';
+            }
+          }
+          if (barEl) {
+            barEl.style.width = `${Math.min(100, (remSec / 60) * 100)}%`;
+            if (remSec <= 15) {
+              barEl.className = 'h-full bg-rose-500 rounded-full transition-all duration-1000 animate-pulse';
+            }
+          }
+        }
+      });
+
+      if (hasExpired) {
+        state.incomingRides = state.incomingRides.filter(r => {
+          const createdMs = r.createdMs || (r.createdAt ? new Date(r.createdAt).getTime() : now);
+          return (now - createdMs) < 60000;
+        });
+        renderDriverIncomingCards(state.incomingRides);
+      }
+    }, 1000);
+  }
+
   function renderDriverIncomingCards(rides) {
     const container = document.getElementById('incomingRidesContainer');
     const badge = document.getElementById('incomingRidesBadge');
     if (!container) return;
 
+    const now = Date.now();
+    const validRides = (rides || []).filter(r => {
+      const createdMs = r.createdMs || (r.createdAt ? new Date(r.createdAt).getTime() : now);
+      return (now - createdMs) < 60000;
+    });
+
     if (badge) {
-      badge.textContent = `${rides.length} Waiting`;
+      badge.textContent = `${validRides.length} Waiting`;
     }
 
     if (state.activeDriverTrip) {
+      if (driverIncomingTimerInterval) {
+        clearInterval(driverIncomingTimerInterval);
+        driverIncomingTimerInterval = null;
+      }
       container.innerHTML = `
         <div class="p-4 bg-emerald-50 border border-emerald-200 rounded-2xl text-xs text-emerald-800 font-bold text-center">
           ⚡ You have an active trip in progress. Complete it before accepting new requests.
@@ -3153,7 +3360,11 @@
       return;
     }
 
-    if (rides.length === 0) {
+    if (validRides.length === 0) {
+      if (driverIncomingTimerInterval) {
+        clearInterval(driverIncomingTimerInterval);
+        driverIncomingTimerInterval = null;
+      }
       container.innerHTML = `
         <div id="driverRadarEmptyState" class="routemate-card p-8 text-center">
           <div class="relative w-16 h-16 mx-auto mb-3 flex items-center justify-center">
@@ -3174,7 +3385,11 @@
     }
 
     let cardsHtml = '';
-    rides.forEach(ride => {
+    validRides.forEach(ride => {
+      const createdMs = ride.createdMs || (ride.createdAt ? new Date(ride.createdAt).getTime() : now);
+      const elapsedSec = Math.max(0, Math.floor((now - createdMs) / 1000));
+      const remSec = Math.max(1, 60 - elapsedSec);
+
       let proximityBadge = '';
       if (state.userGPS && ride.pickupLat && ride.pickupLng) {
         const distKm = calculateProximityKm(state.userGPS.lat, state.userGPS.lng, ride.pickupLat, ride.pickupLng);
@@ -3195,6 +3410,9 @@
           </div>
         `;
       }
+
+      const timerColor = remSec <= 15 ? 'bg-rose-500' : 'bg-amber-500';
+      const timerTextClass = remSec <= 15 ? 'text-xs font-black text-rose-600 animate-pulse' : 'text-xs font-black text-slate-800';
 
       cardsHtml += `
         <div class="routemate-card p-5 border-2 border-blue-500/30 shadow-lg hover:shadow-xl transition relative overflow-hidden bg-white">
@@ -3227,6 +3445,20 @@
             </div>
           </div>
 
+          <!-- 60-Second Real-Time Expiry Countdown Banner -->
+          <div class="mt-2.5 flex items-center justify-between px-3 py-1.5 rounded-xl bg-slate-50 border border-slate-200">
+            <div class="flex items-center gap-1.5">
+              <span class="w-2 h-2 rounded-full ${remSec <= 15 ? 'bg-rose-500 animate-ping' : 'bg-amber-500 animate-pulse'}"></span>
+              <span class="text-[11px] font-bold text-slate-600">Auto-expires in:</span>
+            </div>
+            <div class="flex items-center gap-2">
+              <div class="w-20 bg-slate-200 h-1.5 rounded-full overflow-hidden">
+                <div id="driver-ride-timer-bar-${ride.id}" class="h-full ${timerColor} rounded-full transition-all duration-1000" style="width: ${(remSec / 60) * 100}%;"></div>
+              </div>
+              <span id="driver-ride-timer-txt-${ride.id}" class="${timerTextClass}">${remSec}s</span>
+            </div>
+          </div>
+
           ${proximityBadge}
 
           <div class="mt-4 pt-3 border-t border-slate-100 grid grid-cols-2 gap-2.5">
@@ -3245,6 +3477,7 @@
 
     container.innerHTML = cardsHtml;
     if (window.lucide) lucide.createIcons();
+    startDriverIncomingCountdowns();
   }
 
   function calculateProximityKm(lat1, lon1, lat2, lon2) {
@@ -3262,7 +3495,19 @@
 
   window.acceptDriverRide = async function (rideId) {
     const target = state.incomingRides.find(r => r.id === rideId);
-    if (!target) return;
+    if (!target) {
+      showToast('Ride request no longer available.', 'info');
+      return;
+    }
+
+    const createdMs = target.createdMs || (target.createdAt ? new Date(target.createdAt).getTime() : Date.now());
+    const remSec = Math.max(0, 60 - Math.floor((Date.now() - createdMs) / 1000));
+    if (remSec <= 0) {
+      showToast('⏱️ This ride request has expired (60s limit).', 'warning');
+      state.incomingRides = state.incomingRides.filter(r => r.id !== rideId);
+      renderDriverIncomingCards(state.incomingRides);
+      return;
+    }
 
     // Resolve driver's real registered UPI ID & QR code
     let activeUpiId = state.driverUpi?.upiId || state.kyc?.submission?.upi_id || state.currentUser?.upi_id || state.currentUser?.upiId || '';
@@ -3293,6 +3538,10 @@
     try {
       const resp = await window.db.matching.acceptRequest(rideId, driverPayload);
       if (resp.success) {
+        if (driverIncomingTimerInterval) {
+          clearInterval(driverIncomingTimerInterval);
+          driverIncomingTimerInterval = null;
+        }
         state.activeDriverTrip = {
           ...target,
           status: 'driver_accepted',
@@ -3347,8 +3596,16 @@
         }
         playNotificationSound();
         showToast(`🎉 Accepted ride for ${target.riderName}! Heading to pickup.`, 'success');
+      } else if (resp.alreadyTaken) {
+        showToast('⚡ Another driver just accepted this ride.', 'warning');
+        state.incomingRides = state.incomingRides.filter(r => r.id !== rideId);
+        renderDriverIncomingCards(state.incomingRides);
+      } else if (resp.cancelled || resp.expired) {
+        showToast('⏱️ This ride request was cancelled or has expired.', 'info');
+        state.incomingRides = state.incomingRides.filter(r => r.id !== rideId);
+        renderDriverIncomingCards(state.incomingRides);
       } else {
-        showToast('Could not accept ride. It may have been taken by another driver.', 'warning');
+        showToast(resp.error || 'Could not accept ride. It may have been taken or updated.', 'warning');
       }
     } catch (e) {
       console.error('Accept error:', e);

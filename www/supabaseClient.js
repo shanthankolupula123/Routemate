@@ -1747,9 +1747,13 @@
         let notes = {};
         try { notes = typeof row.notes === 'string' ? JSON.parse(row.notes || '{}') : (row.notes || {}); } catch (e) {}
 
-        const isCompleted = row.status === 'completed' || row.status === 'cancelled' ||
+        // Enforce strict 60-second request lifetime
+        const createdMs = new Date(row.created_at || notes.createdAt || Date.now()).getTime();
+        const isExpired = (Date.now() - createdMs) > 60000;
+
+        const isCompleted = isExpired || row.status === 'completed' || row.status === 'cancelled' ||
                             notes.status === 'driver_accepted' || notes.status === 'ride_started' ||
-                            notes.status === 'ride_completed' || notes.status === 'cancelled';
+                            notes.status === 'ride_completed' || notes.status === 'cancelled' || notes.status === 'expired';
         if (isCompleted) {
           removeRideById(row.vehicle_number || notes.id || row.id);
           return;
@@ -1782,20 +1786,26 @@
 
       const fetchRides = async () => {
         try {
-          const recentCutoff = new Date(Date.now() - 3600000).toISOString();
-          const resp = await supabaseRest(`rides?select=*&status=neq.cancelled&created_at=gte.${recentCutoff}&order=created_at.desc&limit=15`);
+          // Strictly query requests created within the last 60 seconds
+          const recentCutoff = new Date(Date.now() - 60000).toISOString();
+          const resp = await supabaseRest(`rides?select=*&status=neq.cancelled&status=neq.completed&created_at=gte.${recentCutoff}&order=created_at.desc&limit=15`);
 
           if (!resp.ok || !Array.isArray(resp.data)) return;
 
+          const now = Date.now();
           const freshRides = [];
           for (const row of resp.data) {
             if (!row) continue;
             let notes = {};
             try { notes = JSON.parse(row.notes || '{}'); } catch (e) {}
 
+            // Exclude if expired (older than 60s)
+            const createdMs = new Date(row.created_at || notes.createdAt || 0).getTime();
+            if (now - createdMs > 60000) continue;
+
             const isCompleted = row.status === 'completed' || row.status === 'cancelled' ||
                                 notes.status === 'driver_accepted' || notes.status === 'ride_started' ||
-                                notes.status === 'ride_completed' || notes.status === 'cancelled';
+                                notes.status === 'ride_completed' || notes.status === 'cancelled' || notes.status === 'expired';
             if (isCompleted) continue;
 
             // Strict Session Isolation: Exclude own rides
@@ -1887,10 +1897,11 @@
     },
 
     /**
-     * DRIVER: Accept a ride request
+     * DRIVER: Accept a ride request atomically with race-condition prevention
      */
     async acceptRequest(requestId, driverUser) {
       console.log('⚡ [ROUTEMATE DRIVER] Accepting ride:', requestId);
+      const isUUID = (str) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(str || ''));
 
       // Dynamically resolve driver's registered UPI ID from driver profile
       let resolvedUpiId = driverUser.upi_id || driverUser.upiId || driverUser.upi?.id || '';
@@ -1916,11 +1927,18 @@
         rating: driverUser.rating || 4.95
       };
 
-      // Fetch existing row & notes to ensure rider metadata is never lost
+      // 1. Fetch existing row by vehicle_number, ID (UUID), or notes.id to ensure accurate targeting
       let existingNotes = {};
       let existingRow = null;
       try {
-        const fetchResp = await supabaseRest(`rides?vehicle_number=eq.${encodeURIComponent(requestId)}&select=*&limit=1`);
+        let queryFilter = isUUID(requestId)
+          ? `or=(id.eq.${encodeURIComponent(requestId)},vehicle_number.eq.${encodeURIComponent(requestId)})`
+          : `vehicle_number=eq.${encodeURIComponent(requestId)}`;
+
+        let fetchResp = await supabaseRest(`rides?${queryFilter}&select=*&limit=1`);
+        if (!fetchResp.ok || !fetchResp.data || fetchResp.data.length === 0) {
+          fetchResp = await supabaseRest(`rides?notes.ilike.*${encodeURIComponent(requestId)}*&select=*&limit=1`);
+        }
         if (fetchResp.ok && Array.isArray(fetchResp.data) && fetchResp.data[0]) {
           existingRow = fetchResp.data[0];
           if (typeof existingRow.notes === 'string') {
@@ -1929,9 +1947,39 @@
             existingNotes = existingRow.notes;
           }
         }
-      } catch (e) {}
+      } catch (e) {
+        console.warn('Error fetching ride before acceptance:', e);
+      }
 
-      const isUUID = (str) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(str || ''));
+      if (!existingRow) {
+        return { success: false, notFound: true, message: 'Ride request not found or has already expired.' };
+      }
+
+      // 2. Check current status & assignment
+      const currentStatus = existingRow.status || existingNotes.status;
+      const assignedDriverId = existingRow.driver_id || existingNotes.driverId || existingNotes.driver?.id;
+
+      // Idempotency: If this driver ALREADY accepted it, treat as success!
+      if (assignedDriverId && assignedDriverId === driverUser.id) {
+        console.log('✅ Driver already assigned to this ride, returning success.');
+        return { success: true, alreadyAccepted: true, ride: normalizeRideData(existingRow) };
+      }
+
+      // If already accepted by someone else:
+      if ((currentStatus === 'accepted' || existingNotes.status === 'driver_accepted' || existingNotes.status === 'ride_started') && assignedDriverId && assignedDriverId !== driverUser.id) {
+        return { success: false, alreadyTaken: true, message: 'This ride has already been accepted by another driver.' };
+      }
+
+      if (currentStatus === 'cancelled' || existingNotes.status === 'cancelled') {
+        return { success: false, cancelled: true, message: 'This ride was cancelled by the commuter.' };
+      }
+
+      // Check 60-second expiry timeout
+      const createdMs = new Date(existingRow.created_at || existingNotes.createdAt || 0).getTime();
+      if (Date.now() - createdMs > 60000) {
+        return { success: false, expired: true, message: 'This ride request has expired (60s timer elapsed).' };
+      }
+
       const mergedNotes = {
         ...existingNotes,
         isRequest: true,
@@ -1944,33 +1992,7 @@
         acceptedAt: new Date().toISOString()
       };
 
-      // 1. Broadcast immediate acceptance to Rider via WebSocket
-      const client = getSupabase();
-      if (client) {
-        try {
-          const riderDirect = client.channel(`rider-ride-${requestId}`);
-          riderDirect.send({
-            type: 'broadcast',
-            event: 'driver_accepted',
-            payload: {
-              status: 'driver_accepted',
-              requestId,
-              driver: driverPayload,
-              ...mergedNotes
-            }
-          });
-
-          // 2. Broadcast to other drivers to remove this accepted ride from their radars
-          const radarChannel = client.channel('routemate-radar-feed');
-          radarChannel.send({
-            type: 'broadcast',
-            event: 'cancel_ride_broadcast',
-            payload: { id: requestId }
-          });
-        } catch (e) {}
-      }
-
-      // 3. Persist update in database without wiping out rider metadata
+      // 3. ATOMIC UPDATE in Supabase
       const patchBody = {
         status: 'accepted',
         driver_name: driverUser.name || 'Verified Driver',
@@ -1980,12 +2002,126 @@
         patchBody.driver_id = driverUser.id;
       }
 
-      const resp = await supabaseRest(`rides?vehicle_number=eq.${encodeURIComponent(requestId)}`, {
+      const patchResp = await supabaseRest(`rides?id=eq.${encodeURIComponent(existingRow.id)}&status=neq.completed&status=neq.cancelled`, {
         method: 'PATCH',
+        prefer: 'return=representation',
         body: patchBody
       });
 
-      return { success: resp.ok };
+      const updateSucceeded = patchResp.ok && Array.isArray(patchResp.data) && patchResp.data.length > 0;
+      if (!updateSucceeded && !patchResp.ok) {
+        // Fallback retry using vehicle_number directly
+        const fallbackResp = await supabaseRest(`rides?vehicle_number=eq.${encodeURIComponent(existingRow.vehicle_number || requestId)}`, {
+          method: 'PATCH',
+          prefer: 'return=representation',
+          body: patchBody
+        });
+        if (!fallbackResp.ok) {
+          return { success: false, message: 'Failed to update ride status in database.' };
+        }
+      }
+
+      // 4. Broadcast acceptance to Rider and Radar channels via WebSockets
+      const client = getSupabase();
+      if (client) {
+        try {
+          const directChannels = [
+            `rider-ride-${requestId}`,
+            `rider-ride-${existingRow.vehicle_number}`,
+            `rider-ride-${existingRow.id}`
+          ];
+          directChannels.forEach(chName => {
+            try {
+              const ch = client.channel(chName);
+              ch.send({
+                type: 'broadcast',
+                event: 'driver_accepted',
+                payload: {
+                  status: 'driver_accepted',
+                  requestId: existingRow.vehicle_number || requestId,
+                  driver: driverPayload,
+                  ...mergedNotes
+                }
+              });
+            } catch (_) {}
+          });
+
+          // Broadcast removal to all other drivers' radars
+          const radarChannel = client.channel('routemate-radar-feed');
+          radarChannel.send({
+            type: 'broadcast',
+            event: 'cancel_ride_broadcast',
+            payload: { id: requestId, vehicleNumber: existingRow.vehicle_number, takenBy: driverUser.id }
+          });
+        } catch (e) {}
+      }
+
+      return {
+        success: true,
+        ride: {
+          ...normalizeRideData(existingRow),
+          status: 'driver_accepted',
+          driver: driverPayload
+        }
+      };
+    },
+
+    /**
+     * Clean 60-Second Request Expiry in Backend & Radar
+     */
+    async expireRequest(requestId) {
+      console.log('⏱️ [ROUTEMATE] Cleanly expiring ride request (60s timeout):', requestId);
+      if (!requestId) return { success: false };
+      const isUUID = (str) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(str || ''));
+
+      // 1. Broadcast expiry across realtime channels
+      const client = getSupabase();
+      if (client) {
+        try {
+          const radarChannel = client.channel('routemate-radar-feed');
+          radarChannel.send({
+            type: 'broadcast',
+            event: 'cancel_ride_broadcast',
+            payload: { id: requestId, expired: true }
+          });
+
+          const riderChannel = client.channel(`rider-ride-${requestId}`);
+          riderChannel.send({
+            type: 'broadcast',
+            event: 'ride_expired',
+            payload: { requestId, status: 'expired' }
+          });
+        } catch (e) {}
+      }
+
+      // 2. Mark as expired/cancelled in Supabase rides table
+      try {
+        const filter = isUUID(requestId)
+          ? `or=(id.eq.${encodeURIComponent(requestId)},vehicle_number.eq.${encodeURIComponent(requestId)})`
+          : `vehicle_number=eq.${encodeURIComponent(requestId)}`;
+
+        await supabaseRest(`rides?${filter}`, {
+          method: 'PATCH',
+          body: {
+            status: 'cancelled',
+            notes: JSON.stringify({ isRequest: true, status: 'expired', expiredAt: new Date().toISOString() })
+          }
+        });
+      } catch (e) {}
+
+      // 3. API Gateway sync
+      const apiBase = (typeof window !== 'undefined' && window.location && window.location.origin)
+        ? window.location.origin
+        : 'https://www.routemate.pro';
+      try {
+        await fetch(`${apiBase}/api/driver-kyc`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'expire_ride', requestId })
+        });
+      } catch (e) {}
+
+      return { success: true };
     },
 
     async cancelRequest(requestId) {
@@ -2008,7 +2144,7 @@
         method: 'PATCH',
         body: {
           status: 'cancelled',
-          notes: JSON.stringify({ isRequest: true, status: 'cancelled' })
+          notes: JSON.stringify({ isRequest: true, status: 'cancelled', cancelledAt: new Date().toISOString() })
         }
       });
     },
