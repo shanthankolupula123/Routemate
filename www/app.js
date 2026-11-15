@@ -1086,18 +1086,35 @@
         pPhoneEl.textContent = state.currentUser.phone ? `Phone: ${state.currentUser.phone}` : '';
         pPhoneEl.classList.toggle('hidden', !state.currentUser.phone);
       }
+
+      // Dynamic User / Driver Star Rating & Reviews Display
+      const rawRatingVal = state.currentUser.rating !== undefined && state.currentUser.rating !== null ? Number(state.currentUser.rating) : 5.0;
+      const formattedRating = rawRatingVal.toFixed(1);
+      const totalReviews = Number(state.currentUser.total_reviews || 0);
+      const reviewsLabel = totalReviews > 0 ? ` (${totalReviews} review${totalReviews > 1 ? 's' : ''})` : ' (New)';
+
       if (pRoleEl) {
         if (state.currentUser.kyc_status === 'approved') {
-          pRoleEl.textContent = 'Verified Driver • 5.0 ★';
+          pRoleEl.textContent = `Verified Driver • ${formattedRating} ★${reviewsLabel}`;
           pRoleEl.className = 'text-[11px] font-bold text-emerald-600 mt-1';
         } else if (state.currentUser.kyc_status === 'pending') {
-          pRoleEl.textContent = 'KYC Under Review • Commuter';
+          pRoleEl.textContent = `KYC Under Review • ${formattedRating} ★`;
           pRoleEl.className = 'text-[11px] font-bold text-amber-600 mt-1';
         } else {
-          pRoleEl.textContent = 'Unverified Commuter';
+          pRoleEl.textContent = `Verified Commuter • ${formattedRating} ★${totalReviews > 0 ? reviewsLabel : ''}`;
           pRoleEl.className = 'text-[11px] font-bold text-slate-500 mt-1';
         }
       }
+
+      const pScoreEl = document.getElementById('profileUserRatingScore');
+      const pCountEl = document.getElementById('profileUserReviewsCount');
+      if (pScoreEl) pScoreEl.textContent = `${formattedRating} ★`;
+      if (pCountEl) pCountEl.textContent = `${totalReviews} review${totalReviews !== 1 ? 's' : ''}`;
+
+      const drvScoreEl = document.getElementById('driverRatingCardScore');
+      const drvCountEl = document.getElementById('driverRatingCardCount');
+      if (drvScoreEl) drvScoreEl.textContent = `${formattedRating} ★`;
+      if (drvCountEl) drvCountEl.textContent = `(${totalReviews} review${totalReviews !== 1 ? 's' : ''})`;
       const pVerifiedBadge = document.getElementById('profileUserVerifiedBadge');
       if (pVerifiedBadge) {
         pVerifiedBadge.classList.toggle('hidden', state.currentUser.kyc_status !== 'approved');
@@ -3101,7 +3118,7 @@
             <div class="text-xs flex-1 min-w-0">
               <h4 class="font-black text-white text-sm truncate">${driver.name || 'Verified Driver'}</h4>
               <p class="text-slate-300 font-mono text-[11px] truncate">${driver.vehicleNumber || 'TG 08 AB 1234'} • ${driver.vehicleName || 'Hero Splendor'}</p>
-              <p class="text-emerald-300 text-[10px] font-bold mt-0.5">Rating: 4.9 ★ • Verified Commuter</p>
+              <p class="text-emerald-300 text-[10px] font-bold mt-0.5">Rating: ${driver.rating ? Number(driver.rating).toFixed(1) : '5.0'} ★ • Verified Driver</p>
             </div>
             <a href="tel:${driver.phone || '+919494285249'}" class="w-10 h-10 rounded-full bg-emerald-600 hover:bg-emerald-500 text-white flex items-center justify-center shadow-lg transition flex-shrink-0">
               <i data-lucide="phone" class="w-4 h-4"></i>
@@ -3857,6 +3874,9 @@
     if (chk) chk.checked = !!trip.paymentSettled;
 
     selectDriverPaymentMethod(trip.paymentMethod || 'upi');
+    selectDriverCommuterRating(5);
+    const commInput = document.getElementById('driverRiderFeedbackComment');
+    if (commInput) commInput.value = '';
     modal.classList.remove('hidden');
     if (window.lucide) lucide.createIcons();
   };
@@ -3864,6 +3884,22 @@
   window.closeDriverTripCompletionModal = function () {
     const modal = document.getElementById('driverTripCompletionModal');
     if (modal) modal.classList.add('hidden');
+  };
+
+  let selectedDriverCommuterRating = 5;
+  window.selectDriverCommuterRating = function (stars) {
+    selectedDriverCommuterRating = Number(stars) || 5;
+    for (let i = 1; i <= 5; i++) {
+      const btn = document.getElementById(`drvRiderStar-${i}`);
+      if (btn) {
+        btn.className = i <= stars ? 'text-xl text-amber-400 hover:scale-110 transition cursor-pointer' : 'text-xl text-slate-300 hover:scale-110 transition cursor-pointer';
+      }
+    }
+    const label = document.getElementById('drvRiderRatingLabel');
+    if (label) {
+      label.textContent = stars >= 4 ? `${stars}.0 ★ Polite & Prompt Commuter` : `${stars}.0 ★ Issues / Delay Noted`;
+      label.className = stars >= 4 ? 'text-[10px] font-bold text-emerald-600' : 'text-[10px] font-bold text-rose-600';
+    }
   };
 
   window.selectDriverPaymentMethod = function (method) {
@@ -3998,6 +4034,31 @@
         }
       } catch (actErr) {
         console.warn('Driver activity recording notice:', actErr);
+      }
+
+      // Submit driver feedback & star rating for the commuter
+      if (window.db?.feedbacks?.submitFeedback && (trip.riderId || trip.rider_id)) {
+        try {
+          const rComm = document.getElementById('driverRiderFeedbackComment')?.value?.trim() || '';
+          await window.db.feedbacks.submitFeedback({
+            rideId: trip.id,
+            targetUserId: trip.riderId || trip.rider_id,
+            targetUserRole: 'rider',
+            riderId: trip.riderId || trip.rider_id,
+            passengerName: trip.riderName || 'Commuter',
+            passengerPhone: trip.riderPhone || '',
+            driverId: state.currentUser?.id || 'DRV-UNKNOWN',
+            driverName: state.currentUser?.name || 'Verified Driver',
+            reviewerId: state.currentUser?.id || '',
+            reviewerRole: 'driver',
+            rating: selectedDriverCommuterRating || 5,
+            feedbackText: rComm,
+            safetyTags: (selectedDriverCommuterRating || 5) <= 3 ? ['Rider Delay / Conduct'] : [],
+            compliments: (selectedDriverCommuterRating || 5) >= 4 ? ['Polite Commuter', 'Prompt Settlement'] : []
+          });
+        } catch (fErr) {
+          console.warn('Driver feedback for commuter notice:', fErr.message);
+        }
       }
 
       // 3. Clear driver route markers
@@ -6986,12 +7047,19 @@
       showToast('Submitting rating and feedback...', 'info');
 
       if (window.db?.feedbacks?.submitFeedback) {
-        await window.db.feedbacks.submitFeedback({
+        const targetDrvId = activeRide?.driver?.id || activeRide?.driver_id || activeRide?.driverId || 'drv_unknown';
+        const targetDrvName = activeRide?.driver?.name || activeRide?.driverName || 'Verified Driver';
+
+        const fbResp = await window.db.feedbacks.submitFeedback({
           rideId: activeRide?.id || ('RIDE-' + Date.now()),
           passengerName: user?.name || 'Verified Commuter',
           passengerPhone: user?.phone || '',
-          driverId: activeRide?.driver?.id || activeRide?.driver_id || 'drv_unknown',
-          driverName: activeRide?.driver?.name || activeRide?.driverName || 'Verified Driver',
+          reviewerId: user?.id || '',
+          reviewerRole: 'rider',
+          driverId: targetDrvId,
+          driverName: targetDrvName,
+          targetUserId: targetDrvId,
+          targetUserRole: 'driver',
           rating: stars,
           safetyRating: stars >= 4 ? 5 : 2,
           cleanlinessRating: stars >= 4 ? 5 : 3,
@@ -7002,10 +7070,16 @@
           paymentMethod: state.ratingState.chosenPaymentMethod,
           fare: activeRide?.fare || 110
         });
+
+        if (fbResp?.updatedRating !== undefined && activeRide?.driver) {
+          activeRide.driver.rating = fbResp.updatedRating;
+        }
       }
 
       closeRidePaymentAndRatingModal();
       showToast('🎉 Thank you! Your rating & review have been submitted.', 'success');
+      if (typeof updateProfileUI === 'function') updateProfileUI();
+      if (typeof revalidateUserProfileAndUpi === 'function') revalidateUserProfileAndUpi(false);
 
       if (typeof pushUserNotification === 'function') {
         pushUserNotification({
@@ -7190,13 +7264,23 @@
               <div class="flex items-center gap-2 flex-wrap">
                 <span class="text-xs font-black text-slate-900">${fb.driverName || 'Driver'}</span>
                 <span class="text-amber-500 font-mono text-xs font-black">${starsDisplay} (${rating.toFixed(1)})</span>
-                ${isSafetyAlert ? '<span class="px-2 py-0.5 rounded-full bg-rose-600 text-white text-[9px] font-black animate-pulse">SAFETY ALERT</span>' : ''}
+                ${isSafetyAlert ? '<span class="px-2 py-0.5 rounded-full bg-rose-600 text-white text-[9px] font-black animate-pulse flex items-center gap-1"><i data-lucide="alert-triangle" class="w-3 h-3"></i><span>SAFETY ALERT</span></span>' : ''}
                 ${actionBadge}
               </div>
               <p class="text-[10px] text-slate-400 mt-0.5">Rider: <strong class="text-slate-600">${fb.passengerName || 'Verified Commuter'}</strong> • ${timeStr}</p>
             </div>
             <span class="text-[10px] font-mono text-slate-400 font-semibold">${fb.id || ''}</span>
           </div>
+
+          ${fb.is_safety_flag && fb.flag_reason ? `
+            <div class="p-2.5 rounded-xl bg-rose-50 border border-rose-200 text-xs text-rose-800 font-bold flex items-start gap-2">
+              <i data-lucide="alert-triangle" class="w-4 h-4 text-rose-600 flex-shrink-0 mt-0.5"></i>
+              <div class="min-w-0 flex-1">
+                <span class="font-black text-[10px] uppercase tracking-wider block text-rose-600">Smart Issue Alert:</span>
+                <span class="text-[11px] leading-snug">${fb.flag_reason}</span>
+              </div>
+            </div>
+          ` : ''}
 
           ${tagsHtml ? `<div class="flex flex-wrap gap-1">${tagsHtml}</div>` : ''}
 

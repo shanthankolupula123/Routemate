@@ -308,17 +308,90 @@ create table if not exists public.feedbacks (
   rider_phone text,
   rating numeric(2,1) not null,
   tags text[],
+  safety_tags text[],
+  compliments text[],
   feedback_text text,
+  cleanliness_rating numeric(2,1),
+  punctuality_rating numeric(2,1),
+  safety_rating numeric(2,1),
   has_safety_concern boolean default false,
+  is_safety_flag boolean default false,
+  is_flagged boolean default false,
+  flag_reason text,
+  severity text default 'low',
+  admin_action text,
+  admin_action_at timestamp with time zone,
+  admin_action_by text,
+  reviewer_id text,
+  reviewer_role text default 'rider',
+  target_user_id text,
+  target_user_role text default 'driver',
   route text,
   status text default 'published',
+  submitted_at timestamp with time zone default timezone('utc'::text, now()),
   created_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
 
+alter table public.profiles add column if not exists total_reviews integer default 0;
+
 alter table public.feedbacks enable row level security;
+drop policy if exists "Allow public read access to feedbacks" on public.feedbacks;
 create policy "Allow public read access to feedbacks" on public.feedbacks for select using (true);
+drop policy if exists "Allow public insert to feedbacks" on public.feedbacks;
 create policy "Allow public insert to feedbacks" on public.feedbacks for insert with check (true);
+drop policy if exists "Allow public update to feedbacks" on public.feedbacks;
 create policy "Allow public update to feedbacks" on public.feedbacks for update using (true);
+drop policy if exists "Allow public delete on feedbacks" on public.feedbacks;
+create policy "Allow public delete on feedbacks" on public.feedbacks for delete using (true);
+
+-- Function & Trigger to dynamically recalculate average rating
+create or replace function public.recalculate_user_rating()
+returns trigger as $$
+declare
+  v_driver_id text;
+  v_rider_id text;
+  v_avg_rating numeric(3,2);
+  v_count integer;
+begin
+  v_driver_id := coalesce(new.driver_id, old.driver_id);
+  if v_driver_id is not null and v_driver_id != '' and v_driver_id != 'DRV-UNKNOWN' then
+    select round(avg(rating)::numeric, 2), count(*)
+    into v_avg_rating, v_count
+    from public.feedbacks
+    where driver_id = v_driver_id and rating is not null;
+
+    begin
+      update public.profiles
+      set rating = coalesce(v_avg_rating, 5.00), total_reviews = coalesce(v_count, 0)
+      where id::text = v_driver_id or phone = v_driver_id;
+    exception when others then null;
+    end;
+  end if;
+
+  v_rider_id := coalesce(new.rider_id, old.rider_id);
+  if v_rider_id is not null and v_rider_id != '' then
+    select round(avg(rating)::numeric, 2), count(*)
+    into v_avg_rating, v_count
+    from public.feedbacks
+    where rider_id = v_rider_id and rating is not null;
+
+    begin
+      update public.profiles
+      set rating = coalesce(v_avg_rating, 5.00), total_reviews = coalesce(v_count, 0)
+      where id::text = v_rider_id or phone = v_rider_id;
+    exception when others then null;
+    end;
+  end if;
+
+  return new;
+end;
+$$ language plpgsql security definer;
+
+drop trigger if exists trg_recalculate_feedback_rating on public.feedbacks;
+create trigger trg_recalculate_feedback_rating
+after insert or update or delete on public.feedbacks
+for each row execute function public.recalculate_user_rating();
+
 
 -- ==============================================================================
 -- 6. RIDE_MESSAGES TABLE (In-App Real-Time Chat via Supabase Realtime)

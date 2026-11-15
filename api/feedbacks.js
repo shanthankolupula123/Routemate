@@ -27,6 +27,14 @@ const SUPER_ADMIN_EMAIL = 'shanthankolupula123@gmail.com';
 
 const SAFETY_FLAG_TAGS = ['Rash Driving', 'Over-speeding', 'Rude Behavior', 'Vehicle Not Clean', 'Wrong Route', 'Extra Cash Demand'];
 
+const NEGATIVE_KEYWORDS = [
+  'rash', 'overspeed', 'speeding', 'fast', 'dangerous', 'danger', 'unsafe', 'accident', 'brake',
+  'rude', 'abusive', 'abuse', 'misbehave', 'misbehavior', 'harass', 'harassment', 'shouted', 'yelled', 'threat', 'unprofessional',
+  'dirty', 'smelly', 'stink', 'stinky', 'unclean', 'filthy', 'smoke', 'smoking', 'cigarette',
+  'extra cash', 'overcharge', 'bribe', 'scam', 'cheat', 'demand', 'demanded money',
+  'drunk', 'alcohol', 'wrong route', 'lost', 'phone while driving', 'no helmet', 'reckless', 'bad driving'
+];
+
 module.exports = async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
@@ -60,6 +68,7 @@ module.exports = async (req, res) => {
             rideId: r.ride_id,
             passengerName: r.passenger_name,
             passengerPhone: r.passenger_phone,
+            riderId: r.rider_id || r.passenger_id || '',
             driverId: r.driver_id,
             driverName: r.driver_name,
             rating: Number(r.rating || 5),
@@ -72,6 +81,9 @@ module.exports = async (req, res) => {
             is_safety_flag: Boolean(r.is_safety_flag),
             is_flagged: Boolean(r.is_flagged || r.is_safety_flag),
             flag_reason: r.flag_reason || '',
+            severity: r.severity || (r.is_safety_flag ? 'high' : 'low'),
+            targetUserId: r.target_user_id || r.driver_id,
+            targetUserRole: r.target_user_role || 'driver',
             submittedAt: r.submitted_at,
             admin_action: r.admin_action || null,
             admin_action_at: r.admin_action_at || null,
@@ -292,31 +304,61 @@ module.exports = async (req, res) => {
       return res.status(404).json({ success: false, error: 'Feedback not found' });
     }
 
-    // 3. New Passenger Post-Ride Rating & Safety Feedback Submission
+    // 3. New Passenger / Driver Post-Ride Rating & Safety Feedback Submission
     const rawRating = parseFloat(data.rating) || 5;
     const safetyTags = Array.isArray(data.safetyTags) ? data.safetyTags : (Array.isArray(data.tags) ? data.tags : []);
     const compliments = Array.isArray(data.compliments) ? data.compliments : [];
+    const feedbackComment = String(data.feedbackText || data.comments || '').trim();
+    const commentLower = feedbackComment.toLowerCase();
 
-    // Automatically detect safety violation
-    const hasSafetyViolation = rawRating <= 3 || safetyTags.some(t => SAFETY_FLAG_TAGS.includes(t));
+    // Smart Issue-Based Detection: scan for negative issue keywords in feedback body
+    const matchedIssueKeywords = NEGATIVE_KEYWORDS.filter(kw => {
+      return commentLower.includes(kw);
+    });
+
+    const isLowRating = rawRating <= 3;
+    const hasSafetyTags = safetyTags.some(t => SAFETY_FLAG_TAGS.includes(t));
+    const hasIssueKeywords = matchedIssueKeywords.length > 0;
+    const isSafetyAlert = isLowRating || hasSafetyTags || hasIssueKeywords;
+
+    let flagReasons = [];
+    if (isLowRating) flagReasons.push(`Low Rating (${rawRating.toFixed(1)}★)`);
+    if (hasSafetyTags) flagReasons.push(`Safety Tags: ${safetyTags.join(', ')}`);
+    if (hasIssueKeywords) flagReasons.push(`Detected Issues: "${matchedIssueKeywords.join(', ')}"`);
+    const flagReasonStr = isSafetyAlert ? flagReasons.join(' • ') : null;
+
+    const severity = (rawRating <= 2 || matchedIssueKeywords.some(k => ['rash', 'drunk', 'abuse', 'harass', 'threat', 'accident'].includes(k)))
+      ? 'high'
+      : (isSafetyAlert ? 'medium' : 'low');
+
+    const targetUserId = data.targetUserId || data.driverId || 'DRV-UNKNOWN';
+    const targetUserRole = data.targetUserRole || 'driver';
+    const reviewerId = data.reviewerId || data.riderId || '';
+    const reviewerRole = data.reviewerRole || 'rider';
 
     const feedback = {
       id: data.id || ('FB-' + Date.now().toString(36).toUpperCase()),
       rideId: data.rideId || ('RIDE-' + Date.now().toString(36).toUpperCase()),
       passengerName: data.passengerName || 'Verified Commuter',
       passengerPhone: data.passengerPhone || '',
-      driverId: data.driverId || 'DRV-UNKNOWN',
+      riderId: reviewerId,
+      driverId: targetUserRole === 'driver' ? targetUserId : (data.driverId || 'DRV-UNKNOWN'),
       driverName: data.driverName || 'Verified Driver',
       rating: rawRating,
       cleanlinessRating: parseInt(data.cleanlinessRating, 10) || (rawRating >= 4 ? 5 : 3),
       punctualityRating: parseInt(data.punctualityRating, 10) || (rawRating >= 4 ? 5 : 3),
       safetyRating: parseInt(data.safetyRating, 10) || (rawRating >= 4 ? 5 : 2),
-      feedbackText: data.feedbackText || data.comments || '',
+      feedbackText: feedbackComment,
       safetyTags: safetyTags,
       compliments: compliments,
-      is_safety_flag: hasSafetyViolation,
-      is_flagged: hasSafetyViolation,
-      flag_reason: hasSafetyViolation ? (safetyTags.join(', ') || 'Low rider safety rating') : null,
+      is_safety_flag: isSafetyAlert,
+      is_flagged: isSafetyAlert,
+      flag_reason: flagReasonStr,
+      severity: severity,
+      targetUserId: targetUserId,
+      targetUserRole: targetUserRole,
+      reviewerId: reviewerId,
+      reviewerRole: reviewerRole,
       submittedAt: data.submittedAt || new Date().toISOString(),
       admin_action: null,
       admin_action_at: null,
@@ -337,6 +379,7 @@ module.exports = async (req, res) => {
           ride_id: feedback.rideId,
           passenger_name: feedback.passengerName,
           passenger_phone: feedback.passengerPhone,
+          rider_id: feedback.riderId,
           driver_id: feedback.driverId,
           driver_name: feedback.driverName,
           rating: feedback.rating,
@@ -349,6 +392,11 @@ module.exports = async (req, res) => {
           is_safety_flag: feedback.is_safety_flag,
           is_flagged: feedback.is_flagged,
           flag_reason: feedback.flag_reason,
+          severity: feedback.severity,
+          target_user_id: feedback.targetUserId,
+          target_user_role: feedback.targetUserRole,
+          reviewer_id: feedback.reviewerId,
+          reviewer_role: feedback.reviewerRole,
           submitted_at: feedback.submittedAt
         })
       });
@@ -356,10 +404,126 @@ module.exports = async (req, res) => {
       console.warn('[Feedbacks API] Supabase insert notice:', e.message);
     }
 
+    // Dynamic Star Rating Calculation Engine: fetch all historical reviews and calculate real average
+    let allRatings = [rawRating];
+    try {
+      const pastRes = await fetch(`${SUPABASE_URL}/rest/v1/feedbacks?${targetUserRole === 'driver' ? 'driver_id' : 'rider_id'}=eq.${encodeURIComponent(targetUserId)}&select=rating`, {
+        headers: {
+          'apikey': SUPABASE_KEY,
+          'Authorization': `Bearer ${SUPABASE_KEY}`
+        }
+      });
+      if (pastRes.ok) {
+        const pastRows = await pastRes.json();
+        if (Array.isArray(pastRows)) {
+          pastRows.forEach(r => {
+            const v = parseFloat(r.rating);
+            if (!isNaN(v) && v >= 1 && v <= 5) allRatings.push(v);
+          });
+        }
+      }
+    } catch (dbQueryErr) {
+      console.warn('[Feedbacks API] Historical ratings query notice:', dbQueryErr.message);
+    }
+
+    const ratingsSum = allRatings.reduce((sum, r) => sum + r, 0);
+    const avgRating = Number((ratingsSum / allRatings.length).toFixed(2));
+    const totalReviews = allRatings.length;
+
+    // Update target user's `profiles` record with dynamically computed rating
+    try {
+      const pRes = await fetch(`${SUPABASE_URL}/rest/v1/profiles?or=(id.eq.${encodeURIComponent(targetUserId)},phone.eq.${encodeURIComponent(targetUserId)})`, {
+        headers: {
+          'apikey': SUPABASE_KEY,
+          'Authorization': `Bearer ${SUPABASE_KEY}`
+        }
+      });
+      if (pRes.ok) {
+        const pRows = await pRes.json();
+        if (pRows && pRows.length > 0) {
+          const pRow = pRows[0];
+          let meta = {};
+          try {
+            if (typeof pRow.role === 'string' && pRow.role.includes('{')) {
+              meta = JSON.parse(pRow.role);
+            }
+          } catch (e) {}
+
+          meta.rating = avgRating;
+          meta.total_reviews = totalReviews;
+
+          await fetch(`${SUPABASE_URL}/rest/v1/profiles?id=eq.${encodeURIComponent(pRow.id)}`, {
+            method: 'PATCH',
+            headers: {
+              'apikey': SUPABASE_KEY,
+              'Authorization': `Bearer ${SUPABASE_KEY}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              rating: avgRating,
+              total_reviews: totalReviews,
+              role: JSON.stringify(meta)
+            })
+          });
+        }
+      }
+    } catch (pErr) {
+      console.warn('[Feedbacks API] Profile rating update notice:', pErr.message);
+    }
+
+    // Also update local KYC store if target is driver
+    if (targetUserRole === 'driver') {
+      try {
+        const { getStore: getKycStore, saveStore: saveKycStore } = require('./_kyc-store');
+        const kycList = getKycStore();
+        const kIdx = kycList.findIndex(s => s.id === targetUserId || s.user_id === targetUserId);
+        if (kIdx !== -1) {
+          kycList[kIdx].rating = avgRating;
+          kycList[kIdx].total_reviews = totalReviews;
+          saveKycStore(kycList);
+        }
+      } catch (e) {}
+    }
+
+    // If flagged as a Safety/Performance Alert, dispatch a push alert to Super Admin
+    if (isSafetyAlert) {
+      try {
+        await fetch(`${SUPABASE_URL}/rest/v1/notifications`, {
+          method: 'POST',
+          headers: {
+            'apikey': SUPABASE_KEY,
+            'Authorization': `Bearer ${SUPABASE_KEY}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            recipient_role: 'admin',
+            type: 'safety',
+            title: `🚨 Safety/Performance Alert: ${feedback.driverName}`,
+            message: `Trip review #${feedback.id} flagged: ${feedback.flag_reason}. Immediate compliance review required.`,
+            data: {
+              feedbackId: feedback.id,
+              driverId: feedback.driverId,
+              driverName: feedback.driverName,
+              rating: feedback.rating,
+              flag_reason: feedback.flag_reason,
+              severity: feedback.severity
+            }
+          })
+        });
+      } catch (nErr) {
+        console.warn('[Feedbacks API] Notification insert notice:', nErr.message);
+      }
+    }
+
     list.unshift(feedback);
     saveStore(list);
 
-    return res.status(200).json({ success: true, feedback });
+    return res.status(200).json({
+      success: true,
+      feedback,
+      updatedRating: avgRating,
+      totalReviews: totalReviews
+    });
   }
 
   return res.status(405).json({ error: 'Method not allowed' });

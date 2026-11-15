@@ -1450,7 +1450,7 @@
     const riderName = notes.riderName || (row.driver_name ? String(row.driver_name).replace(/\s*\([^)]*\)/g, '').trim() : 'Commuter');
     const riderAvatar = (notes.riderAvatar && !notes.riderAvatar.includes('unsplash')) ? notes.riderAvatar : getSvgInitialsAvatar(riderName);
     const riderPhone = notes.riderPhone || '+91 98480 23145';
-    const riderRating = notes.riderRating || 4.9;
+    const riderRating = (notes.riderRating !== undefined && notes.riderRating !== null) ? Number(notes.riderRating).toFixed(1) : (notes.rating ? Number(notes.rating).toFixed(1) : '5.0');
 
     const pickupLat = notes.pickupLat || notes.pickup_lat || 17.4018;
     const pickupLng = notes.pickupLng || notes.pickup_lng || 78.5602;
@@ -1559,7 +1559,7 @@
         riderPhone: reqData.riderPhone || '+91 98480 23145',
         riderName: rName,
         riderAvatar: (reqData.riderAvatar && !reqData.riderAvatar.includes('unsplash')) ? reqData.riderAvatar : getSvgInitialsAvatar(rName),
-        riderRating: 4.95,
+        riderRating: (reqData.riderRating !== undefined && reqData.riderRating !== null) ? Number(reqData.riderRating) : (reqData.rating ? Number(reqData.rating) : 5.0),
         fare: fare,
         distance: dist,
         pin: pin,
@@ -2003,7 +2003,7 @@
         upi_id: resolvedUpiId,
         upiQr: resolvedUpiQr,
         upi_qr: resolvedUpiQr,
-        rating: driverUser.rating || 4.95
+        rating: (driverUser.rating !== undefined && driverUser.rating !== null) ? Number(driverUser.rating) : 5.0
       };
 
       // 1. Fetch existing row by optionalDbId (UUID), vehicle_number, ID, or notes.id

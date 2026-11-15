@@ -499,6 +499,25 @@
           </div>
         </div>
 
+        <!-- DRIVER LIVE REPUTATION & DYNAMIC RATING CARD -->
+        <div class="routemate-card p-3.5 bg-gradient-to-r from-amber-50 via-orange-50 to-amber-50 border border-amber-200/80 rounded-2xl flex items-center justify-between gap-3 shadow-xs">
+          <div class="flex items-center gap-2.5">
+            <div class="w-9 h-9 rounded-xl bg-amber-400 text-slate-900 flex items-center justify-center font-black text-sm shadow-xs">
+              ★
+            </div>
+            <div>
+              <div class="flex items-center gap-1.5">
+                <span id="driverRatingCardScore" class="text-xs font-black text-slate-900">5.0 ★</span>
+                <span id="driverRatingCardCount" class="text-[10px] text-slate-500 font-semibold">(0 reviews)</span>
+              </div>
+              <p class="text-[10px] text-slate-500">Live Driver Safety & Performance Score</p>
+            </div>
+          </div>
+          <span class="text-[10px] font-bold text-amber-800 bg-amber-100 px-2 py-0.5 rounded-full border border-amber-300">
+            Real Reviews
+          </span>
+        </div>
+
         <!-- DRIVER P2P UPI SETTLEMENT CARD (DIRECT COMMUTER PAYMENTS) -->
         <div id="driverUpiCard" class="routemate-card p-3.5 bg-white border border-slate-200/90 flex items-center justify-between gap-3 shadow-xs">
           <div class="flex items-center gap-2.5 min-w-0">
@@ -663,6 +682,25 @@
             <p id="profileUserPhone" class="text-xs text-slate-500 font-mono mt-0.5 truncate">+91 98480 12345</p>
             <p id="profileUserRole" class="text-[11px] font-bold text-slate-500 mt-1">Unverified Commuter</p>
           </div>
+        </div>
+
+        <!-- Dynamic Star Rating & Community Trust Card -->
+        <div class="mt-4 p-3.5 rounded-2xl bg-amber-50/70 border border-amber-200/80 flex items-center justify-between gap-3 shadow-xs">
+          <div class="flex items-center gap-2.5">
+            <div class="w-9 h-9 rounded-xl bg-amber-400 text-slate-900 flex items-center justify-center font-black text-sm shadow-xs">
+              ★
+            </div>
+            <div>
+              <div class="flex items-center gap-1.5">
+                <span id="profileUserRatingScore" class="text-xs font-black text-slate-900">5.0 ★</span>
+                <span id="profileUserReviewsCount" class="text-[10px] text-slate-500 font-semibold">(0 reviews)</span>
+              </div>
+              <p class="text-[10px] text-slate-500">Historical Peer Rating & Safety Score</p>
+            </div>
+          </div>
+          <span class="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-black border border-emerald-200">
+            Real Verified
+          </span>
         </div>
 
         <div class="mt-4 p-4 rounded-2xl bg-slate-50 border border-slate-200/80 space-y-3">
@@ -1980,6 +2018,22 @@
         </span>
       </label>
 
+      <!-- Optional Commuter Rating & Review by Driver -->
+      <div class="p-3 bg-slate-50 border border-slate-200/80 rounded-2xl space-y-1.5 text-center">
+        <div class="flex items-center justify-between">
+          <span class="text-[11px] font-bold text-slate-700">Rate Commuter</span>
+          <span id="drvRiderRatingLabel" class="text-[10px] font-bold text-emerald-600">5.0 ★ Polite & Prompt Commuter</span>
+        </div>
+        <div class="flex items-center justify-center gap-2 py-1">
+          <button type="button" onclick="selectDriverCommuterRating(1)" id="drvRiderStar-1" class="text-xl text-amber-400 hover:scale-110 transition cursor-pointer">★</button>
+          <button type="button" onclick="selectDriverCommuterRating(2)" id="drvRiderStar-2" class="text-xl text-amber-400 hover:scale-110 transition cursor-pointer">★</button>
+          <button type="button" onclick="selectDriverCommuterRating(3)" id="drvRiderStar-3" class="text-xl text-amber-400 hover:scale-110 transition cursor-pointer">★</button>
+          <button type="button" onclick="selectDriverCommuterRating(4)" id="drvRiderStar-4" class="text-xl text-amber-400 hover:scale-110 transition cursor-pointer">★</button>
+          <button type="button" onclick="selectDriverCommuterRating(5)" id="drvRiderStar-5" class="text-xl text-amber-400 hover:scale-110 transition cursor-pointer">★</button>
+        </div>
+        <input type="text" id="driverRiderFeedbackComment" placeholder="Optional comments on commuter (polite, timely...)" class="w-full text-xs px-3 py-1.5 bg-white border border-slate-200 rounded-xl focus:outline-blue-500" />
+      </div>
+
       <!-- Action Button -->
       <button type="button" onclick="executeDriverPaymentVerificationAndCompletion()" id="btnDriverConfirmAndComplete" class="w-full py-3.5 btn-pill-primary text-xs font-black flex items-center justify-center gap-2 shadow-lg cursor-pointer active:scale-95">
         <i data-lucide="check-check" class="w-4 h-4"></i>
@@ -2557,8 +2611,8 @@
   </audio>
 
   <!-- Core Scripts -->
-  <script src="payment.js?v=20261115_notifs_session_v88"></script>
-  <script src="supabaseClient.js?v=20261115_notifs_session_v88"></script>
-  <script src="app.js?v=20261115_notifs_session_v88"></script>
+  <script src="payment.js?v=20261115_dynamic_ratings_v89"></script>
+  <script src="supabaseClient.js?v=20261115_dynamic_ratings_v89"></script>
+  <script src="app.js?v=20261115_dynamic_ratings_v89"></script>
 </body>
 </html>

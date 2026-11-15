@@ -203,3 +203,98 @@ CREATE POLICY "Allow public delete on notifications"
   ON public.notifications FOR DELETE
   USING (true);
 
+-- ==============================================================================
+-- 5. DYNAMIC STAR RATING CALCULATION HOOK & SMART FEEDBACK ANALYSIS
+-- ==============================================================================
+
+-- Upgrade profiles table for dynamic ratings & reviews
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS rating numeric(3,2) DEFAULT 5.00;
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS total_reviews integer DEFAULT 0;
+
+-- Upgrade feedbacks table columns for safety analysis
+ALTER TABLE public.feedbacks ADD COLUMN IF NOT EXISTS safety_rating numeric(2,1);
+ALTER TABLE public.feedbacks ADD COLUMN IF NOT EXISTS cleanliness_rating numeric(2,1);
+ALTER TABLE public.feedbacks ADD COLUMN IF NOT EXISTS punctuality_rating numeric(2,1);
+ALTER TABLE public.feedbacks ADD COLUMN IF NOT EXISTS safety_tags text[];
+ALTER TABLE public.feedbacks ADD COLUMN IF NOT EXISTS compliments text[];
+ALTER TABLE public.feedbacks ADD COLUMN IF NOT EXISTS is_safety_flag boolean DEFAULT false;
+ALTER TABLE public.feedbacks ADD COLUMN IF NOT EXISTS is_flagged boolean DEFAULT false;
+ALTER TABLE public.feedbacks ADD COLUMN IF NOT EXISTS flag_reason text;
+ALTER TABLE public.feedbacks ADD COLUMN IF NOT EXISTS severity text DEFAULT 'low';
+ALTER TABLE public.feedbacks ADD COLUMN IF NOT EXISTS admin_action text;
+ALTER TABLE public.feedbacks ADD COLUMN IF NOT EXISTS admin_action_at timestamp with time zone;
+ALTER TABLE public.feedbacks ADD COLUMN IF NOT EXISTS admin_action_by text;
+ALTER TABLE public.feedbacks ADD COLUMN IF NOT EXISTS submitted_at timestamp with time zone DEFAULT timezone('utc'::text, now());
+ALTER TABLE public.feedbacks ADD COLUMN IF NOT EXISTS reviewer_id text;
+ALTER TABLE public.feedbacks ADD COLUMN IF NOT EXISTS reviewer_role text DEFAULT 'rider';
+ALTER TABLE public.feedbacks ADD COLUMN IF NOT EXISTS target_user_id text;
+ALTER TABLE public.feedbacks ADD COLUMN IF NOT EXISTS target_user_role text DEFAULT 'driver';
+
+-- Function: Automatically recalculate average rating from historical feedbacks
+CREATE OR REPLACE FUNCTION public.recalculate_user_rating()
+RETURNS TRIGGER AS $$
+DECLARE
+  v_driver_id text;
+  v_rider_id text;
+  v_avg_rating numeric(3,2);
+  v_count integer;
+BEGIN
+  -- 1. Recalculate Driver Rating
+  v_driver_id := COALESCE(NEW.driver_id, OLD.driver_id);
+  IF v_driver_id IS NOT NULL AND v_driver_id != '' AND v_driver_id != 'DRV-UNKNOWN' THEN
+    SELECT 
+      ROUND(AVG(rating)::numeric, 2), 
+      COUNT(*)
+    INTO 
+      v_avg_rating, 
+      v_count
+    FROM public.feedbacks
+    WHERE driver_id = v_driver_id AND rating IS NOT NULL;
+
+    BEGIN
+      UPDATE public.profiles
+      SET 
+        rating = COALESCE(v_avg_rating, 5.00),
+        total_reviews = COALESCE(v_count, 0)
+      WHERE id::text = v_driver_id OR phone = v_driver_id;
+    EXCEPTION WHEN OTHERS THEN
+      NULL;
+    END;
+  END IF;
+
+  -- 2. Recalculate Rider / Commuter Rating (if target_user_role is rider or rider_id provided)
+  v_rider_id := COALESCE(NEW.rider_id, OLD.rider_id);
+  IF v_rider_id IS NOT NULL AND v_rider_id != '' THEN
+    SELECT 
+      ROUND(AVG(rating)::numeric, 2), 
+      COUNT(*)
+    INTO 
+      v_avg_rating, 
+      v_count
+    FROM public.feedbacks
+    WHERE rider_id = v_rider_id AND rating IS NOT NULL;
+
+    BEGIN
+      UPDATE public.profiles
+      SET 
+        rating = COALESCE(v_avg_rating, 5.00),
+        total_reviews = COALESCE(v_count, 0)
+      WHERE id::text = v_rider_id OR phone = v_rider_id;
+    EXCEPTION WHEN OTHERS THEN
+      NULL;
+    END;
+  END IF;
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Trigger: Fire on every INSERT, UPDATE, or DELETE on public.feedbacks
+DROP TRIGGER IF EXISTS trg_recalculate_feedback_rating ON public.feedbacks;
+CREATE TRIGGER trg_recalculate_feedback_rating
+AFTER INSERT OR UPDATE OR DELETE ON public.feedbacks
+FOR EACH ROW EXECUTE FUNCTION public.recalculate_user_rating();
+
+GRANT EXECUTE ON FUNCTION public.recalculate_user_rating TO anon, authenticated, service_role;
+
+
