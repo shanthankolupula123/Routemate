@@ -284,3 +284,22 @@ body {
   width: 100% !important;
   height: 100% !important;
 }
+
+/* Notification Center Styles */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.notification-card {
+  transition: all 0.15s ease-out;
+}
+.notification-card:hover {
+  transform: translateY(-1px);
+}
+.notification-card.unread {
+  border-left: 3px solid #2563EB;
+}

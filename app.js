@@ -77,6 +77,12 @@
       selectedTags: new Set(['Smooth & Safe Ride', 'Polite Driver']),
       chosenPaymentMethod: 'upi'
     },
+    notifications: {
+      items: [],
+      filter: 'all',
+      activeDetail: null,
+      readIds: new Set()
+    },
     kyc: {
       status: 'not_submitted', // 'not_submitted' | 'pending' | 'approved' | 'rejected'
       submission: null,
@@ -742,6 +748,7 @@
     // Load Driver KYC, wallet balance, and vehicle registrations immediately
     checkDriverKycStatus(false);
     listenForDriverSafetyAlerts(user);
+    initNotificationSystem(user);
 
     // Default to commuter mode (user can freely toggle rider/driver anytime via header slider or bottom nav)
     switchMode('rider');
@@ -764,6 +771,8 @@
     closeLocationPreferencesModal();
     if (typeof closeTermsModal === 'function') closeTermsModal();
     if (typeof closePrivacyModal === 'function') closePrivacyModal();
+    if (typeof closeNotificationDrawer === 'function') closeNotificationDrawer();
+    if (typeof closeNotificationDetailModal === 'function') closeNotificationDetailModal();
 
     // Hide Super Admin controls
     const adminPill = document.getElementById('headerAdminPill');
@@ -3398,6 +3407,19 @@
       } else {
         showToast(`🎉 Driver Confirmed Payment! ₹${fare} verified via ${payMethodLabel}. (₹${commissionFee} ${commInfo.label} deducted from wallet)`, 'success');
       }
+
+      if (typeof pushUserNotification === 'function') {
+        pushUserNotification({
+          id: 'notif_trip_completed_' + trip.id,
+          type: 'wallet',
+          title: `🎉 Ride #${String(trip.id).slice(-6).toUpperCase()} Completed`,
+          message: `Fuel split of ₹${fare} verified via ${payMethodLabel}. Dynamic platform fee of ₹${commissionFee} deducted from wallet.`,
+          timestamp: new Date().toISOString(),
+          icon: 'check-circle-2',
+          iconBg: 'bg-emerald-100 text-emerald-800',
+          action: { label: 'View Wallet', tab: 'drive' }
+        });
+      }
     } catch (err) {
       console.error('Complete ride error:', err);
       showToast('Failed to complete ride: ' + err.message, 'danger');
@@ -4458,11 +4480,35 @@
           }
           state.kyc.status = 'suspended';
           showToast(`🚫 Account Suspended by Super Admin: ${p.notes || 'Safety compliance violation.'}`, 'danger');
+          if (typeof pushUserNotification === 'function') {
+            pushUserNotification({
+              id: 'alert_suspend_' + Date.now(),
+              type: 'safety',
+              title: '🚫 Account Suspended by Super Admin',
+              message: p.notes || 'Safety compliance violation reported.',
+              timestamp: p.timestamp || new Date().toISOString(),
+              icon: 'alert-triangle',
+              iconBg: 'bg-rose-100 text-rose-800',
+              action: { label: 'Contact Support', email: 'routmatesupport@gmail.com' }
+            });
+          }
           checkDriverKycStatus(true);
         } else if (p.actionType === 'warning') {
           showToast(`⚠️ Official Safety Warning: ${p.notes || 'Please follow community safety guidelines.'}`, 'warning');
           if (state.currentUser) {
             state.currentUser.warning_alert = { notes: p.notes, issuedAt: p.timestamp || new Date().toISOString() };
+          }
+          if (typeof pushUserNotification === 'function') {
+            pushUserNotification({
+              id: 'alert_warn_' + Date.now(),
+              type: 'safety',
+              title: '⚠️ Compliance Warning from Super Admin',
+              message: p.notes || 'Please follow community safety guidelines.',
+              timestamp: p.timestamp || new Date().toISOString(),
+              icon: 'shield-alert',
+              iconBg: 'bg-amber-100 text-amber-800',
+              action: { label: 'Review Guidelines', tab: 'profile' }
+            });
           }
           checkDriverKycStatus(true);
         } else if (p.actionType === 'unsuspend' || p.actionType === 'resolve') {
@@ -4472,6 +4518,18 @@
           }
           state.kyc.status = 'approved';
           showToast('✓ Driver account reinstated by Compliance Team.', 'success');
+          if (typeof pushUserNotification === 'function') {
+            pushUserNotification({
+              id: 'alert_restore_' + Date.now(),
+              type: 'account',
+              title: '✓ Account Restored by Compliance Team',
+              message: 'Your driver account has been reinstated. You can now go online and accept rides.',
+              timestamp: p.timestamp || new Date().toISOString(),
+              icon: 'check-circle-2',
+              iconBg: 'bg-emerald-100 text-emerald-800',
+              action: { label: 'Go Online', tab: 'drive' }
+            });
+          }
           checkDriverKycStatus(true);
         }
       }).subscribe();
@@ -5842,6 +5900,19 @@
           closeDriverWalletRechargeModal();
           showToast(`🎉 ₹${finalAmount} added to wallet successfully! Balance: ₹${state.wallet.balance.toFixed(2)} (Payment ID: ${result.paymentId})`, 'success');
 
+          if (typeof pushUserNotification === 'function') {
+            pushUserNotification({
+              id: 'notif_recharge_' + (result.paymentId || Date.now()),
+              type: 'wallet',
+              title: `💰 Wallet Recharged (+₹${finalAmount})`,
+              message: `Successfully credited ₹${finalAmount} to your wallet. New balance: ₹${state.wallet.balance.toFixed(2)}.`,
+              timestamp: new Date().toISOString(),
+              icon: 'wallet',
+              iconBg: 'bg-emerald-100 text-emerald-800',
+              action: { label: 'View Wallet', tab: 'drive' }
+            });
+          }
+
           if (btn) btn.disabled = false;
           if (btnText) btnText.textContent = `Pay & Recharge ₹${selectedRechargeAmount}`;
         },
@@ -6206,6 +6277,19 @@
 
       closeRidePaymentAndRatingModal();
       showToast('🎉 Thank you! Your rating & review have been submitted.', 'success');
+
+      if (typeof pushUserNotification === 'function') {
+        pushUserNotification({
+          id: 'notif_rider_feedback_' + Date.now(),
+          type: 'trip',
+          title: '🚗 Trip & Feedback Recorded',
+          message: `Thank you for traveling with Routemate! Fuel split settled and ${stars}★ rating recorded for ${activeRide?.driver?.driver_name || 'Driver'}.`,
+          timestamp: new Date().toISOString(),
+          icon: 'star',
+          iconBg: 'bg-amber-100 text-amber-800',
+          action: { label: 'Book Another Ride', tab: 'rider' }
+        });
+      }
     } catch (err) {
       console.error('Feedback submit error:', err);
       showToast('Failed to submit feedback: ' + err.message, 'danger');
@@ -6504,6 +6588,445 @@
   window.closeImageLightbox = function () {
     const modal = document.getElementById('imageLightboxModal');
     if (modal) modal.classList.add('hidden');
+  };
+
+  // =========================================================================
+  // TOP HEADER NOTIFICATION BELL & MULTI-CHANNEL ALERT SYSTEM
+  // =========================================================================
+
+  function getStoredReadNotifIds(userId) {
+    try {
+      const raw = localStorage.getItem('routemate_read_notifs_' + (userId || 'guest'));
+      return new Set(raw ? JSON.parse(raw) : []);
+    } catch (e) {
+      return new Set();
+    }
+  }
+
+  function saveStoredReadNotifIds(userId, readSet) {
+    try {
+      localStorage.setItem('routemate_read_notifs_' + (userId || 'guest'), JSON.stringify(Array.from(readSet)));
+    } catch (e) {}
+  }
+
+  function getStoredCustomNotifs(userId) {
+    try {
+      const raw = localStorage.getItem('routemate_custom_notifs_' + (userId || 'guest'));
+      return raw ? JSON.parse(raw) : [];
+    } catch (e) {
+      return [];
+    }
+  }
+
+  function saveStoredCustomNotifs(userId, list) {
+    try {
+      localStorage.setItem('routemate_custom_notifs_' + (userId || 'guest'), JSON.stringify(list.slice(0, 50)));
+    } catch (e) {}
+  }
+
+  function formatRelativeTime(isoStr) {
+    if (!isoStr) return 'Just now';
+    try {
+      const diffMs = Date.now() - new Date(isoStr).getTime();
+      const mins = Math.floor(diffMs / 60000);
+      if (mins < 1) return 'Just now';
+      if (mins < 60) return `${mins}m ago`;
+      const hrs = Math.floor(mins / 60);
+      if (hrs < 24) return `${hrs}h ago`;
+      const days = Math.floor(hrs / 24);
+      if (days < 7) return `${days}d ago`;
+      return new Date(isoStr).toLocaleDateString('en-IN', { month: 'short', day: 'numeric' });
+    } catch (e) {
+      return 'Recent';
+    }
+  }
+
+  function initNotificationSystem(user) {
+    const userId = user?.id || 'guest';
+    const readSet = getStoredReadNotifIds(userId);
+    state.notifications.readIds = readSet;
+
+    const items = [];
+
+    // 1. Admin Safety Alerts & Warnings
+    if (user?.warning_alert && user.warning_alert.notes) {
+      items.push({
+        id: 'notif_warn_active',
+        type: 'safety',
+        title: '⚠️ Safety & Compliance Notice',
+        message: user.warning_alert.notes,
+        timestamp: user.warning_alert.issuedAt || new Date().toISOString(),
+        icon: 'shield-alert',
+        iconBg: 'bg-amber-100 text-amber-800',
+        action: { label: 'Acknowledge', type: 'dismiss_warning' }
+      });
+    }
+
+    if (Array.isArray(user?.role?.warnings)) {
+      user.role.warnings.forEach((w, i) => {
+        items.push({
+          id: `notif_warn_${w.id || i}`,
+          type: 'safety',
+          title: 'Community Safety Warning',
+          message: w.notes || 'Violation of Routemate safety guidelines was reported.',
+          timestamp: w.issuedAt || new Date().toISOString(),
+          icon: 'shield-alert',
+          iconBg: 'bg-amber-100 text-amber-800',
+          action: { label: 'Review Guidelines', tab: 'profile' }
+        });
+      });
+    }
+
+    if (user?.kyc_status === 'suspended' || user?.is_suspended) {
+      items.push({
+        id: 'notif_acc_suspended',
+        type: 'safety',
+        title: '🚫 Driver Account Suspended',
+        message: user.suspension_reason || 'Your driver account has been suspended by Super Admin due to passenger complaints or safety guidelines.',
+        timestamp: new Date().toISOString(),
+        icon: 'alert-triangle',
+        iconBg: 'bg-rose-100 text-rose-800',
+        action: { label: 'Contact Support', email: 'routmatesupport@gmail.com' }
+      });
+    }
+
+    // 2. Account & KYC Status Updates
+    if (user?.kyc_status === 'approved') {
+      items.push({
+        id: 'notif_kyc_approved',
+        type: 'account',
+        title: '🎉 Driver KYC Approved',
+        message: 'Your Driving License, Aadhaar, and Vehicle RC have been verified. You can now accept rides and earn 100% fuel split via Direct UPI.',
+        timestamp: user.submitted_at || new Date().toISOString(),
+        icon: 'check-circle-2',
+        iconBg: 'bg-emerald-100 text-emerald-800',
+        action: { label: 'Go Online', tab: 'drive' }
+      });
+    } else if (user?.kyc_status === 'pending') {
+      items.push({
+        id: 'notif_kyc_pending',
+        type: 'account',
+        title: '📄 Driver Documents Under Review',
+        message: 'Your KYC submission is in the Super Admin verification queue. Verification typically completes within a few minutes to hours.',
+        timestamp: user.submitted_at || new Date().toISOString(),
+        icon: 'clock',
+        iconBg: 'bg-blue-100 text-blue-800',
+        action: { label: 'Check Status', tab: 'drive' }
+      });
+    } else if (user?.kyc_status === 'rejected') {
+      items.push({
+        id: 'notif_kyc_rejected',
+        type: 'account',
+        title: '⚠️ KYC Revision Required',
+        message: user.rejection_reason || 'One of your uploaded documents could not be verified. Please review and re-upload valid documents.',
+        timestamp: new Date().toISOString(),
+        icon: 'alert-circle',
+        iconBg: 'bg-rose-100 text-rose-800',
+        action: { label: 'Re-submit KYC', tab: 'drive' }
+      });
+    }
+
+    // 3. Wallet & Promotional Bonus
+    if (state.wallet?.balance >= 100 || user?.role?.welcome_bonus_credited !== false) {
+      items.push({
+        id: 'notif_wallet_welcome_bonus',
+        type: 'wallet',
+        title: '🎁 ₹100 Welcome Bonus Credited',
+        message: '₹100 promotional balance has been deposited to your in-app driver wallet to offset platform fees.',
+        timestamp: '2026-11-01T00:00:00.000Z',
+        icon: 'sparkles',
+        iconBg: 'bg-emerald-100 text-emerald-800',
+        action: { label: 'View Wallet', tab: 'drive' }
+      });
+    }
+
+    // Wallet Transactions
+    if (Array.isArray(state.wallet?.transactions)) {
+      state.wallet.transactions.slice(0, 5).forEach((tx) => {
+        const isCredit = tx.type === 'credit';
+        items.push({
+          id: `notif_tx_${tx.id}`,
+          type: 'wallet',
+          title: isCredit ? `+₹${tx.amount} Wallet Top-Up` : `-₹${tx.amount} Platform Commission`,
+          message: tx.description || (isCredit ? 'Wallet recharge successful.' : 'Platform fee deducted upon verified ride completion.'),
+          timestamp: tx.timestamp || new Date().toISOString(),
+          icon: isCredit ? 'wallet' : 'receipt',
+          iconBg: isCredit ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-800',
+          action: { label: 'Open Wallet', tab: 'drive' }
+        });
+      });
+    }
+
+    // 4. Platform & Corridor Announcements
+    items.push({
+      id: 'notif_corridor_hyderabad_warangal',
+      type: 'promo',
+      title: '🚀 Hyderabad – Warangal Corridor Active',
+      message: 'Verified carpool trips between Uppal, Ghatkesar, Bhongir, Aler, and Jangaon are now active. Save fuel, avoid bus queues, and travel safely!',
+      timestamp: '2026-11-01T06:00:00.000Z',
+      icon: 'map-pin',
+      iconBg: 'bg-indigo-100 text-indigo-800',
+      action: { label: 'Search Rides', tab: 'rider' }
+    });
+
+    items.push({
+      id: 'notif_direct_p2p_upi',
+      type: 'promo',
+      title: '⚡ 100% Direct P2P UPI Payouts',
+      message: 'Commuters settle payments straight to your personal UPI ID (GPay, PhonePe, Paytm). Zero payout delays and zero intermediary holding.',
+      timestamp: '2026-11-05T08:00:00.000Z',
+      icon: 'smartphone',
+      iconBg: 'bg-cyan-100 text-cyan-800',
+      action: { label: 'Verify UPI ID', tab: 'profile' }
+    });
+
+    // Merge any stored custom notifications
+    const customNotifs = getStoredCustomNotifs(userId);
+    customNotifs.forEach(c => {
+      if (!items.some(it => it.id === c.id)) {
+        items.push(c);
+      }
+    });
+
+    // Mark read states
+    items.forEach(it => {
+      it.read = readSet.has(it.id);
+    });
+
+    // Sort: unread first, then by timestamp descending
+    items.sort((a, b) => {
+      if (a.read !== b.read) return a.read ? 1 : -1;
+      return new Date(b.timestamp || 0) - new Date(a.timestamp || 0);
+    });
+
+    state.notifications.items = items;
+    updateNotificationBadge();
+    renderNotifications();
+  }
+  window.initNotificationSystem = initNotificationSystem;
+
+  function updateNotificationBadge() {
+    const unreadCount = state.notifications.items.filter(n => !n.read).length;
+    const headerBadge = document.getElementById('headerNotificationBadge');
+    const drawerBadge = document.getElementById('notifDrawerUnreadBadge');
+
+    if (headerBadge) {
+      if (unreadCount > 0) {
+        headerBadge.textContent = unreadCount > 9 ? '9+' : unreadCount;
+        headerBadge.classList.remove('hidden');
+      } else {
+        headerBadge.classList.add('hidden');
+      }
+    }
+
+    if (drawerBadge) {
+      if (unreadCount > 0) {
+        drawerBadge.textContent = `${unreadCount} New`;
+        drawerBadge.classList.remove('hidden');
+      } else {
+        drawerBadge.classList.add('hidden');
+      }
+    }
+  }
+
+  window.openNotificationDrawer = function () {
+    const modal = document.getElementById('notificationDrawerModal');
+    if (!modal) return;
+    renderNotifications();
+    modal.classList.remove('hidden');
+    if (window.lucide) lucide.createIcons();
+  };
+
+  window.closeNotificationDrawer = function () {
+    const modal = document.getElementById('notificationDrawerModal');
+    if (modal) modal.classList.add('hidden');
+  };
+
+  window.handleNotificationBackdropClick = function (e) {
+    if (e.target.id === 'notificationDrawerModal') {
+      closeNotificationDrawer();
+    }
+  };
+
+  window.filterNotifications = function (category) {
+    state.notifications.filter = category;
+    const tabs = ['all', 'safety', 'account', 'wallet'];
+    tabs.forEach(t => {
+      const btn = document.getElementById(`notifFilterBtn-${t}`);
+      if (btn) {
+        if (t === category) {
+          btn.className = 'px-3 py-1 rounded-full bg-slate-900 text-white font-bold transition cursor-pointer';
+        } else {
+          btn.className = 'px-3 py-1 rounded-full bg-slate-100 text-slate-600 hover:bg-slate-200 font-semibold transition cursor-pointer';
+        }
+      }
+    });
+    renderNotifications();
+  };
+
+  function renderNotifications() {
+    const container = document.getElementById('notificationListContainer');
+    if (!container) return;
+
+    let list = state.notifications.items || [];
+    const filter = state.notifications.filter;
+
+    if (filter === 'safety') {
+      list = list.filter(n => n.type === 'safety');
+    } else if (filter === 'account') {
+      list = list.filter(n => n.type === 'account');
+    } else if (filter === 'wallet') {
+      list = list.filter(n => n.type === 'wallet' || n.type === 'trip');
+    }
+
+    if (list.length === 0) {
+      container.innerHTML = `
+        <div class="py-10 text-center text-slate-400 space-y-2">
+          <div class="w-12 h-12 mx-auto rounded-2xl bg-slate-100 flex items-center justify-center text-slate-300">
+            <i data-lucide="bell-off" class="w-6 h-6"></i>
+          </div>
+          <div>
+            <h5 class="text-xs font-bold text-slate-600">No Notifications</h5>
+            <p class="text-[10px] text-slate-400">You are completely up to date.</p>
+          </div>
+        </div>
+      `;
+      if (window.lucide) lucide.createIcons();
+      return;
+    }
+
+    container.innerHTML = list.map(n => {
+      const timeStr = formatRelativeTime(n.timestamp);
+      const isUnread = !n.read;
+      const borderClass = isUnread ? 'border-l-4 border-l-blue-600 bg-blue-50/20' : 'border-slate-100 bg-white';
+
+      return `
+        <div onclick="openNotificationDetail('${n.id}')" class="notification-card p-3 rounded-2xl border ${borderClass} hover:border-slate-300 transition cursor-pointer flex items-start gap-3">
+          <div class="w-9 h-9 rounded-xl ${n.iconBg || 'bg-slate-100 text-slate-700'} flex items-center justify-center flex-shrink-0 font-bold">
+            <i data-lucide="${n.icon || 'bell'}" class="w-4 h-4"></i>
+          </div>
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center justify-between gap-1">
+              <h4 class="text-xs font-black text-slate-900 truncate flex items-center gap-1.5">
+                ${n.title}
+                ${isUnread ? '<span class="w-2 h-2 rounded-full bg-blue-600 flex-shrink-0"></span>' : ''}
+              </h4>
+              <span class="text-[10px] text-slate-400 flex-shrink-0">${timeStr}</span>
+            </div>
+            <p class="text-[11px] text-slate-600 line-clamp-2 mt-0.5 leading-relaxed">${n.message}</p>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    if (window.lucide) lucide.createIcons();
+  }
+
+  window.openNotificationDetail = function (notifId) {
+    const notif = state.notifications.items.find(n => n.id === notifId);
+    if (!notif) return;
+
+    markNotificationAsRead(notifId);
+    state.notifications.activeDetail = notif;
+
+    const modal = document.getElementById('notificationDetailModal');
+    const titleEl = document.getElementById('notifDetailTitle');
+    const timeEl = document.getElementById('notifDetailTime');
+    const msgEl = document.getElementById('notifDetailMessage');
+    const iconContainer = document.getElementById('notifDetailIconContainer');
+    const iconEl = document.getElementById('notifDetailIcon');
+    const actionBtn = document.getElementById('notifDetailActionBtn');
+
+    if (titleEl) titleEl.textContent = notif.title;
+    if (timeEl) timeEl.textContent = formatRelativeTime(notif.timestamp);
+    if (msgEl) msgEl.textContent = notif.message;
+
+    if (iconContainer) iconContainer.className = `w-9 h-9 rounded-2xl flex items-center justify-center font-black ${notif.iconBg || 'bg-blue-50 text-blue-600'}`;
+    if (iconEl) iconEl.setAttribute('data-lucide', notif.icon || 'bell');
+
+    if (actionBtn) {
+      if (notif.action && notif.action.label) {
+        actionBtn.textContent = notif.action.label;
+        actionBtn.classList.remove('hidden');
+      } else {
+        actionBtn.classList.add('hidden');
+      }
+    }
+
+    if (modal) modal.classList.remove('hidden');
+    if (window.lucide) lucide.createIcons();
+  };
+
+  window.closeNotificationDetailModal = function () {
+    const modal = document.getElementById('notificationDetailModal');
+    if (modal) modal.classList.add('hidden');
+    state.notifications.activeDetail = null;
+  };
+
+  window.handleNotificationActionClick = function () {
+    const notif = state.notifications.activeDetail;
+    closeNotificationDetailModal();
+    closeNotificationDrawer();
+
+    if (!notif || !notif.action) return;
+
+    if (notif.action.tab) {
+      navigateToTab(notif.action.tab);
+    } else if (notif.action.email) {
+      window.location.href = `mailto:${notif.action.email}?subject=Routemate Support Inquiry`;
+    } else if (notif.action.type === 'dismiss_warning') {
+      dismissDriverWarningAlert();
+    }
+  };
+
+  window.markNotificationAsRead = function (notifId) {
+    const notif = state.notifications.items.find(n => n.id === notifId);
+    if (notif) {
+      notif.read = true;
+      state.notifications.readIds.add(notifId);
+      saveStoredReadNotifIds(state.currentUser?.id, state.notifications.readIds);
+      updateNotificationBadge();
+      renderNotifications();
+    }
+  };
+
+  window.markAllNotificationsAsRead = function () {
+    state.notifications.items.forEach(n => {
+      n.read = true;
+      state.notifications.readIds.add(n.id);
+    });
+    saveStoredReadNotifIds(state.currentUser?.id, state.notifications.readIds);
+    updateNotificationBadge();
+    renderNotifications();
+    showToast('All notifications marked as read ✓', 'info');
+  };
+
+  window.clearAllReadNotifications = function () {
+    state.notifications.items = state.notifications.items.filter(n => !n.read);
+    renderNotifications();
+    updateNotificationBadge();
+    showToast('Cleared read notifications', 'info');
+  };
+
+  window.pushUserNotification = function (notif) {
+    if (!notif || !notif.id) return;
+    const exists = state.notifications.items.findIndex(n => n.id === notif.id);
+    if (exists !== -1) {
+      state.notifications.items[exists] = { ...state.notifications.items[exists], ...notif };
+    } else {
+      state.notifications.items.unshift(notif);
+    }
+
+    // Save to custom notifs storage
+    const userId = state.currentUser?.id || 'guest';
+    const list = getStoredCustomNotifs(userId);
+    const cIdx = list.findIndex(c => c.id === notif.id);
+    if (cIdx !== -1) list[cIdx] = notif;
+    else list.unshift(notif);
+    saveStoredCustomNotifs(userId, list);
+
+    updateNotificationBadge();
+    renderNotifications();
   };
 
   // =========================================================================
