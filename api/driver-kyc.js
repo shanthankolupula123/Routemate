@@ -1419,6 +1419,122 @@ module.exports = async (req, res) => {
     }
 
     // -----------------------------------------------------------------------
+    // ACTION: Atomic Accept Ride Request (Conflict Prevention & DB Lock Fix)
+    // -----------------------------------------------------------------------
+    if (action === 'accept_ride') {
+      const { requestId, rideId, dbId, driver } = body;
+      const targetId = dbId || requestId || rideId || body.id;
+      if (!targetId || !driver) {
+        return res.status(400).json({ success: false, error: 'Ride target identifier and Driver payload are required' });
+      }
+
+      try {
+        let filter = '';
+        if (dbId && isUUID(dbId)) {
+          filter = `id=eq.${encodeURIComponent(dbId)}`;
+        } else if (isUUID(targetId)) {
+          filter = `id=eq.${encodeURIComponent(targetId)}`;
+        } else {
+          filter = `vehicle_number=eq.${encodeURIComponent(targetId)}`;
+        }
+
+        const getRes = await fetch(`${SUPABASE_URL}/rest/v1/rides?${filter}&select=*&limit=1`, {
+          headers: {
+            'apikey': SUPABASE_KEY,
+            'Authorization': `Bearer ${SUPABASE_KEY}`
+          }
+        });
+        const rows = await getRes.json().catch(() => []);
+        let existingRow = Array.isArray(rows) && rows[0] ? rows[0] : null;
+
+        if (!existingRow && !isUUID(targetId)) {
+          // Fallback search by notes
+          const noteRes = await fetch(`${SUPABASE_URL}/rest/v1/rides?notes=ilike.*${encodeURIComponent(targetId)}*&select=*&limit=1`, {
+            headers: {
+              'apikey': SUPABASE_KEY,
+              'Authorization': `Bearer ${SUPABASE_KEY}`
+            }
+          });
+          const noteRows = await noteRes.json().catch(() => []);
+          if (Array.isArray(noteRows) && noteRows[0]) {
+            existingRow = noteRows[0];
+          }
+        }
+
+        if (!existingRow) {
+          return res.status(404).json({ success: false, notFound: true, message: 'Ride request not found or has already expired.' });
+        }
+
+        let existingNotes = {};
+        try {
+          existingNotes = typeof existingRow.notes === 'string' ? JSON.parse(existingRow.notes || '{}') : (existingRow.notes || {});
+        } catch (_) {}
+
+        const currentStatus = String(existingRow.status || existingNotes.status || '').toLowerCase();
+        const assignedDriverId = existingRow.driver_id || existingNotes.driverId || existingNotes.driver?.id;
+        const assignedDriverEmail = existingNotes.driverEmail || existingNotes.driver?.email;
+
+        // Idempotency: Driver already accepted this trip
+        if (assignedDriverId && (assignedDriverId === driver.id || (driver.email && assignedDriverEmail === driver.email))) {
+          return res.status(200).json({ success: true, alreadyAccepted: true, row: existingRow });
+        }
+
+        // Conflict: Another driver already assigned
+        if ((currentStatus === 'accepted' || existingNotes.status === 'driver_accepted' || existingNotes.status === 'ride_started') && assignedDriverId && assignedDriverId !== driver.id) {
+          return res.status(200).json({ success: false, alreadyTaken: true, message: 'This ride has already been accepted by another driver.' });
+        }
+
+        if (currentStatus === 'cancelled' || existingNotes.status === 'cancelled') {
+          return res.status(200).json({ success: false, cancelled: true, message: 'This ride was cancelled by the commuter.' });
+        }
+
+        const mergedNotes = {
+          ...existingNotes,
+          isRequest: true,
+          status: 'driver_accepted',
+          driverId: driver.id,
+          driverName: driver.name,
+          driverPhone: driver.phone,
+          driverEmail: driver.email,
+          driver: driver,
+          acceptedAt: new Date().toISOString()
+        };
+
+        const patchBody = {
+          status: 'accepted',
+          driver_name: driver.name || 'Verified Driver',
+          driver_role: 'Driver',
+          notes: JSON.stringify(mergedNotes)
+        };
+        if (isUUID(driver.id)) {
+          patchBody.driver_id = driver.id;
+        }
+
+        const patchRes = await fetch(`${SUPABASE_URL}/rest/v1/rides?id=eq.${encodeURIComponent(existingRow.id)}`, {
+          method: 'PATCH',
+          headers: {
+            'apikey': SUPABASE_KEY,
+            'Authorization': `Bearer ${SUPABASE_KEY}`,
+            'Content-Type': 'application/json',
+            'Prefer': 'return=representation'
+          },
+          body: JSON.stringify(patchBody)
+        });
+        const patchData = await patchRes.json().catch(() => []);
+        const finalRow = Array.isArray(patchData) && patchData[0] ? patchData[0] : { ...existingRow, ...patchBody, notes: mergedNotes };
+
+        return res.status(200).json({
+          success: true,
+          message: 'Ride accepted successfully',
+          row: finalRow
+        });
+      } catch (e) {
+        console.warn('Accept ride API error:', e.message);
+        return res.status(500).json({ success: false, error: e.message });
+      }
+    }
+
+    // -----------------------------------------------------------------------
     // ACTION: Driver Document Upload & Submission
     // -----------------------------------------------------------------------
     const cleanUserId = body.user_id || body.userId;

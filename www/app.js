@@ -3252,11 +3252,19 @@
     if (!state.driverOnline || !state.currentUser) return;
     console.log('📡 [APP DRIVER] Starting Realtime Radar listener for user:', state.currentUser.name);
 
-    window.db.matching.startDriverPolling(state.currentUser, (rides) => {
-      state.incomingRides = rides.filter(r => !state.declinedRideIds.has(r.id));
-      renderDriverIncomingCards(state.incomingRides);
-      updateDriverMapIncomingMarkers(state.incomingRides);
-    });
+    // Pass live GPS locator and 15km geo-radius filter to matching engine
+    window.db.matching.startDriverPolling(
+      state.currentUser,
+      (rides) => {
+        state.incomingRides = rides.filter(r => !state.declinedRideIds.has(r.id));
+        renderDriverIncomingCards(state.incomingRides);
+        updateDriverMapIncomingMarkers(state.incomingRides);
+      },
+      {
+        getDriverGPS: () => state.userGPS,
+        maxRadiusKm: 15
+      }
+    );
   }
 
   function updateDriverMapIncomingMarkers(rides) {
@@ -3340,7 +3348,13 @@
     const now = Date.now();
     const validRides = (rides || []).filter(r => {
       const createdMs = r.createdMs || (r.createdAt ? new Date(r.createdAt).getTime() : now);
-      return (now - createdMs) < 60000;
+      if ((now - createdMs) >= 60000) return false;
+      // Geo-Radius Proximity Filtering: Only allow pickups within 15 km of driver's live GPS
+      if (state.userGPS && r.pickupLat && r.pickupLng) {
+        const distKm = calculateProximityKm(state.userGPS.lat, state.userGPS.lng, r.pickupLat, r.pickupLng);
+        if (distKm !== null && distKm > 15) return false;
+      }
+      return true;
     });
 
     if (badge) {
@@ -3398,7 +3412,7 @@
           proximityBadge = `
             <div class="mt-2.5 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
               <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-              <span>Pickup is ${distKm} km away • ~${etaMins} mins</span>
+              <span>Pickup is ${distKm} km away • ~${etaMins} mins (Within 15km radar)</span>
             </div>
           `;
         }
@@ -3406,7 +3420,7 @@
         proximityBadge = `
           <div class="mt-2.5 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-blue-50 text-blue-700 border border-blue-200">
             <span class="w-2 h-2 rounded-full bg-blue-500"></span>
-            <span>Corridor Pickup • NH163 Hub</span>
+            <span>Corridor Pickup • NH163 Hub (Within 15km radar)</span>
           </div>
         `;
       }
@@ -3536,7 +3550,7 @@
     };
 
     try {
-      const resp = await window.db.matching.acceptRequest(rideId, driverPayload);
+      const resp = await window.db.matching.acceptRequest(rideId, driverPayload, target.dbId);
       if (resp.success) {
         if (driverIncomingTimerInterval) {
           clearInterval(driverIncomingTimerInterval);
@@ -3605,7 +3619,7 @@
         state.incomingRides = state.incomingRides.filter(r => r.id !== rideId);
         renderDriverIncomingCards(state.incomingRides);
       } else {
-        showToast(resp.error || 'Could not accept ride. It may have been taken or updated.', 'warning');
+        showToast(resp.message || resp.error || 'Could not accept ride. Please check network and try again.', 'warning');
       }
     } catch (e) {
       console.error('Accept error:', e);
@@ -4051,8 +4065,26 @@
       if (title) title.textContent = 'Driver Radar Active';
       if (ring) ring.classList.remove('hidden');
       if (dot) dot.className = 'w-3.5 h-3.5 rounded-full bg-emerald-500';
+
+      // Refresh live GPS immediately to calibrate 15km geo-radius proximity filter
+      if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+          (pos) => {
+            const { latitude, longitude, accuracy } = pos.coords;
+            state.userGPS = { lat: latitude, lng: longitude, accuracy };
+            window._driverLiveGPS = { lat: latitude, lng: longitude };
+            updateUserGPSMarker(latitude, longitude);
+            if (state.incomingRides && state.incomingRides.length > 0) {
+              renderDriverIncomingCards(state.incomingRides);
+            }
+          },
+          (err) => console.warn('Online GPS update notice:', err.message),
+          { enableHighAccuracy: true, timeout: 5000, maximumAge: 10000 }
+        );
+      }
+
       startDriverRadar();
-      showToast('You are now Online! Receiving commuter requests in real-time.', 'success');
+      showToast('You are now Online! Receiving commuter requests within 15 km in real-time.', 'success');
     } else {
       if (btn) {
         btn.textContent = 'Offline';

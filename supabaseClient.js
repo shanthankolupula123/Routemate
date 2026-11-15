@@ -1485,6 +1485,29 @@
     }
   }
 
+  /**
+   * Calculates Haversine distance in kilometers between two GPS coordinates
+   */
+  function calculateProximityKm(lat1, lon1, lat2, lon2) {
+    if (lat1 === null || lat1 === undefined || lon1 === null || lon1 === undefined ||
+        lat2 === null || lat2 === undefined || lon2 === null || lon2 === undefined) {
+      return null;
+    }
+    const nLat1 = Number(lat1), nLon1 = Number(lon1);
+    const nLat2 = Number(lat2), nLon2 = Number(lon2);
+    if (isNaN(nLat1) || isNaN(nLon1) || isNaN(nLat2) || isNaN(nLon2)) return null;
+
+    const R = 6371; // Earth radius in km
+    const dLat = (nLat2 - nLat1) * Math.PI / 180;
+    const dLon = (nLon2 - nLon1) * Math.PI / 180;
+    const a =
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos(nLat1 * Math.PI / 180) * Math.cos(nLat2 * Math.PI / 180) *
+      Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return Math.round((R * c) * 10) / 10;
+  }
+
   // =========================================================================
   // REALTIME MATCHING ENGINE (REALTIME CHANNELS + 1S POLLING FAILSAFE)
   // =========================================================================
@@ -1714,13 +1737,24 @@
     },
 
     /**
-     * DRIVER: Realtime Channel + 1-second radar polling loop
+     * DRIVER: Realtime Channel + 1-second radar polling loop with Geo-Radius Proximity Filtering
      */
-    startDriverPolling(currentUser, onRidesUpdated) {
+    startDriverPolling(currentUser, onRidesUpdated, options = {}) {
       this.stopDriverPolling();
       console.log('📡 [ROUTEMATE DRIVER] Starting Realtime + Radar Polling for user:', currentUser?.name);
 
       let activeSearchingRides = [];
+      const maxRadiusKm = Number(options?.maxRadiusKm || 15);
+
+      const getDriverLocation = () => {
+        if (typeof options?.getDriverGPS === 'function') {
+          return options.getDriverGPS();
+        }
+        if (options?.driverGPS) return options.driverGPS;
+        if (currentUser?.gps) return currentUser.gps;
+        if (typeof window !== 'undefined' && window._driverLiveGPS) return window._driverLiveGPS;
+        return null;
+      };
 
       const triggerUpdate = () => {
         if (typeof onRidesUpdated === 'function') {
@@ -1762,6 +1796,18 @@
         const normalized = normalizeRideData(row);
         if (!normalized) return;
 
+        // Geo-Radius Proximity Filtering (within 10-15 km of driver's live GPS)
+        const driverLoc = getDriverLocation();
+        if (driverLoc && driverLoc.lat && driverLoc.lng && normalized.pickupLat && normalized.pickupLng) {
+          const distKm = calculateProximityKm(driverLoc.lat, driverLoc.lng, normalized.pickupLat, normalized.pickupLng);
+          normalized.proximityKm = distKm;
+          if (distKm !== null && distKm > maxRadiusKm) {
+            console.log(`📍 [PROXIMITY RADAR FILTER] Ride ${normalized.id} pickup is ${distKm} km away (> ${maxRadiusKm} km limit), filtered out.`);
+            removeRideById(normalized.id);
+            return;
+          }
+        }
+
         const existsIdx = activeSearchingRides.findIndex(r => r.id === normalized.id || (r.dbId && r.dbId === normalized.dbId));
         if (existsIdx === -1) {
           activeSearchingRides.unshift(normalized);
@@ -1794,6 +1840,8 @@
 
           const now = Date.now();
           const freshRides = [];
+          const driverLoc = getDriverLocation();
+
           for (const row of resp.data) {
             if (!row) continue;
             let notes = {};
@@ -1814,9 +1862,18 @@
             }
 
             const normalized = normalizeRideData(row);
-            if (normalized) {
-              freshRides.push(normalized);
+            if (!normalized) continue;
+
+            // Geo-Radius Proximity Filtering (within 10-15 km of driver's live GPS)
+            if (driverLoc && driverLoc.lat && driverLoc.lng && normalized.pickupLat && normalized.pickupLng) {
+              const distKm = calculateProximityKm(driverLoc.lat, driverLoc.lng, normalized.pickupLat, normalized.pickupLng);
+              normalized.proximityKm = distKm;
+              if (distKm !== null && distKm > maxRadiusKm) {
+                continue; // Skip rides outside driver's 15km live radius
+              }
             }
+
+            freshRides.push(normalized);
           }
 
           activeSearchingRides = freshRides;
@@ -1897,10 +1954,10 @@
     },
 
     /**
-     * DRIVER: Accept a ride request atomically with race-condition prevention
+     * DRIVER: Accept a ride request atomically with race-condition prevention & state lock resolution
      */
-    async acceptRequest(requestId, driverUser) {
-      console.log('⚡ [ROUTEMATE DRIVER] Accepting ride:', requestId);
+    async acceptRequest(requestId, driverUser, optionalDbId) {
+      console.log('⚡ [ROUTEMATE DRIVER] Accepting ride:', requestId, 'dbId:', optionalDbId);
       const isUUID = (str) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(str || ''));
 
       // Dynamically resolve driver's registered UPI ID from driver profile
@@ -1916,6 +1973,7 @@
         id: driverUser.id,
         name: driverUser.name,
         phone: driverUser.phone,
+        email: driverUser.email,
         avatar: (driverUser.avatar_url && !driverUser.avatar_url.includes('unsplash')) ? driverUser.avatar_url : (driverUser.avatar && !driverUser.avatar.includes('unsplash') ? driverUser.avatar : getSvgInitialsAvatar(driverUser.name || 'Driver', '#10B981')),
         vehicleName: driverUser.vehicleName || driverUser.vehicle_name || 'Verified Commuter Vehicle',
         vehicleNumber: driverUser.vehicleNumber || driverUser.vehicle_number || 'TG 08 AB 1234',
@@ -1927,20 +1985,39 @@
         rating: driverUser.rating || 4.95
       };
 
-      // 1. Fetch existing row by vehicle_number, ID (UUID), or notes.id to ensure accurate targeting
+      // 1. Fetch existing row by optionalDbId (UUID), vehicle_number, ID, or notes.id
       let existingNotes = {};
       let existingRow = null;
       try {
-        let queryFilter = isUUID(requestId)
-          ? `or=(id.eq.${encodeURIComponent(requestId)},vehicle_number.eq.${encodeURIComponent(requestId)})`
-          : `vehicle_number=eq.${encodeURIComponent(requestId)}`;
-
-        let fetchResp = await supabaseRest(`rides?${queryFilter}&select=*&limit=1`);
-        if (!fetchResp.ok || !fetchResp.data || fetchResp.data.length === 0) {
-          fetchResp = await supabaseRest(`rides?notes.ilike.*${encodeURIComponent(requestId)}*&select=*&limit=1`);
+        if (optionalDbId && isUUID(optionalDbId)) {
+          const fetchDb = await supabaseRest(`rides?id=eq.${encodeURIComponent(optionalDbId)}&select=*&limit=1`);
+          if (fetchDb.ok && Array.isArray(fetchDb.data) && fetchDb.data[0]) {
+            existingRow = fetchDb.data[0];
+          }
         }
-        if (fetchResp.ok && Array.isArray(fetchResp.data) && fetchResp.data[0]) {
-          existingRow = fetchResp.data[0];
+
+        if (!existingRow && isUUID(requestId)) {
+          const fetchUuid = await supabaseRest(`rides?id=eq.${encodeURIComponent(requestId)}&select=*&limit=1`);
+          if (fetchUuid.ok && Array.isArray(fetchUuid.data) && fetchUuid.data[0]) {
+            existingRow = fetchUuid.data[0];
+          }
+        }
+
+        if (!existingRow) {
+          const fetchVeh = await supabaseRest(`rides?vehicle_number=eq.${encodeURIComponent(requestId)}&select=*&limit=1`);
+          if (fetchVeh.ok && Array.isArray(fetchVeh.data) && fetchVeh.data[0]) {
+            existingRow = fetchVeh.data[0];
+          }
+        }
+
+        if (!existingRow) {
+          const fetchNotes = await supabaseRest(`rides?notes=ilike.*${encodeURIComponent(requestId)}*&select=*&limit=1`);
+          if (fetchNotes.ok && Array.isArray(fetchNotes.data) && fetchNotes.data[0]) {
+            existingRow = fetchNotes.data[0];
+          }
+        }
+
+        if (existingRow) {
           if (typeof existingRow.notes === 'string') {
             try { existingNotes = JSON.parse(existingRow.notes || '{}'); } catch (e) {}
           } else if (existingRow.notes && typeof existingRow.notes === 'object') {
@@ -1952,15 +2029,43 @@
       }
 
       if (!existingRow) {
+        // Fallback: Query backend serverless endpoint
+        try {
+          const apiBase = (typeof window !== 'undefined' && window.location && window.location.origin) ? window.location.origin : 'https://www.routemate.pro';
+          const apiRes = await fetch(`${apiBase}/api/driver-kyc`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              action: 'accept_ride',
+              requestId,
+              dbId: optionalDbId,
+              driver: driverPayload
+            })
+          });
+          const apiData = await apiRes.json().catch(() => ({}));
+          if (apiData.success && apiData.row) {
+            existingRow = apiData.row;
+            return {
+              success: true,
+              ride: {
+                ...normalizeRideData(existingRow),
+                status: 'driver_accepted',
+                driver: driverPayload
+              }
+            };
+          }
+        } catch (_) {}
+
         return { success: false, notFound: true, message: 'Ride request not found or has already expired.' };
       }
 
       // 2. Check current status & assignment
-      const currentStatus = existingRow.status || existingNotes.status;
+      const currentStatus = String(existingRow.status || existingNotes.status || '').toLowerCase();
       const assignedDriverId = existingRow.driver_id || existingNotes.driverId || existingNotes.driver?.id;
+      const assignedDriverEmail = existingNotes.driverEmail || existingNotes.driver?.email;
 
       // Idempotency: If this driver ALREADY accepted it, treat as success!
-      if (assignedDriverId && assignedDriverId === driverUser.id) {
+      if (assignedDriverId && (assignedDriverId === driverUser.id || (driverUser.email && assignedDriverEmail === driverUser.email))) {
         console.log('✅ Driver already assigned to this ride, returning success.');
         return { success: true, alreadyAccepted: true, ride: normalizeRideData(existingRow) };
       }
@@ -1974,10 +2079,11 @@
         return { success: false, cancelled: true, message: 'This ride was cancelled by the commuter.' };
       }
 
-      // Check 60-second expiry timeout
+      // Check expiry with 90s grace window (allowing in-flight accepts without false timeout rejection)
       const createdMs = new Date(existingRow.created_at || existingNotes.createdAt || 0).getTime();
-      if (Date.now() - createdMs > 60000) {
-        return { success: false, expired: true, message: 'This ride request has expired (60s timer elapsed).' };
+      const ageSec = Math.floor((Date.now() - createdMs) / 1000);
+      if (ageSec > 90 && (existingNotes.status === 'expired' || currentStatus === 'expired')) {
+        return { success: false, expired: true, message: 'This ride request has expired.' };
       }
 
       const mergedNotes = {
@@ -1996,29 +2102,55 @@
       const patchBody = {
         status: 'accepted',
         driver_name: driverUser.name || 'Verified Driver',
+        driver_role: 'Driver',
         notes: JSON.stringify(mergedNotes)
       };
       if (isUUID(driverUser.id)) {
         patchBody.driver_id = driverUser.id;
       }
 
-      const patchResp = await supabaseRest(`rides?id=eq.${encodeURIComponent(existingRow.id)}&status=neq.completed&status=neq.cancelled`, {
+      let patchSuccess = false;
+      let finalRow = existingRow;
+
+      const patchResp = await supabaseRest(`rides?id=eq.${encodeURIComponent(existingRow.id)}`, {
         method: 'PATCH',
         prefer: 'return=representation',
         body: patchBody
       });
 
-      const updateSucceeded = patchResp.ok && Array.isArray(patchResp.data) && patchResp.data.length > 0;
-      if (!updateSucceeded && !patchResp.ok) {
-        // Fallback retry using vehicle_number directly
-        const fallbackResp = await supabaseRest(`rides?vehicle_number=eq.${encodeURIComponent(existingRow.vehicle_number || requestId)}`, {
-          method: 'PATCH',
-          prefer: 'return=representation',
-          body: patchBody
-        });
-        if (!fallbackResp.ok) {
-          return { success: false, message: 'Failed to update ride status in database.' };
+      if (patchResp.ok) {
+        patchSuccess = true;
+        if (Array.isArray(patchResp.data) && patchResp.data[0]) {
+          finalRow = patchResp.data[0];
+        } else {
+          finalRow = { ...existingRow, ...patchBody, notes: mergedNotes };
         }
+      } else {
+        // Fallback retry using backend serverless API
+        try {
+          const apiBase = (typeof window !== 'undefined' && window.location && window.location.origin) ? window.location.origin : 'https://www.routemate.pro';
+          const apiRes = await fetch(`${apiBase}/api/driver-kyc`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              action: 'accept_ride',
+              requestId,
+              dbId: existingRow.id,
+              driver: driverPayload
+            })
+          });
+          const apiData = await apiRes.json().catch(() => ({}));
+          if (apiData.success) {
+            patchSuccess = true;
+            finalRow = apiData.row || { ...existingRow, ...patchBody, notes: mergedNotes };
+          }
+        } catch (apiErr) {
+          console.warn('API fallback error:', apiErr);
+        }
+      }
+
+      if (!patchSuccess) {
+        return { success: false, message: 'Failed to update ride status in database. Please check your network and try again.' };
       }
 
       // 4. Broadcast acceptance to Rider and Radar channels via WebSockets
@@ -2059,7 +2191,7 @@
       return {
         success: true,
         ride: {
-          ...normalizeRideData(existingRow),
+          ...normalizeRideData(finalRow),
           status: 'driver_accepted',
           driver: driverPayload
         }
