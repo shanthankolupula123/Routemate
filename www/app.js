@@ -3177,6 +3177,56 @@
 
   let selectedDriverPaymentMethod = 'upi';
 
+  // -------------------------------------------------------------------------
+  // DISTANCE & FARE-SLAB DYNAMIC COMMISSION CALCULATOR
+  // -------------------------------------------------------------------------
+  function calculateDynamicCommission({ fare, distance, vehicleType }) {
+    const numFare = Math.max(0, Number(fare) || 0);
+    const numDist = Math.max(0, Number(distance) || 0);
+    const vType = String(vehicleType || 'bike').toLowerCase();
+
+    let category = 'bike';
+    if (vType.includes('car')) category = 'car';
+    else if (vType.includes('auto')) category = 'auto';
+
+    if (numFare < 50 || (numDist > 0 && numDist <= 5 && numFare < 75)) {
+      // Short / Local Rides (< ₹50)
+      const commission = category === 'bike' ? 2 : 3;
+      return {
+        commission,
+        slab: 'short',
+        category,
+        label: 'Micro-Fee (Short Ride)'
+      };
+    } else if (numFare <= 150) {
+      // Medium Rides (₹50 - ₹150)
+      let commission = 3;
+      if (category === 'bike') {
+        commission = numFare <= 100 ? 3 : 4;
+      } else if (category === 'auto') {
+        commission = numFare <= 100 ? 6 : 8;
+      } else {
+        commission = numFare <= 100 ? 8 : 12;
+      }
+      return {
+        commission,
+        slab: 'medium',
+        category,
+        label: 'Scaled Fee (Medium Ride)'
+      };
+    } else {
+      // Long Rides (Fare > ₹150 / Inter-city like Jangaon to Uppal)
+      const commission = category === 'bike' ? 5 : (category === 'auto' ? 10 : 18);
+      return {
+        commission,
+        slab: 'long',
+        category,
+        label: 'Standard Cap (Long Ride)'
+      };
+    }
+  }
+  window.calculateDynamicCommission = calculateDynamicCommission;
+
   window.openDriverTripCompletionModal = function () {
     if (!state.activeDriverTrip) return;
     const trip = state.activeDriverTrip;
@@ -3202,6 +3252,31 @@
         fareBadge.textContent = `⚠️ Awaiting Settlement (${(trip.paymentMethod || 'upi').toUpperCase()})`;
       }
     }
+
+    // Dynamic Slab Commission Preview
+    const commInfo = calculateDynamicCommission({
+      fare: trip.fare,
+      distance: trip.distance || trip.distanceKm || 0,
+      vehicleType: trip.vehicleType || trip.vehicle || 'bike'
+    });
+
+    const commSlabBadge = document.getElementById('driverModalCommissionSlabBadge');
+    if (commSlabBadge) {
+      commSlabBadge.textContent = `${commInfo.slab.toUpperCase()} RIDE`;
+      if (commInfo.slab === 'short') {
+        commSlabBadge.className = 'px-1.5 py-0.5 rounded-md bg-emerald-100 text-emerald-800 text-[9px] font-black uppercase';
+      } else if (commInfo.slab === 'medium') {
+        commSlabBadge.className = 'px-1.5 py-0.5 rounded-md bg-blue-100 text-blue-800 text-[9px] font-black uppercase';
+      } else {
+        commSlabBadge.className = 'px-1.5 py-0.5 rounded-md bg-purple-100 text-purple-800 text-[9px] font-black uppercase';
+      }
+    }
+
+    const commLabelEl = document.getElementById('driverModalCommissionLabel');
+    if (commLabelEl) commLabelEl.textContent = `${commInfo.label} (${commInfo.category.toUpperCase()})`;
+
+    const commAmtEl = document.getElementById('driverModalCommissionAmount');
+    if (commAmtEl) commAmtEl.textContent = `₹${commInfo.commission.toFixed(2)}`;
 
     const chk = document.getElementById('driverConfirmPaymentCheckbox');
     if (chk) chk.checked = !!trip.paymentSettled;
@@ -3249,12 +3324,12 @@
 
     const trip = state.activeDriverTrip;
     const fare = trip.fare;
+    const distance = trip.distance || trip.distanceKm || 0;
     const vehicleType = (trip.vehicle || trip.vehicle_type || 'bike').toLowerCase();
     const paymentMethod = selectedDriverPaymentMethod;
 
-    let commissionFee = 5;
-    if (vehicleType.includes('car')) commissionFee = 18;
-    else if (vehicleType.includes('auto')) commissionFee = 10;
+    const commInfo = calculateDynamicCommission({ fare, distance, vehicleType });
+    let commissionFee = commInfo.commission;
 
     const btn = document.getElementById('btnDriverConfirmAndComplete');
     if (btn) {
@@ -3263,7 +3338,7 @@
     }
 
     try {
-      // 1. Deduct dynamic vehicle-wise platform commission from driver in-app wallet
+      // 1. Deduct dynamic distance & fare-slab platform commission from driver in-app wallet
       if (window.db?.kyc?.deductDriverCommission && state.currentUser) {
         try {
           const deductRes = await window.db.kyc.deductDriverCommission({
@@ -3272,8 +3347,12 @@
             vehicleType,
             rideId: trip.id,
             fare,
+            distance,
             paymentMethod
           });
+          if (deductRes?.commissionDeducted !== undefined) {
+            commissionFee = deductRes.commissionDeducted;
+          }
           const newBal = deductRes?.wallet_balance !== undefined ? deductRes.wallet_balance : deductRes?.newBalance;
           if (newBal !== undefined) {
             state.wallet.balance = Number(newBal);
@@ -3292,7 +3371,10 @@
         upiId: state.driverUpi?.upiId || state.kyc?.submission?.upi_id || '',
         driverName: state.currentUser?.name || 'Verified Driver',
         fare,
+        distance,
         vehicleType,
+        commissionDeducted: commissionFee,
+        commissionSlab: commInfo.slab,
         vehicleNumber: state.kyc?.submission?.vehicle_number || '',
         paymentMethod,
         paymentVerifiedByDriver: true
@@ -3314,7 +3396,7 @@
       if (state.wallet.balance < 0) {
         showToast(`🎉 Driver Confirmed Payment! ₹${fare} collected via ${payMethodLabel}. Wallet balance is -₹${Math.abs(state.wallet.balance).toFixed(2)}. Please recharge soon.`, 'warning');
       } else {
-        showToast(`🎉 Driver Confirmed Payment! ₹${fare} verified via ${payMethodLabel}. (₹${commissionFee} commission deducted from wallet)`, 'success');
+        showToast(`🎉 Driver Confirmed Payment! ₹${fare} verified via ${payMethodLabel}. (₹${commissionFee} ${commInfo.label} deducted from wallet)`, 'success');
       }
     } catch (err) {
       console.error('Complete ride error:', err);

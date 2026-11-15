@@ -526,11 +526,13 @@ module.exports = async (req, res) => {
     }
 
     // -----------------------------------------------------------------------
-    // ACTION: Vehicle-Wise Dynamic Commission Deduction for Cash/UPI Rides
-    // Bike: Flat ₹5, Auto: Flat ₹10, Car: Flat ₹18
+    // ACTION: Distance & Fare-Slab Based Dynamic Commission Deduction
+    // Short Rides (Fare < ₹50 / Local <= 5km): Minimal micro-commission (₹2 Bike, ₹3 Auto/Car)
+    // Medium Rides (₹50 - ₹150): Scaled moderate commission
+    // Long Rides (Fare > ₹150 / Inter-city): Capped at standard (₹5 Bike, ₹10 Auto, ₹18 Car)
     // -----------------------------------------------------------------------
     if (action === 'deduct_commission') {
-      const { userId, driverId, vehicleType, fare, rideId, email, driverEmail, paymentMethod } = body;
+      const { userId, driverId, vehicleType, fare, distance, rideId, email, driverEmail, paymentMethod } = body;
       const targetId = userId || driverId || body.user_id;
       const cleanEmail = String(email || driverEmail || '').trim().toLowerCase();
 
@@ -539,9 +541,45 @@ module.exports = async (req, res) => {
       }
 
       const vType = String(vehicleType || 'bike').toLowerCase();
-      let commission = 5; // Minimal flat ₹5 for Bike
-      if (vType.includes('car')) commission = 18; // Balanced ₹18 for Car Seat
-      else if (vType.includes('auto')) commission = 10; // Moderate ₹10 for Auto
+      const numFare = Math.max(0, Number(fare) || 0);
+      const numDist = Math.max(0, Number(distance) || 0);
+
+      // Determine vehicle category
+      let category = 'bike';
+      if (vType.includes('car')) category = 'car';
+      else if (vType.includes('auto')) category = 'auto';
+
+      let commission = 5;
+      let slab = 'long';
+      let slabLabel = 'Standard Cap';
+
+      if (numFare < 50 || (numDist > 0 && numDist <= 5 && numFare < 75)) {
+        // Short / Local Rides (< ₹50)
+        slab = 'short';
+        slabLabel = 'Micro-Fee (Short Ride)';
+        if (category === 'bike') commission = 2;
+        else if (category === 'auto') commission = 3;
+        else commission = 3;
+      } else if (numFare <= 150) {
+        // Medium Rides (₹50 - ₹150)
+        slab = 'medium';
+        slabLabel = 'Scaled Fee (Medium Ride)';
+        if (category === 'bike') {
+          commission = numFare <= 100 ? 3 : 4;
+        } else if (category === 'auto') {
+          commission = numFare <= 100 ? 6 : 8;
+        } else {
+          commission = numFare <= 100 ? 8 : 12;
+        }
+      } else {
+        // Long Rides (Fare > ₹150 / Inter-city like Jangaon to Uppal)
+        // Strictly capped at standard vehicle-category caps
+        slab = 'long';
+        slabLabel = 'Standard Cap (Long Ride)';
+        if (category === 'bike') commission = 5;
+        else if (category === 'auto') commission = 10;
+        else commission = 18;
+      }
 
       // 1. Fetch from Supabase profiles
       let profileRow = null;
@@ -600,8 +638,11 @@ module.exports = async (req, res) => {
         id: 'tx_comm_' + Date.now().toString(36),
         type: 'debit',
         amount: commission,
-        vehicleType: vType,
-        description: `Platform fee for ${payMethodLabel} Ride #${rideId || 'TRIP'} (${vType.toUpperCase()})`,
+        vehicleType: category,
+        slab: slab,
+        fare: numFare,
+        distance: numDist,
+        description: `Platform fee for ${payMethodLabel} Ride #${rideId || 'TRIP'} (${category.toUpperCase()} • ${slabLabel} ₹${commission})`,
         timestamp: new Date().toISOString()
       };
       txs.unshift(commTx);
@@ -632,6 +673,10 @@ module.exports = async (req, res) => {
       return res.status(200).json({
         success: true,
         commissionDeducted: commission,
+        slab,
+        slabLabel,
+        fare: numFare,
+        distance: numDist,
         newBalance,
         wallet_balance: newBalance,
         wallet_transactions: txs,

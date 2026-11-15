@@ -1823,6 +1823,21 @@
         </div>
       </div>
 
+      <!-- Dynamic Fare-Slab Commission Breakdown -->
+      <div class="p-3 bg-slate-50 border border-slate-200/80 rounded-2xl flex items-center justify-between text-xs">
+        <div class="space-y-0.5">
+          <div class="flex items-center gap-1.5">
+            <span class="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Dynamic Platform Fee</span>
+            <span id="driverModalCommissionSlabBadge" class="px-1.5 py-0.5 rounded-md bg-blue-100 text-blue-800 text-[9px] font-black uppercase">Short Ride</span>
+          </div>
+          <span id="driverModalCommissionLabel" class="text-[11px] font-semibold text-slate-600 block">Micro-Fee (Fare &lt; ₹50)</span>
+        </div>
+        <div class="text-right">
+          <span id="driverModalCommissionAmount" class="text-sm font-black text-slate-900">₹2.00</span>
+          <span class="text-[9px] text-slate-400 block font-medium">Deducted on completion</span>
+        </div>
+      </div>
+
       <!-- Driver Confirmation Checkbox -->
       <label class="flex items-start gap-2.5 p-3 rounded-2xl bg-slate-50 border border-slate-200/80 cursor-pointer text-left">
         <input type="checkbox" id="driverConfirmPaymentCheckbox" checked class="mt-0.5 w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500" />
@@ -2319,8 +2334,8 @@
   </audio>
 
   <!-- Core Scripts -->
-  <script src="payment.js?v=20261114_live_payment_admin_safety_v77"></script>
-  <script src="supabaseClient.js?v=20261114_live_payment_admin_safety_v77"></script>
-  <script src="app.js?v=20261114_live_payment_admin_safety_v77"></script>
+  <script src="payment.js?v=20261115_dynamic_slab_commission_v78"></script>
+  <script src="supabaseClient.js?v=20261115_dynamic_slab_commission_v78"></script>
+  <script src="app.js?v=20261115_dynamic_slab_commission_v78"></script>
 </body>
 </html>

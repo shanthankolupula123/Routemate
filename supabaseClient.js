@@ -1055,8 +1055,56 @@
     },
 
     /**
-     * Deducts vehicle-wise dynamic platform fee from driver wallet for cash rides
-     * (Bike: ₹5, Auto: ₹10, Car: ₹18)
+     * Calculates distance & fare-slab based dynamic commission:
+     * - Short (< ₹50 / <= 5km): Micro-commission (Bike: ₹2, Auto: ₹3, Car: ₹3)
+     * - Medium (₹50 - ₹150): Scaled moderate commission
+     * - Long (> ₹150 / Inter-city): Capped at standard (Bike: ₹5, Auto: ₹10, Car: ₹18)
+     */
+    calculateDynamicCommission({ fare, distance, vehicleType }) {
+      const numFare = Math.max(0, Number(fare) || 0);
+      const numDist = Math.max(0, Number(distance) || 0);
+      const vType = String(vehicleType || 'bike').toLowerCase();
+
+      let category = 'bike';
+      if (vType.includes('car')) category = 'car';
+      else if (vType.includes('auto')) category = 'auto';
+
+      if (numFare < 50 || (numDist > 0 && numDist <= 5 && numFare < 75)) {
+        const commission = category === 'bike' ? 2 : 3;
+        return {
+          commission,
+          slab: 'short',
+          category,
+          label: 'Micro-Fee (Short Ride)'
+        };
+      } else if (numFare <= 150) {
+        let commission = 3;
+        if (category === 'bike') {
+          commission = numFare <= 100 ? 3 : 4;
+        } else if (category === 'auto') {
+          commission = numFare <= 100 ? 6 : 8;
+        } else {
+          commission = numFare <= 100 ? 8 : 12;
+        }
+        return {
+          commission,
+          slab: 'medium',
+          category,
+          label: 'Scaled Fee (Medium Ride)'
+        };
+      } else {
+        const commission = category === 'bike' ? 5 : (category === 'auto' ? 10 : 18);
+        return {
+          commission,
+          slab: 'long',
+          category,
+          label: 'Standard Cap (Long Ride)'
+        };
+      }
+    },
+
+    /**
+     * Deducts distance & fare-slab dynamic platform fee from driver wallet upon verified ride completion
      */
     async deductDriverCommission(payload) {
       const apiBase = (typeof window !== 'undefined' && window.location && window.location.origin)
