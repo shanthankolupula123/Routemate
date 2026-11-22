@@ -56,6 +56,13 @@
   // Pre-initialize
   getSupabase();
 
+  const getSvgInitialsAvatar = (userName, bg = '#0052CC') => {
+    const parts = String(userName || 'User').trim().split(/\s+/);
+    const initials = (parts.length >= 2 ? parts[0][0] + parts[1][0] : parts[0].slice(0, 2)).toUpperCase();
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 120 120"><rect width="120" height="120" rx="60" fill="${bg}"/><text x="50%" y="54%" text-anchor="middle" dominant-baseline="middle" fill="#FFFFFF" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-weight="800" font-size="48px">${initials}</text></svg>`;
+    return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+  };
+
   /**
    * Direct fetch helper to Supabase PostgREST
    */
@@ -1320,6 +1327,11 @@
     }
   };
 
+  const kycManager = kyc;
+  if (typeof window !== 'undefined') {
+    window.kycManager = kyc;
+  }
+
   /**
    * Post-Ride Rating & Safety Feedback Helper
    */
@@ -1651,9 +1663,29 @@
       const rName = reqData.riderName || 'Commuter';
       const seatsBooked = Math.max(1, Number(reqData.seatsBooked || reqData.seats_booked || reqData.seats || 1));
 
-      const commInfo = (typeof kycManager?.calculateDynamicCommission === 'function')
-        ? kycManager.calculateDynamicCommission({ fare, distance: dist, vehicleType })
-        : { commission: 2, commission_amount: 2, slab: 'short', driverPayout: Math.max(0, fare - 2), driver_payout: Math.max(0, fare - 2) };
+      let commInfo = null;
+      if (reqData.commission_amount !== undefined && (reqData.driver_payout !== undefined || reqData.driverPayout !== undefined)) {
+        commInfo = {
+          commission: Math.round(Number(reqData.commission || reqData.commission_amount) || 0),
+          commission_amount: Math.round(Number(reqData.commission_amount || reqData.commission) || 0),
+          slab: reqData.commissionSlab || reqData.slab || 'short',
+          driverPayout: Math.round(Number(reqData.driverPayout || reqData.driver_payout) || Math.max(0, fare - (reqData.commission_amount || 0))),
+          driver_payout: Math.round(Number(reqData.driver_payout || reqData.driverPayout) || Math.max(0, fare - (reqData.commission_amount || 0)))
+        };
+      } else if (typeof kyc !== 'undefined' && typeof kyc.calculateDynamicCommission === 'function') {
+        commInfo = kyc.calculateDynamicCommission({ fare, distance: dist, vehicleType });
+      } else if (typeof window !== 'undefined' && typeof window.calculateDynamicCommission === 'function') {
+        commInfo = window.calculateDynamicCommission({ fare, distance: dist, vehicleType });
+      } else {
+        const defaultComm = vehicleType === 'car' ? 8 : (vehicleType === 'auto' ? 5 : 2);
+        commInfo = {
+          commission: defaultComm,
+          commission_amount: defaultComm,
+          slab: 'short',
+          driverPayout: Math.max(0, fare - defaultComm),
+          driver_payout: Math.max(0, fare - defaultComm)
+        };
+      }
 
       const notesPayload = {
         isRequest: true,
@@ -3441,6 +3473,7 @@
     getSupabase,
     auth,
     kyc,
+    kycManager: kyc,
     feedbacks,
     calculateDriverRatingAndSafetyScore: feedbacks.calculateDriverRatingAndSafetyScore,
     broadcast,

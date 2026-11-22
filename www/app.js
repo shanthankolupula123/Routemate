@@ -4358,6 +4358,9 @@
     };
   }
   window.calculateDynamicCommission = calculateDynamicCommission;
+  if (typeof window !== 'undefined') {
+    window.kycManager = window.kycManager || window.db?.kyc || {};
+  }
 
   window.openDriverTripCompletionModal = function (rideId) {
     currentTargetCompleteRideId = rideId || (state.activeDriverTrips && state.activeDriverTrips[0]?.id) || state.activeDriverTrip?.id || null;
