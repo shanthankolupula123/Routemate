@@ -28,8 +28,8 @@
     vehicleType: 'bike',
     seatsBooked: 1,
     distanceKm: 84,
-    fare: 116,
-    baseFare: 116,
+    fare: 91,
+    baseFare: 91,
     userGPS: null,
     activeRiderRequest: null,
     activeDriverTrip: null,
@@ -2655,11 +2655,11 @@
   }
 
   /**
-   * Public-Transport-Aligned Tiered Fuel Share Calculator
-   * Aligned with public transit economics (RTC Bus, Shared Auto, Carpooling):
-   * - Bike (Single Pillion): Low base (₹20 up to 2km) + affordable per-km tiers (₹1.50/km -> ₹1.25/km -> ₹1.10/km).
-   * - Auto (1-3 Seats): Balanced base (₹25 up to 2km) + per-km tiers (₹2.00/km -> ₹1.70/km -> ₹1.40/km) scaled by seats.
-   * - Car (1-4 Seats): Fair fuel-share (₹35 up to 2km) + per-km tiers (₹2.50/km -> ₹2.10/km -> ₹1.75/km) scaled by seats.
+   * Realistic Peer-to-Peer Fuel-Share Pricing Engine:
+   * - Bike (1 Pillion): Base fare ₹15 + ₹0.90/km (e.g. ~84-87 km calculates to ~₹90-₹95).
+   * - Auto (Per Seat): Base fare ₹20 + ₹1.30/km per seat (multiplied by seats_booked).
+   * - Car (Per Seat): Base fare ₹25 + ₹1.60/km per seat (multiplied by seats_booked).
+   * Fares are cleanly rounded to the nearest whole rupee with Math.round().
    */
   function calculateTieredFuelShareFare(distanceKm, vehicleType, seatsBooked = 1) {
     const dist = Math.max(1, Number(distanceKm) || 1);
@@ -2667,70 +2667,32 @@
     const seats = Math.max(1, Number(seatsBooked) || 1);
 
     let baseFarePerSeat = 0;
-    let slab = 'short';
-    let transitComparison = 'Bus Equivalent';
+    let ratePerKm = 0.90;
 
     if (vType === 'car') {
-      // CAR (1 to 4 Seats) - AC Comfort at Near-Bus/Shared-Taxi Economy
-      const minFare = 35;
-      if (dist <= 2) {
-        baseFarePerSeat = minFare;
-        slab = 'short';
-      } else if (dist <= 10) {
-        baseFarePerSeat = minFare + (dist - 2) * 2.50;
-        slab = 'short';
-      } else if (dist <= 30) {
-        baseFarePerSeat = 35 + (8 * 2.50) + (dist - 10) * 2.10; // ₹55 for 10km + ₹2.10/km
-        slab = 'medium';
-      } else {
-        baseFarePerSeat = 35 + (8 * 2.50) + (20 * 2.10) + (dist - 30) * 1.75; // ₹97 for 30km + ₹1.75/km
-        slab = 'long';
-      }
-      transitComparison = 'Deluxe AC Bus Aligned';
+      // Car (Per Seat): Base fare ₹25 + ₹1.60/km per seat
+      ratePerKm = 1.60;
+      baseFarePerSeat = 25 + (dist * ratePerKm);
     } else if (vType === 'auto') {
-      // AUTO (1 to 3 Seats) - Shared Auto Transit Alternative
-      const minFare = 25;
-      if (dist <= 2) {
-        baseFarePerSeat = minFare;
-        slab = 'short';
-      } else if (dist <= 10) {
-        baseFarePerSeat = minFare + (dist - 2) * 2.00;
-        slab = 'short';
-      } else if (dist <= 30) {
-        baseFarePerSeat = 25 + (8 * 2.00) + (dist - 10) * 1.70; // ₹41 for 10km + ₹1.70/km
-        slab = 'medium';
-      } else {
-        baseFarePerSeat = 25 + (8 * 2.00) + (20 * 1.70) + (dist - 30) * 1.40; // ₹75 for 30km + ₹1.40/km
-        slab = 'long';
-      }
-      transitComparison = 'Shared Auto Aligned';
+      // Auto (Per Seat): Base fare ₹20 + ₹1.30/km per seat
+      ratePerKm = 1.30;
+      baseFarePerSeat = 20 + (dist * ratePerKm);
     } else {
-      // BIKE (Single Pillion) - Low Base & RTC Bus Comparable Rate
-      const minFare = 20;
-      if (dist <= 2) {
-        baseFarePerSeat = minFare;
-        slab = 'short';
-      } else if (dist <= 10) {
-        baseFarePerSeat = minFare + (dist - 2) * 1.50;
-        slab = 'short';
-      } else if (dist <= 30) {
-        baseFarePerSeat = 20 + (8 * 1.50) + (dist - 10) * 1.25; // ₹32 for 10km + ₹1.25/km
-        slab = 'medium';
-      } else {
-        baseFarePerSeat = 20 + (8 * 1.50) + (20 * 1.25) + (dist - 30) * 1.10; // ₹57 for 30km + ₹1.10/km
-        slab = 'long';
-      }
-      transitComparison = 'RTC Bus Aligned';
+      // Bike (1 Pillion): Base fare ₹15 + ₹0.90/km
+      ratePerKm = 0.90;
+      baseFarePerSeat = 15 + (dist * ratePerKm);
     }
 
     const roundedBase = Math.round(baseFarePerSeat);
     const totalFare = roundedBase * (vType === 'bike' ? 1 : seats);
+    const slab = (dist <= 15) ? 'short' : ((dist <= 40) ? 'medium' : 'long');
 
     return {
       baseFarePerSeat: roundedBase,
       totalFare,
       slab,
-      transitComparison
+      ratePerKm,
+      transitComparison: 'Direct Fuel Split'
     };
   }
   window.calculateTieredFuelShareFare = calculateTieredFuelShareFare;
@@ -2774,13 +2736,11 @@
     }
 
     if (badgeEl) {
-      badgeEl.textContent = calc.transitComparison;
+      badgeEl.classList.add('hidden');
     }
 
     if (detailEl) {
-      detailEl.textContent = seats > 1 
-        ? `₹${state.baseFare} / seat (${seats} seats) • Fuel Split` 
-        : `₹${state.baseFare} / seat • Fuel Split`;
+      detailEl.textContent = `~${state.distanceKm} km • Direct Fuel Split`;
     }
 
     if (window.lucide) lucide.createIcons();
@@ -5323,10 +5283,10 @@
     const vType = state.selectedScheduleVehicleType || 'bike';
     const fareCalc = (typeof window.calculateTieredFuelShareFare === 'function')
       ? window.calculateTieredFuelShareFare(dist, vType, 1)
-      : { baseFarePerSeat: 116, transitComparison: 'RTC Bus Aligned' };
+      : { baseFarePerSeat: (vType === 'car' ? Math.round(25 + dist * 1.60) : (vType === 'auto' ? Math.round(20 + dist * 1.30) : Math.round(15 + dist * 0.90))) };
 
     if (fareDisplay) fareDisplay.textContent = `₹${fareCalc.baseFarePerSeat}`;
-    if (fareBreakdown) fareBreakdown.textContent = `~${dist} km • ${fareCalc.transitComparison}`;
+    if (fareBreakdown) fareBreakdown.textContent = `~${dist} km • Direct Fuel Split`;
   }
   window.updateScheduleFareCalculation = updateScheduleFareCalculation;
 
@@ -5374,7 +5334,7 @@
 
     const fareCalc = (typeof window.calculateTieredFuelShareFare === 'function')
       ? window.calculateTieredFuelShareFare(dist, vType, 1)
-      : { baseFarePerSeat: 116 };
+      : { baseFarePerSeat: (vType === 'car' ? Math.round(25 + dist * 1.60) : (vType === 'auto' ? Math.round(20 + dist * 1.30) : Math.round(15 + dist * 0.90))) };
 
     // Resolve driver vehicle info
     let vehName = state.driverActiveVehicle?.vehicle_name || state.kyc?.submission?.vehicle_name || 'Verified Commuter Vehicle';
@@ -5521,7 +5481,7 @@
               </div>
 
               <div class="text-right flex-shrink-0">
-                <span class="text-sm font-black text-indigo-700 block">₹${ride.per_seat_fare || 116}</span>
+                <span class="text-sm font-black text-indigo-700 block">₹${ride.per_seat_fare || 91}</span>
                 <span class="text-[9px] font-bold text-slate-400 uppercase">Per Seat</span>
               </div>
             </div>
@@ -5567,7 +5527,7 @@
               ` : `
                 <button type="button" onclick="openBookScheduledSeatModal('${ride.id}')" class="w-full py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-black transition cursor-pointer shadow-sm active:scale-95 flex items-center justify-center gap-1.5">
                   <i data-lucide="ticket" class="w-4 h-4"></i>
-                  <span>Pre-Book Seat (₹${ride.per_seat_fare || 116}/seat)</span>
+                  <span>Pre-Book Seat (₹${ride.per_seat_fare || 91}/seat)</span>
                 </button>
               `)}
             </div>
@@ -5681,7 +5641,7 @@
       if (grid) grid.innerHTML = btnsHtml;
     }
 
-    const perFare = Number(ride.per_seat_fare || 116);
+    const perFare = Number(ride.per_seat_fare || 91);
     if (badge) badge.textContent = `1 Seat Selected`;
     if (rateDisplay) rateDisplay.textContent = `₹${perFare} × 1 seat`;
     if (totalDisplay) totalDisplay.textContent = `₹${perFare}`;
@@ -5698,7 +5658,7 @@
   window.selectBookingSeats = function (count) {
     state.currentBookingSeats = count;
     const ride = state.currentBookingScheduledRide;
-    const perFare = Number(ride?.per_seat_fare || 116);
+    const perFare = Number(ride?.per_seat_fare || 91);
     const total = perFare * count;
 
     const badge = document.getElementById('bookScheduledSeatBadge');
@@ -5737,7 +5697,7 @@
     }
 
     const seats = state.currentBookingSeats || 1;
-    const perFare = Number(ride.per_seat_fare || 116);
+    const perFare = Number(ride.per_seat_fare || 91);
     const totalFare = perFare * seats;
 
     const btn = document.getElementById('btnConfirmScheduledBooking');
@@ -5906,7 +5866,7 @@
         const vEmoji = vType === 'car' ? '🚗' : (vType === 'auto' ? '🛺' : '🛵');
         const userBooking = (ride.bookings || []).find(b => String(b.commuter_id) === userId && b.status !== 'cancelled');
         const bookedSeats = userBooking ? Number(userBooking.seats_booked || 1) : 1;
-        const totalFare = userBooking ? Number(userBooking.total_fare || (Number(ride.per_seat_fare || 116) * bookedSeats)) : (Number(ride.per_seat_fare || 116) * bookedSeats);
+        const totalFare = userBooking ? Number(userBooking.total_fare || (Number(ride.per_seat_fare || 91) * bookedSeats)) : (Number(ride.per_seat_fare || 91) * bookedSeats);
 
         cardsHtml += `
           <div class="p-4 rounded-2xl border-2 border-emerald-500/30 bg-gradient-to-br from-emerald-50/40 via-white to-blue-50/20 shadow-sm space-y-2.5">
@@ -6002,7 +5962,7 @@
           pickup: targetRide.pickup,
           drop: targetRide.drop_location || targetRide.drop,
           seatsBooked: Number(b.seats_booked || 1),
-          fare: Number(b.total_fare || (Number(targetRide.per_seat_fare || 116) * Number(b.seats_booked || 1))),
+          fare: Number(b.total_fare || (Number(targetRide.per_seat_fare || 91) * Number(b.seats_booked || 1))),
           distance: targetRide.distance_km || 84,
           pin: '4821',
           vehicleType: activeVehType,
@@ -6030,7 +5990,7 @@
           pickup: targetRide.pickup,
           drop: targetRide.drop_location || targetRide.drop,
           seatsBooked: 0,
-          fare: Number(targetRide.per_seat_fare || 116),
+          fare: Number(targetRide.per_seat_fare || 91),
           distance: targetRide.distance_km || 84,
           pin: '4821',
           vehicleType: activeVehType,
