@@ -2799,7 +2799,8 @@
     }
 
     wrap.classList.remove('hidden');
-    const maxSeats = (state.vehicleType === 'car') ? 4 : 3;
+    // Car allows up to 8 passenger seats for pooling, Auto strictly 3
+    const maxSeats = (state.vehicleType === 'car') ? 8 : 3;
     if (!state.seatsBooked || state.seatsBooked < 1) state.seatsBooked = 1;
     if (state.seatsBooked > maxSeats) state.seatsBooked = maxSeats;
 
@@ -2807,16 +2808,18 @@
       badge.textContent = `${state.seatsBooked} ${state.seatsBooked === 1 ? 'Seat' : 'Seats'} Selected`;
     }
 
+    grid.className = (maxSeats > 4) ? 'grid grid-cols-4 gap-2' : ((maxSeats === 3) ? 'grid grid-cols-3 gap-2' : 'grid grid-cols-4 gap-2');
+
     let html = '';
     for (let i = 1; i <= maxSeats; i++) {
       const isSel = (i === state.seatsBooked);
       html += `
-        <button type="button" onclick="selectSeatsBooked(${i})" class="py-2.5 px-2 rounded-xl text-xs font-black transition cursor-pointer flex flex-col items-center gap-0.5 ${
+        <button type="button" onclick="selectSeatsBooked(${i})" class="py-2.5 px-1.5 rounded-xl text-xs font-black transition cursor-pointer flex flex-col items-center gap-0.5 ${
           isSel 
             ? 'bg-blue-600 text-white shadow-md ring-2 ring-blue-300' 
             : 'bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-200'
         }">
-          <span class="text-sm">${i === 1 ? '👤' : (i === 2 ? '👥' : '👨‍👩‍👧')}</span>
+          <span class="text-sm">${i === 1 ? '👤' : (i === 2 ? '👥' : (i <= 4 ? '👨‍👩‍👧' : '🚐'))}</span>
           <span>${i} ${i === 1 ? 'Seat' : 'Seats'}</span>
         </button>
       `;
@@ -2825,7 +2828,7 @@
   }
 
   window.selectSeatsBooked = function (num) {
-    const maxSeats = (state.vehicleType === 'car') ? 4 : (state.vehicleType === 'auto' ? 3 : 1);
+    const maxSeats = (state.vehicleType === 'car') ? 8 : (state.vehicleType === 'auto' ? 3 : 1);
     state.seatsBooked = Math.max(1, Math.min(maxSeats, Number(num) || 1));
     renderCommuterSeatSelector();
     calculateDistanceAndFare();
@@ -3556,7 +3559,18 @@
   // -------------------------------------------------------------------------
   function getDriverMaxCapacity() {
     const vType = String(state.driverActiveVehicleType || (state.driverActiveVehicle?.vehicle_type) || 'bike').toLowerCase();
-    if (vType === 'car') return 4;
+    if (vType === 'car') {
+      const configuredCap = Number(
+        state.driverActiveVehicle?.car_seat_capacity ||
+        state.driverActiveVehicle?.seat_capacity ||
+        state.driverActiveVehicle?.seats ||
+        state.kyc?.submission?.car_seat_capacity ||
+        state.kyc?.submission?.seat_capacity ||
+        (state.currentUser?.vehicles?.find(v => v.vehicle_type === 'car')?.car_seat_capacity) ||
+        4
+      );
+      return Math.min(8, Math.max(1, configuredCap));
+    }
     if (vType === 'auto') return 3;
     return 1;
   }
@@ -5208,14 +5222,21 @@
 
     const vType = String(vehicleType || 'bike').toLowerCase();
     let maxSeats = 1;
-    if (vType === 'auto') maxSeats = 3;
-    else if (vType === 'car') maxSeats = 4;
+    if (vType === 'auto') {
+      maxSeats = 3;
+    } else if (vType === 'car') {
+      const driverCarCap = (state.driverActiveVehicle && String(state.driverActiveVehicle.vehicle_type || '').toLowerCase() === 'car')
+        ? (Number(state.driverActiveVehicle.car_seat_capacity || state.driverActiveVehicle.carSeatCapacity) || 4)
+        : (Number(state.kyc?.submission?.car_seat_capacity || state.kyc?.submission?.vehicles?.[0]?.car_seat_capacity) || 4);
+      maxSeats = Math.min(8, Math.max(1, driverCarCap || 4));
+    }
 
     // Reset default selected seats
     state.selectedScheduleSeats = Math.min(state.selectedScheduleSeats || 1, maxSeats);
 
     if (vType === 'bike') {
       state.selectedScheduleSeats = 1;
+      grid.className = 'grid grid-cols-4 gap-2';
       grid.innerHTML = `
         <div class="col-span-4 py-2 px-3 text-center rounded-xl bg-indigo-50 border border-indigo-200 text-xs font-bold text-indigo-900 flex items-center justify-center gap-1.5">
           <i data-lucide="user-check" class="w-4 h-4 text-indigo-600"></i>
@@ -5224,6 +5245,12 @@
       `;
       if (badge) badge.textContent = '1 Seat (Full Pillion)';
     } else {
+      if (maxSeats <= 3) {
+        grid.className = 'grid grid-cols-3 gap-2';
+      } else {
+        grid.className = 'grid grid-cols-4 gap-2';
+      }
+
       let buttonsHtml = '';
       for (let i = 1; i <= maxSeats; i++) {
         const isSelected = state.selectedScheduleSeats === i;
@@ -5622,11 +5649,13 @@
 
     const vType = String(ride.vehicle_type || 'bike').toLowerCase();
     const maxAvailable = Number(ride.available_seats !== undefined ? ride.available_seats : ride.total_seats || 1);
-    const maxAllowed = vType === 'bike' ? 1 : (vType === 'auto' ? Math.min(3, maxAvailable) : Math.min(4, maxAvailable));
+    const rideCarCap = Number(ride.total_seats || ride.car_seat_capacity || 8);
+    const maxAllowed = vType === 'bike' ? 1 : (vType === 'auto' ? Math.min(3, maxAvailable) : Math.min(rideCarCap, maxAvailable));
 
     if (vType === 'bike') {
       state.currentBookingSeats = 1;
       if (grid) {
+        grid.className = 'grid grid-cols-4 gap-2';
         grid.innerHTML = `
           <div class="col-span-4 py-2 px-3 text-center rounded-xl bg-blue-50 border border-blue-200 text-xs font-bold text-blue-900">
             1 Pillion Seat Available
@@ -5634,6 +5663,9 @@
         `;
       }
     } else {
+      if (grid) {
+        grid.className = (maxAllowed <= 3) ? 'grid grid-cols-3 gap-2' : 'grid grid-cols-4 gap-2';
+      }
       let btnsHtml = '';
       for (let i = 1; i <= maxAllowed; i++) {
         const isSel = i === 1;
@@ -6834,6 +6866,9 @@
 
     updateKycStepUI();
     refreshKycPreviews();
+    if (typeof selectKycCarSeats === 'function') {
+      selectKycCarSeats(4);
+    }
     const currentKycVehType = document.getElementById('kycSelectVehicleType')?.value || 'bike';
     handleKycVehicleTypeChange(currentKycVehType);
     modal.classList.remove('hidden');
@@ -7195,6 +7230,8 @@
         vehicle_color: vehColor,
         vehicleType: vehType,
         vehicle_type: vehType,
+        carSeatCapacity: vehType === 'car' ? Math.min(8, Math.max(1, parseInt(document.getElementById('kycInputCarSeats')?.value || 4, 10))) : (vehType === 'auto' ? 3 : 1),
+        car_seat_capacity: vehType === 'car' ? Math.min(8, Math.max(1, parseInt(document.getElementById('kycInputCarSeats')?.value || 4, 10))) : (vehType === 'auto' ? 3 : 1),
         rcPhoto: state.kyc.formData.rc_photo,
         rc_photo: state.kyc.formData.rc_photo
       };
@@ -7256,6 +7293,15 @@
       }
     }
 
+    const carSeatsWrap = document.getElementById('addVehicleCarSeatsWrap');
+    if (carSeatsWrap) {
+      if (type === 'car') {
+        carSeatsWrap.classList.remove('hidden');
+      } else {
+        carSeatsWrap.classList.add('hidden');
+      }
+    }
+
     const nameLabel = document.getElementById('addVehicleNameLabel');
     const nameInput = document.getElementById('addVehicleNameInput');
 
@@ -7272,6 +7318,15 @@
   };
 
   window.handleKycVehicleTypeChange = function (type) {
+    const kycSeatsWrap = document.getElementById('kycCarSeatsWrap');
+    if (kycSeatsWrap) {
+      if (type === 'car') {
+        kycSeatsWrap.classList.remove('hidden');
+      } else {
+        kycSeatsWrap.classList.add('hidden');
+      }
+    }
+
     const nameLabel = document.getElementById('kycLabelVehicleName');
     const nameInput = document.getElementById('kycInputVehicleName');
 
@@ -7285,6 +7340,48 @@
       if (nameLabel) nameLabel.innerHTML = 'Bike / Scooter Name <span class="text-rose-500">*</span>';
       if (nameInput) nameInput.placeholder = 'e.g. Honda Activa 6G / Royal Enfield';
     }
+  };
+
+  window.selectAddVehicleCarSeats = function (seats) {
+    const seatNum = Math.min(8, Math.max(1, parseInt(seats, 10) || 4));
+    const input = document.getElementById('addVehicleCarSeatsInput');
+    if (input) input.value = seatNum;
+
+    const badge = document.getElementById('addVehicleCarSeatsBadge');
+    if (badge) badge.textContent = `${seatNum} Passenger Seats`;
+
+    const seatOptions = [4, 6, 7, 8];
+    seatOptions.forEach(opt => {
+      const btn = document.getElementById(`addVehSeatBtn-${opt}`);
+      if (btn) {
+        if (opt === seatNum) {
+          btn.className = 'py-2.5 px-1 text-center rounded-xl text-xs font-black transition cursor-pointer bg-indigo-600 text-white shadow-xs';
+        } else {
+          btn.className = 'py-2.5 px-1 text-center rounded-xl text-xs font-bold transition cursor-pointer bg-white text-slate-700 border border-slate-200 hover:border-indigo-400';
+        }
+      }
+    });
+  };
+
+  window.selectKycCarSeats = function (seats) {
+    const seatNum = Math.min(8, Math.max(1, parseInt(seats, 10) || 4));
+    const input = document.getElementById('kycInputCarSeats');
+    if (input) input.value = seatNum;
+
+    const badge = document.getElementById('kycCarSeatsBadge');
+    if (badge) badge.textContent = `${seatNum} Passenger Seats`;
+
+    const seatOptions = [4, 6, 7, 8];
+    seatOptions.forEach(opt => {
+      const btn = document.getElementById(`kycSeatBtn-${opt}`);
+      if (btn) {
+        if (opt === seatNum) {
+          btn.className = 'py-2.5 px-1 text-center rounded-xl text-xs font-black transition cursor-pointer bg-indigo-600 text-white shadow-xs';
+        } else {
+          btn.className = 'py-2.5 px-1 text-center rounded-xl text-xs font-bold transition cursor-pointer bg-white text-slate-700 border border-slate-200 hover:border-indigo-400';
+        }
+      }
+    });
   };
 
   window.handleAddVehicleCarDlFile = async function (e) {
@@ -7349,6 +7446,7 @@
       errBox.textContent = '';
     }
 
+    selectAddVehicleCarSeats(4);
     handleAddVehicleTypeChange('bike');
     modal.classList.remove('hidden');
     if (window.lucide) lucide.createIcons();
@@ -7464,6 +7562,10 @@
 
     try {
       showToast('Submitting vehicle details for Super Admin review...', 'info');
+      const carSeatCapacity = vehicleType === 'car'
+        ? Math.min(8, Math.max(1, parseInt(document.getElementById('addVehicleCarSeatsInput')?.value || 4, 10)))
+        : (vehicleType === 'auto' ? 3 : 1);
+
       const payload = {
         userId: user.id,
         user_id: user.id,
@@ -7480,6 +7582,8 @@
         chassis_number: vehicleChassis,
         vehicleType,
         vehicle_type: vehicleType,
+        carSeatCapacity,
+        car_seat_capacity: carSeatCapacity,
         vehicleName,
         vehicle_name: vehicleName,
         vehicleColor,
@@ -7553,8 +7657,9 @@
       approvedVehicles = [{
         id: 'primary',
         vehicle_type: mainType === 'car' ? 'car' : (mainType === 'auto' ? 'auto' : 'bike'),
-        vehicle_name: state.kyc?.submission?.vehicle_name || (mainType === 'car' ? 'Car Seat' : (mainType === 'auto' ? 'Auto' : 'Bike')),
+        vehicle_name: state.kyc?.submission?.vehicle_name || (mainType === 'car' ? 'Car' : (mainType === 'auto' ? 'Auto' : 'Bike')),
         vehicle_number: state.kyc?.submission?.vehicle_number || '--',
+        car_seat_capacity: state.kyc?.submission?.car_seat_capacity || 4,
         is_default: true,
         status: 'approved'
       }];
@@ -7579,12 +7684,16 @@
     const plateEl = document.getElementById('driverActiveVehiclePlate');
     const switchWrap = document.getElementById('driverVehicleSwitchWrap');
 
+    const activeCarCap = (activeVeh && String(activeVeh.vehicle_type || '').toLowerCase() === 'car')
+      ? (Number(activeVeh.car_seat_capacity || activeVeh.carSeatCapacity) || 4)
+      : (Number(state.kyc?.submission?.car_seat_capacity || 4));
+
     const typeIcons = { bike: '🛵', car: '🚗', auto: '🛺' };
-    const typeNames = { bike: 'Bike', car: 'Car Seat (Pooling)', auto: 'Auto (Pooling)' };
+    const typeNames = { bike: 'Bike', car: `Car (${activeCarCap} Seats)`, auto: 'Auto (3 Seats)' };
     const typeLockLabels = {
-      bike: 'Bike Verified Only',
-      car: 'Car Verified (LMV DL)',
-      auto: 'Auto Verified'
+      bike: 'Bike Verified (1 Pillion)',
+      car: `Car Verified (${activeCarCap} Seats)`,
+      auto: 'Auto Verified (3 Seats)'
     };
 
     if (iconWrap) {
@@ -7742,7 +7851,7 @@
       const isRejected = v.status === 'rejected';
       const isActive = !!v.is_default;
       const vehIcon = v.vehicle_type === 'car' ? '🚗' : (v.vehicle_type === 'auto' ? '🛺' : '🛵');
-      const categoryLabel = v.vehicle_type === 'car' ? 'Car Seat' : (v.vehicle_type === 'auto' ? 'Auto' : 'Bike');
+      const categoryLabel = v.vehicle_type === 'car' ? `Car (${v.car_seat_capacity || 4} Seats)` : (v.vehicle_type === 'auto' ? 'Auto (3 Seats)' : 'Bike (1 Seat)');
 
       return `
         <div class="p-3 rounded-2xl bg-white border ${isActive ? 'border-blue-400 ring-2 ring-blue-100 shadow-sm' : 'border-slate-200'} space-y-2 transition">

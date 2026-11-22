@@ -1027,7 +1027,11 @@
           vehicle_number: payload.vehicleNumber,
           vehicle_type: payload.vehicleType,
           vehicle_name: payload.vehicleName,
-          rc_photo: payload.rcPhoto
+          vehicle_color: payload.vehicleColor,
+          vehicle_chassis: payload.vehicleChassis,
+          car_seat_capacity: payload.carSeatCapacity || payload.car_seat_capacity,
+          rc_photo: payload.rcPhoto,
+          dl_photo: payload.dlPhoto
         })
       });
 

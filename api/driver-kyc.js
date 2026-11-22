@@ -1226,6 +1226,10 @@ module.exports = async (req, res) => {
         });
       }
 
+      const carSeatCapacity = cleanVehType === 'car'
+        ? Math.min(8, Math.max(1, parseInt(body.car_seat_capacity || body.carSeatCapacity || body.seat_capacity || 4, 10)))
+        : (cleanVehType === 'auto' ? 3 : 1);
+
       const newVehicle = {
         id: 'veh_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
         user_id: cleanUserId,
@@ -1235,6 +1239,8 @@ module.exports = async (req, res) => {
         vehicle_type: cleanVehType,
         vehicle_name: cleanVehName,
         vehicle_color: cleanVehColor,
+        car_seat_capacity: carSeatCapacity,
+        seat_capacity: carSeatCapacity,
         rc_photo: cleanRcPhoto,
         dl_photo: cleanCarDlPhoto || null,
         status: 'pending', // Strictly Pending Super Admin review
@@ -1297,6 +1303,9 @@ module.exports = async (req, res) => {
       });
       sub.vehicle_number = target.vehicle_number;
       sub.vehicle_type = target.vehicle_type;
+      if (target.car_seat_capacity) {
+        sub.car_seat_capacity = target.car_seat_capacity;
+      }
       saveStore(list);
 
       return res.status(200).json({
@@ -1344,6 +1353,9 @@ module.exports = async (req, res) => {
         targetVeh.is_default = true;
         sub.vehicle_number = targetVeh.vehicle_number;
         sub.vehicle_type = targetVeh.vehicle_type;
+        if (targetVeh.car_seat_capacity) {
+          sub.car_seat_capacity = targetVeh.car_seat_capacity;
+        }
       }
 
       saveStore(list);
@@ -1818,6 +1830,7 @@ module.exports = async (req, res) => {
       status: 'pending', // Strictly Pending Approval
       rejection_reason: null,
       submitted_at: new Date().toISOString(),
+      car_seat_capacity: cleanVehicleType === 'car' ? Math.min(8, Math.max(1, parseInt(body.car_seat_capacity || body.carSeatCapacity || body.seat_capacity || 4, 10))) : (cleanVehicleType === 'auto' ? 3 : 1),
       vehicles: [
         {
           id: 'veh_primary_' + cleanUserId,
@@ -1828,6 +1841,8 @@ module.exports = async (req, res) => {
           vehicle_type: cleanVehicleType,
           vehicle_name: cleanVehicleName,
           vehicle_color: cleanVehicleColor,
+          car_seat_capacity: cleanVehicleType === 'car' ? Math.min(8, Math.max(1, parseInt(body.car_seat_capacity || body.carSeatCapacity || body.seat_capacity || 4, 10))) : (cleanVehicleType === 'auto' ? 3 : 1),
+          seat_capacity: cleanVehicleType === 'car' ? Math.min(8, Math.max(1, parseInt(body.car_seat_capacity || body.carSeatCapacity || body.seat_capacity || 4, 10))) : (cleanVehicleType === 'auto' ? 3 : 1),
           rc_photo: cleanRcPhoto,
           status: 'pending',
           is_default: true,
