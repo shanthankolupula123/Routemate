@@ -391,14 +391,19 @@ module.exports = async (req, res) => {
 
     // 4. ACTION: CANCEL TRIP OR BOOKING
     if (action === 'cancel') {
-      const { rideId, bookingId } = body;
+      const { rideId, bookingId, reason } = body;
+      const cancellationReason = String(reason || '').trim();
 
       if (bookingId) {
+        // Commuter cancelling their seat booking
         const localBookings = getLocalBookings();
         const b = localBookings.find(x => String(x.id) === String(bookingId));
         if (b) {
           b.status = 'cancelled';
+          b.cancelled_at = new Date().toISOString();
+          if (cancellationReason) b.cancellation_reason = cancellationReason;
           saveLocalBookings(localBookings);
+
           // Return seats to ride
           const localRides = getLocalRides();
           const r = localRides.find(x => String(x.id) === String(b.scheduled_ride_id));
@@ -407,16 +412,120 @@ module.exports = async (req, res) => {
             saveLocalRides(localRides);
           }
         }
+
+        // Update in Supabase
+        try {
+          await fetch(`${SUPABASE_URL}/rest/v1/scheduled_ride_bookings?id=eq.${encodeURIComponent(bookingId)}`, {
+            method: 'PATCH',
+            headers: {
+              'apikey': SUPABASE_KEY,
+              'Authorization': `Bearer ${SUPABASE_KEY}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              status: 'cancelled',
+              notes: cancellationReason ? `Cancelled: ${cancellationReason}` : 'Cancelled by commuter'
+            }),
+            signal: AbortSignal.timeout(1500)
+          });
+        } catch (e) {}
+
+        return res.status(200).json({ success: true, message: 'Booking cancelled successfully.' });
       } else if (rideId) {
+        // Driver cancelling the entire scheduled trip
         const localRides = getLocalRides();
         const r = localRides.find(x => String(x.id) === String(rideId));
         if (r) {
           r.status = 'cancelled';
+          r.cancelled_at = new Date().toISOString();
+          if (cancellationReason) r.cancellation_reason = cancellationReason;
           saveLocalRides(localRides);
         }
+
+        // Cancel all bookings on this trip in local store
+        const localBookings = getLocalBookings();
+        const affectedBookings = [];
+        localBookings.forEach(b => {
+          if (String(b.scheduled_ride_id) === String(rideId)) {
+            b.status = 'cancelled';
+            b.cancelled_at = new Date().toISOString();
+            if (cancellationReason) b.cancellation_reason = cancellationReason;
+            affectedBookings.push(b);
+          }
+        });
+        if (affectedBookings.length > 0) {
+          saveLocalBookings(localBookings);
+        }
+
+        // Update in Supabase REST: scheduled_rides
+        try {
+          await fetch(`${SUPABASE_URL}/rest/v1/scheduled_rides?id=eq.${encodeURIComponent(rideId)}`, {
+            method: 'PATCH',
+            headers: {
+              'apikey': SUPABASE_KEY,
+              'Authorization': `Bearer ${SUPABASE_KEY}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              status: 'cancelled',
+              notes: cancellationReason ? `Cancelled by driver: ${cancellationReason}` : 'Cancelled by driver'
+            }),
+            signal: AbortSignal.timeout(1500)
+          });
+        } catch (e) {}
+
+        // Update in Supabase REST: scheduled_ride_bookings
+        try {
+          await fetch(`${SUPABASE_URL}/rest/v1/scheduled_ride_bookings?scheduled_ride_id=eq.${encodeURIComponent(rideId)}`, {
+            method: 'PATCH',
+            headers: {
+              'apikey': SUPABASE_KEY,
+              'Authorization': `Bearer ${SUPABASE_KEY}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              status: 'cancelled',
+              notes: cancellationReason ? `Trip cancelled by driver: ${cancellationReason}` : 'Trip cancelled by driver'
+            }),
+            signal: AbortSignal.timeout(1500)
+          });
+        } catch (e) {}
+
+        // Send cancellation notifications to booked commuters
+        for (const booking of affectedBookings) {
+          if (booking.commuter_id) {
+            try {
+              const notifPayload = {
+                user_id: String(booking.commuter_id),
+                title: 'Scheduled Ride Cancelled',
+                message: `Driver cancelled the scheduled ride on ${r?.departure_date || 'scheduled date'} at ${r?.departure_time || 'time'}.${cancellationReason ? ` Reason: ${cancellationReason}` : ''}`,
+                type: 'ride_cancelled',
+                read: false,
+                created_at: new Date().toISOString()
+              };
+              await fetch(`${SUPABASE_URL}/rest/v1/notifications`, {
+                method: 'POST',
+                headers: {
+                  'apikey': SUPABASE_KEY,
+                  'Authorization': `Bearer ${SUPABASE_KEY}`,
+                  'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(notifPayload),
+                signal: AbortSignal.timeout(1500)
+              });
+            } catch (ne) {}
+          }
+        }
+
+        return res.status(200).json({
+          success: true,
+          message: 'Scheduled trip and associated bookings cancelled successfully.',
+          cancelledRideId: rideId,
+          affectedCommutersCount: affectedBookings.length
+        });
       }
 
-      return res.status(200).json({ success: true, message: 'Cancelled successfully.' });
+      return res.status(400).json({ success: false, error: 'Missing rideId or bookingId to cancel.' });
     }
 
     return res.status(400).json({ success: false, error: 'Unknown action.' });

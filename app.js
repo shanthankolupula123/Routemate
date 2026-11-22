@@ -5366,15 +5366,16 @@
       ? window.calculateTieredFuelShareFare(dist, vType, 1)
       : { baseFarePerSeat: (vType === 'car' ? Math.max(45, Math.round(35 + dist * 2.00)) : (vType === 'auto' ? Math.max(30, Math.round(25 + dist * 1.50)) : Math.max(20, Math.round(15 + dist * 0.90)))) };
 
-    // Resolve driver vehicle info
+    // Resolve driver vehicle info & verified contact phone
     let vehName = state.driverActiveVehicle?.vehicle_name || state.kyc?.submission?.vehicle_name || 'Verified Commuter Vehicle';
     let vehNumber = state.driverActiveVehicle?.vehicle_number || state.kyc?.submission?.vehicle_number || 'TG 08 AB 1234';
     let driverUpi = (typeof getResolvedUserUpiId === 'function') ? getResolvedUserUpiId() : (state.driverUpi?.upiId || '');
+    let driverPhone = user.phone || state.kyc?.submission?.driver_phone || state.kyc?.submission?.phone || state.driverKycData?.phone || '';
 
     const payload = {
       driverId: user.id || user.phone,
       driverName: user.name || 'Verified Driver',
-      driverPhone: user.phone || '',
+      driverPhone: driverPhone,
       driverAvatar: user.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=256&q=80',
       driverRating: parseFloat(user.rating || 5.0),
       driverUpi: driverUpi,
@@ -5438,6 +5439,27 @@
     if (modal) modal.classList.add('hidden');
   };
 
+  // Phone formatting helpers for scheduled rides contact
+  function formatPublisherPhone(rawPhone) {
+    if (!rawPhone) return '';
+    const digits = String(rawPhone).replace(/\D/g, '');
+    if (digits.length >= 10) {
+      const last10 = digits.slice(-10);
+      return `+91 ${last10.slice(0, 5)} ${last10.slice(5)}`;
+    }
+    return String(rawPhone).trim();
+  }
+
+  function getPublisherCleanTel(rawPhone) {
+    if (!rawPhone) return '';
+    const digits = String(rawPhone).replace(/\D/g, '');
+    if (digits.length >= 10) {
+      return `+91${digits.slice(-10)}`;
+    }
+    if (digits.length > 0) return digits;
+    return '';
+  }
+
   window.loadBrowseScheduledRides = async function (showToastMsg = false) {
     const container = document.getElementById('browseScheduledRidesContainer');
     if (!container) return;
@@ -5485,6 +5507,11 @@
         const availSeats = Number(ride.available_seats !== undefined ? ride.available_seats : ride.total_seats || 1);
         const totalSeats = Number(ride.total_seats || 1);
 
+        // Publisher / driver contact phone resolution
+        const rawDriverPhone = ride.driver_phone || ride.driverPhone || ride.phone || (isOwnTrip && user?.phone ? user.phone : '');
+        const formattedDriverPhone = formatPublisherPhone(rawDriverPhone);
+        const cleanDriverTel = getPublisherCleanTel(rawDriverPhone);
+
         // Date & time formatting
         let formattedDate = ride.departure_date || '';
         try {
@@ -5495,12 +5522,12 @@
         return `
           <div class="routemate-card p-4 border border-slate-200/90 hover:border-indigo-300 transition shadow-xs space-y-3 bg-white">
             <div class="flex items-start justify-between gap-3">
-              <div class="flex items-center gap-2.5">
+              <div class="flex items-center gap-2.5 min-w-0">
                 <img src="${ride.driver_avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=256&q=80'}" alt="${ride.driver_name}" class="w-10 h-10 rounded-full object-cover border-2 border-indigo-500 shadow-xs flex-shrink-0" />
-                <div>
-                  <div class="flex items-center gap-1.5">
-                    <h4 class="text-xs font-black text-slate-900">${ride.driver_name}</h4>
-                    <span class="px-1.5 py-0.2 rounded text-[9px] font-bold bg-emerald-100 text-emerald-800">Verified</span>
+                <div class="min-w-0">
+                  <div class="flex items-center gap-1.5 flex-wrap">
+                    <h4 class="text-xs font-black text-slate-900 truncate">${ride.driver_name}</h4>
+                    <span class="px-1.5 py-0.2 rounded text-[9px] font-bold bg-emerald-100 text-emerald-800 flex-shrink-0">Verified</span>
                   </div>
                   <div class="flex items-center gap-1.5 text-[10px] text-slate-500 font-semibold mt-0.5">
                     <span class="text-amber-500">★ ${ride.driver_rating || '5.0'}</span>
@@ -5514,6 +5541,27 @@
                 <span class="text-sm font-black text-indigo-700 block">₹${ride.per_seat_fare || 91}</span>
                 <span class="text-[9px] font-bold text-slate-400 uppercase">Per Seat</span>
               </div>
+            </div>
+
+            <!-- Publisher / Driver Contact Bar -->
+            <div class="flex items-center justify-between gap-2 px-3 py-1.5 bg-slate-50/90 rounded-xl border border-slate-200/60 text-xs">
+              <div class="flex items-center gap-1.5 text-[11px] font-semibold text-slate-600 min-w-0 truncate">
+                <span class="text-slate-400 flex-shrink-0">Driver Contact:</span>
+                ${cleanDriverTel ? `
+                  <a href="tel:${cleanDriverTel}" class="inline-flex items-center gap-1 text-emerald-700 hover:text-emerald-800 font-bold hover:underline truncate" title="Call driver to coordinate pickup">
+                    <i data-lucide="phone-call" class="w-3 h-3 text-emerald-600 flex-shrink-0"></i>
+                    <span class="truncate">${formattedDriverPhone}</span>
+                  </a>
+                ` : `
+                  <span class="text-slate-400 font-normal italic">Verified on profile</span>
+                `}
+              </div>
+              ${cleanDriverTel ? `
+                <a href="tel:${cleanDriverTel}" class="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-black transition cursor-pointer flex items-center gap-1 flex-shrink-0 shadow-xs active:scale-95" title="Call ${formattedDriverPhone}">
+                  <i data-lucide="phone" class="w-3 h-3"></i>
+                  <span>Call</span>
+                </a>
+              ` : ''}
             </div>
 
             <!-- Departure Time & Route -->
@@ -5544,11 +5592,18 @@
               </p>
             ` : ''}
 
-            <!-- Pre-Book Action Button -->
+            <!-- Pre-Book / Driver Action Button -->
             <div class="pt-1">
               ${isOwnTrip ? `
-                <div class="w-full py-2 rounded-xl bg-slate-100 text-slate-500 text-xs font-bold text-center">
-                  Your Published Trip
+                <div class="flex items-center gap-2">
+                  <div class="flex-1 py-2 px-3 rounded-xl bg-slate-100 text-slate-600 text-xs font-bold text-center border border-slate-200/80 flex items-center justify-center gap-1.5">
+                    <i data-lucide="user-check" class="w-3.5 h-3.5 text-indigo-600"></i>
+                    <span>Your Published Trip</span>
+                  </div>
+                  <button type="button" onclick="handleCancelScheduledRide('${ride.id}')" class="px-3.5 py-2 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-bold transition cursor-pointer border border-rose-200/80 flex items-center justify-center gap-1 active:scale-95 flex-shrink-0 shadow-2xs">
+                    <i data-lucide="x-circle" class="w-3.5 h-3.5 text-rose-600"></i>
+                    <span>Cancel Trip</span>
+                  </button>
                 </div>
               ` : (availSeats <= 0 ? `
                 <div class="w-full py-2 rounded-xl bg-slate-100 text-slate-400 text-xs font-bold text-center">
@@ -5597,13 +5652,18 @@
     const allRides = await window.db.scheduledRides.getScheduledRides({ all: true });
     ride = allRides.find(r => String(r.id) === String(rideId));
 
-    if (!ride) {
-      showToast('Ride details not found.', 'error');
+    if (!ride || ride.status === 'cancelled') {
+      showToast('This scheduled trip is cancelled or no longer available.', 'error');
       return;
     }
 
     state.currentBookingScheduledRide = ride;
     state.currentBookingSeats = 1;
+
+    // Resolve driver phone
+    const rawDriverPhone = ride.driver_phone || ride.driverPhone || ride.phone || '';
+    const formattedDriverPhone = formatPublisherPhone(rawDriverPhone);
+    const cleanDriverTel = getPublisherCleanTel(rawDriverPhone);
 
     // Render trip summary
     const summary = document.getElementById('bookScheduledTripSummary');
@@ -5627,6 +5687,17 @@
         <div class="space-y-1 text-[11px] pt-1">
           <p class="text-slate-700 truncate"><strong>Pickup:</strong> ${ride.pickup}</p>
           <p class="text-slate-700 truncate"><strong>Drop:</strong> ${ride.drop_location || ride.drop}</p>
+          <div class="pt-1 flex items-center justify-between text-[11px] text-slate-600 border-t border-slate-200/60 mt-1">
+            <span class="text-slate-500 font-semibold">Publisher Contact:</span>
+            ${cleanDriverTel ? `
+              <a href="tel:${cleanDriverTel}" class="font-bold text-emerald-700 hover:text-emerald-800 flex items-center gap-1 hover:underline">
+                <i data-lucide="phone-call" class="w-3 h-3 text-emerald-600"></i>
+                <span>${formattedDriverPhone}</span>
+              </a>
+            ` : `
+              <span class="text-slate-400 italic">Verified on profile</span>
+            `}
+          </div>
         </div>
       `;
     }
@@ -5825,16 +5896,27 @@
             <div class="mt-2.5 pt-2 border-t border-slate-100 space-y-1.5">
               <span class="text-[10px] font-black uppercase text-slate-400 tracking-wider block">Booked Commuters (${bookedSeats}/${totalSeats} Seats):</span>
               <div class="space-y-1">
-                ${bookings.map(b => `
+                ${bookings.map(b => {
+                  const bPhoneDigits = getPublisherCleanTel(b.commuter_phone);
+                  const bPhoneFormatted = formatPublisherPhone(b.commuter_phone);
+                  return `
                   <div class="flex items-center justify-between text-[11px] p-1.5 bg-slate-50 rounded-xl">
                     <div class="flex items-center gap-1.5 min-w-0">
                       <img src="${b.commuter_avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=256&q=80'}" class="w-5 h-5 rounded-full object-cover flex-shrink-0" />
                       <span class="font-bold text-slate-900 truncate">${b.commuter_name}</span>
-                      <span class="text-[10px] text-slate-400">(${b.commuter_phone || 'Verified'})</span>
+                      ${bPhoneDigits ? `
+                        <a href="tel:${bPhoneDigits}" class="text-[10px] text-emerald-700 font-bold hover:underline flex items-center gap-0.5" title="Call ${bPhoneFormatted}">
+                          <i data-lucide="phone" class="w-2.5 h-2.5"></i>
+                          <span>${bPhoneFormatted}</span>
+                        </a>
+                      ` : `
+                        <span class="text-[10px] text-slate-400">(Verified)</span>
+                      `}
                     </div>
                     <span class="font-black text-indigo-700 flex-shrink-0">${b.seats_booked} ${b.seats_booked === 1 ? 'Seat' : 'Seats'} (₹${b.total_fare || 0})</span>
                   </div>
-                `).join('')}
+                `;
+                }).join('')}
               </div>
             </div>
           `;
@@ -5898,6 +5980,11 @@
         const bookedSeats = userBooking ? Number(userBooking.seats_booked || 1) : 1;
         const totalFare = userBooking ? Number(userBooking.total_fare || (Number(ride.per_seat_fare || 91) * bookedSeats)) : (Number(ride.per_seat_fare || 91) * bookedSeats);
 
+        // Resolve driver contact phone
+        const rawDriverPhone = ride.driver_phone || ride.driverPhone || ride.phone || '';
+        const formattedDriverPhone = formatPublisherPhone(rawDriverPhone);
+        const cleanDriverTel = getPublisherCleanTel(rawDriverPhone);
+
         cardsHtml += `
           <div class="p-4 rounded-2xl border-2 border-emerald-500/30 bg-gradient-to-br from-emerald-50/40 via-white to-blue-50/20 shadow-sm space-y-2.5">
             <div class="flex items-start justify-between gap-2">
@@ -5914,12 +6001,31 @@
               </span>
             </div>
 
-            <div class="flex items-center justify-between text-xs py-1 px-2.5 bg-slate-50 rounded-xl">
+            <!-- Driver & Publisher Contact Info -->
+            <div class="flex items-center justify-between text-xs py-2 px-2.5 bg-slate-50 rounded-xl">
               <div class="flex items-center gap-2 min-w-0">
-                <img src="${ride.driver_avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=256&q=80'}" class="w-6 h-6 rounded-full object-cover border border-emerald-400 flex-shrink-0" />
-                <span class="font-bold text-slate-900 truncate">${ride.driver_name} (${ride.vehicle_name || vType.toUpperCase()})</span>
+                <img src="${ride.driver_avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=256&q=80'}" class="w-7 h-7 rounded-full object-cover border border-emerald-400 flex-shrink-0" />
+                <div class="min-w-0">
+                  <span class="font-bold text-slate-900 truncate block leading-tight">${ride.driver_name} (${ride.vehicle_name || vType.toUpperCase()})</span>
+                  ${cleanDriverTel ? `
+                    <a href="tel:${cleanDriverTel}" class="text-[10px] text-emerald-700 font-bold flex items-center gap-1 hover:underline mt-0.5" title="Call driver">
+                      <i data-lucide="phone-call" class="w-2.5 h-2.5 text-emerald-600"></i>
+                      <span>${formattedDriverPhone}</span>
+                    </a>
+                  ` : `
+                    <span class="text-[10px] text-slate-400 mt-0.5 block">Verified Driver</span>
+                  `}
+                </div>
               </div>
-              <span class="font-black text-emerald-700 flex-shrink-0">${bookedSeats} ${bookedSeats === 1 ? 'Seat' : 'Seats'} (₹${totalFare})</span>
+              <div class="text-right flex-shrink-0 flex flex-col items-end gap-1">
+                <span class="font-black text-emerald-700 block">${bookedSeats} ${bookedSeats === 1 ? 'Seat' : 'Seats'} (₹${totalFare})</span>
+                ${cleanDriverTel ? `
+                  <a href="tel:${cleanDriverTel}" class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white text-[9px] font-black transition cursor-pointer shadow-2xs active:scale-95" title="Call ${formattedDriverPhone}">
+                    <i data-lucide="phone" class="w-2.5 h-2.5"></i>
+                    <span>Call Driver</span>
+                  </a>
+                ` : ''}
+              </div>
             </div>
 
             <div class="space-y-1 text-xs">
@@ -6052,16 +6158,129 @@
     }
   };
 
-  window.handleCancelScheduledRide = async function (rideId) {
-    if (!confirm('Are you sure you want to cancel this scheduled ride? Any booked passengers will be notified.')) return;
+  // -------------------------------------------------------------------------
+  // DRIVER SCHEDULED TRIP CANCELLATION CONTROLLER
+  // -------------------------------------------------------------------------
+  window.openCancelScheduledTripModal = async function (rideId) {
+    state.pendingCancelScheduledRideId = rideId;
+    const modal = document.getElementById('cancelScheduledTripModal');
+    const summary = document.getElementById('cancelScheduledTripSummary');
+
+    let targetRide = null;
     try {
-      await window.db.scheduledRides.cancelScheduledRide(rideId);
+      const allRides = await window.db.scheduledRides.getScheduledRides({ all: true });
+      targetRide = allRides.find(r => String(r.id) === String(rideId));
+    } catch (e) {}
+
+    if (summary) {
+      if (targetRide) {
+        const vType = String(targetRide.vehicle_type || 'bike').toLowerCase();
+        const vEmoji = vType === 'car' ? '🚗' : (vType === 'auto' ? '🛺' : '🛵');
+        const bookings = Array.isArray(targetRide.bookings) ? targetRide.bookings.filter(b => b.status !== 'cancelled') : [];
+        const bookedSeats = bookings.reduce((sum, b) => sum + Number(b.seats_booked || 1), 0);
+        const totalSeats = Number(targetRide.total_seats || 1);
+
+        summary.innerHTML = `
+          <div class="flex items-center justify-between pb-1.5 border-b border-slate-200/80">
+            <span class="font-black text-slate-900">${vEmoji} ${targetRide.departure_date} at ${targetRide.departure_time}</span>
+            <span class="px-2 py-0.5 rounded-full ${bookedSeats > 0 ? 'bg-amber-100 text-amber-900' : 'bg-slate-200 text-slate-700'} text-[10px] font-bold">
+              ${bookedSeats > 0 ? `${bookedSeats} Booked / ${totalSeats} Total` : '0 Booked Commuters'}
+            </span>
+          </div>
+          <div class="space-y-0.5 pt-0.5">
+            <p class="truncate"><strong>From:</strong> ${targetRide.pickup}</p>
+            <p class="truncate"><strong>To:</strong> ${targetRide.drop_location || targetRide.drop}</p>
+          </div>
+        `;
+      } else {
+        summary.innerHTML = `<p class="font-bold text-slate-900">Scheduled Trip #${rideId}</p>`;
+      }
+    }
+
+    // Reset reason inputs
+    const select = document.getElementById('cancelScheduledReasonSelect');
+    if (select) select.selectedIndex = 0;
+    const textarea = document.getElementById('cancelScheduledReasonInput');
+    if (textarea) textarea.value = '';
+
+    if (modal) {
+      modal.classList.remove('hidden');
+      if (window.lucide) lucide.createIcons();
+    } else {
+      // Graceful prompt fallback
+      const reason = prompt('Are you sure you want to cancel this scheduled ride? Enter optional reason:', 'Change of plans');
+      if (reason !== null) {
+        try {
+          await window.db.scheduledRides.cancelScheduledRide(rideId, reason);
+          showToast('Scheduled trip cancelled successfully.', 'info');
+          if (typeof renderScheduledTripsSection === 'function') renderScheduledTripsSection();
+          if (typeof loadBrowseScheduledRides === 'function') loadBrowseScheduledRides();
+          if (typeof renderActivityList === 'function') renderActivityList();
+        } catch (err) {
+          showToast(`Error: ${err.message}`, 'error');
+        }
+      }
+    }
+  };
+
+  window.closeCancelScheduledTripModal = function () {
+    const modal = document.getElementById('cancelScheduledTripModal');
+    if (modal) modal.classList.add('hidden');
+    state.pendingCancelScheduledRideId = null;
+  };
+
+  window.handleScheduledCancelReasonSelectChange = function (selectEl) {
+    const textarea = document.getElementById('cancelScheduledReasonInput');
+    if (!textarea) return;
+    if (selectEl.value === 'Other') {
+      textarea.value = '';
+      textarea.focus();
+      textarea.placeholder = 'Please specify your cancellation reason...';
+    } else {
+      textarea.placeholder = `e.g. ${selectEl.value}`;
+    }
+  };
+
+  window.confirmCancelScheduledTripAction = async function () {
+    const rideId = state.pendingCancelScheduledRideId;
+    if (!rideId) {
+      closeCancelScheduledTripModal();
+      return;
+    }
+
+    const selectVal = document.getElementById('cancelScheduledReasonSelect')?.value || '';
+    const inputVal = document.getElementById('cancelScheduledReasonInput')?.value?.trim() || '';
+    const reason = (selectVal === 'Other' ? (inputVal || 'Driver cancelled trip') : (inputVal || selectVal || 'Change of plans'));
+
+    const btn = document.getElementById('btnConfirmCancelScheduledTrip');
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = `<span class="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span> Cancelling...`;
+    }
+
+    try {
+      await window.db.scheduledRides.cancelScheduledRide(rideId, reason);
       showToast('Scheduled trip cancelled successfully.', 'info');
-      renderScheduledTripsSection();
+      closeCancelScheduledTripModal();
+
+      // Refresh all views immediately
+      if (typeof renderScheduledTripsSection === 'function') renderScheduledTripsSection();
+      if (typeof loadBrowseScheduledRides === 'function') loadBrowseScheduledRides();
       if (typeof renderActivityList === 'function') renderActivityList();
     } catch (err) {
-      showToast(`Error: ${err.message}`, 'error');
+      console.error('Cancel scheduled trip error:', err);
+      showToast(`Error: ${err.message || 'Failed to cancel trip'}`, 'error');
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = `<i data-lucide="x-circle" class="w-4 h-4"></i> <span>Confirm Cancel</span>`;
+        if (window.lucide) lucide.createIcons();
+      }
     }
+  };
+
+  window.handleCancelScheduledRide = function (rideId) {
+    window.openCancelScheduledTripModal(rideId);
   };
 
   window.handleCancelScheduledBooking = async function (bookingId, rideId, seatsBooked) {

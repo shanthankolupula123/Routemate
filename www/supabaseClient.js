@@ -3218,20 +3218,99 @@
         ? window.location.origin
         : 'https://www.routemate.pro';
 
+      const cancelReason = String(reason || '').trim();
+
+      // 1. Trigger backend API
       try {
         await fetch(`${apiBase}/api/scheduled-rides`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'cancel', rideId, reason })
+          body: JSON.stringify({ action: 'cancel', rideId, reason: cancelReason })
         });
       } catch (e) {}
 
+      // 2. Direct Supabase update for scheduled_rides and bookings
+      try {
+        const client = getSupabase();
+        if (client) {
+          await client
+            .from('scheduled_rides')
+            .update({
+              status: 'cancelled',
+              notes: cancelReason ? `Cancelled by driver: ${cancelReason}` : 'Cancelled by driver'
+            })
+            .eq('id', rideId);
+
+          await client
+            .from('scheduled_ride_bookings')
+            .update({
+              status: 'cancelled',
+              notes: cancelReason ? `Trip cancelled by driver: ${cancelReason}` : 'Trip cancelled by driver'
+            })
+            .eq('scheduled_ride_id', rideId);
+        }
+      } catch (dbErr) {
+        console.warn('Supabase scheduled ride cancel warning:', dbErr);
+      }
+
+      // 3. Local storage update
+      let targetRide = null;
+      let affectedBookings = [];
       try {
         const localRides = JSON.parse(localStorage.getItem('routemate_scheduled_rides') || '[]');
-        const target = localRides.find(r => String(r.id) === String(rideId));
-        if (target) {
-          target.status = 'cancelled';
+        targetRide = localRides.find(r => String(r.id) === String(rideId));
+        if (targetRide) {
+          targetRide.status = 'cancelled';
+          if (cancelReason) targetRide.cancellation_reason = cancelReason;
           localStorage.setItem('routemate_scheduled_rides', JSON.stringify(localRides));
+        }
+
+        const localBookings = JSON.parse(localStorage.getItem('routemate_scheduled_bookings') || '[]');
+        localBookings.forEach(b => {
+          if (String(b.scheduled_ride_id) === String(rideId)) {
+            b.status = 'cancelled';
+            if (cancelReason) b.cancellation_reason = cancelReason;
+            affectedBookings.push(b);
+          }
+        });
+        localStorage.setItem('routemate_scheduled_bookings', JSON.stringify(localBookings));
+      } catch (e) {}
+
+      // 4. Send cancellation notifications to booked commuters
+      try {
+        const client = getSupabase();
+        const bookingsToNotify = affectedBookings.length > 0 ? affectedBookings : (targetRide?.bookings || []);
+        for (const b of bookingsToNotify) {
+          if (b.commuter_id) {
+            const notifPayload = {
+              user_id: String(b.commuter_id),
+              title: 'Scheduled Ride Cancelled',
+              message: `Driver cancelled your scheduled trip on ${targetRide?.departure_date || 'scheduled date'} at ${targetRide?.departure_time || 'time'}.${cancelReason ? ` Reason: ${cancelReason}` : ''}`,
+              type: 'ride_cancelled',
+              read: false,
+              created_at: new Date().toISOString()
+            };
+            if (client) {
+              await client.from('notifications').insert([notifPayload]).catch(() => {});
+            }
+            // Also save to local notifications
+            const localNotifs = JSON.parse(localStorage.getItem('routemate_notifications') || '[]');
+            localNotifs.unshift({ id: 'notif_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6), ...notifPayload });
+            localStorage.setItem('routemate_notifications', JSON.stringify(localNotifs.slice(0, 50)));
+          }
+        }
+      } catch (e) {}
+
+      // 5. Broadcast realtime cancellation event
+      try {
+        const client = getSupabase();
+        if (client) {
+          const ch = client.channel('routemate-scheduled-rides');
+          ch.send({
+            type: 'broadcast',
+            event: 'scheduled_ride_cancelled',
+            payload: { rideId, reason: cancelReason }
+          });
         }
       } catch (e) {}
 
