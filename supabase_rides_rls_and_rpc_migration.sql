@@ -322,4 +322,154 @@ FOR EACH ROW EXECUTE FUNCTION public.recalculate_user_rating();
 
 GRANT EXECUTE ON FUNCTION public.recalculate_user_rating TO anon, authenticated, service_role;
 
+-- ==============================================================================
+-- 8. SCHEDULED RIDES & ADVANCE ROUTE PRE-BOOKING (TABLES, RLS & ATOMIC RPC)
+-- ==============================================================================
+create table if not exists public.scheduled_rides (
+  id uuid primary key default uuid_generate_v4(),
+  driver_id text not null,
+  driver_name text not null,
+  driver_phone text,
+  driver_avatar text,
+  driver_rating numeric default 5.0,
+  driver_upi text,
+  vehicle_type text not null default 'bike',
+  vehicle_name text,
+  vehicle_number text,
+  pickup text not null,
+  drop_location text not null,
+  pickup_lat double precision,
+  pickup_lng double precision,
+  drop_lat double precision,
+  drop_lng double precision,
+  distance_km numeric default 0,
+  scheduled_datetime timestamp with time zone not null,
+  departure_date text not null,
+  departure_time text not null,
+  total_seats integer not null default 1,
+  available_seats integer not null default 1,
+  per_seat_fare numeric not null default 0,
+  status text not null default 'published', -- 'published', 'active', 'completed', 'cancelled'
+  notes text,
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
+create index if not exists idx_scheduled_rides_driver_id on public.scheduled_rides(driver_id);
+create index if not exists idx_scheduled_rides_status on public.scheduled_rides(status);
+create index if not exists idx_scheduled_rides_datetime on public.scheduled_rides(scheduled_datetime);
+
+alter table public.scheduled_rides enable row level security;
+drop policy if exists "Allow public select on scheduled_rides" on public.scheduled_rides;
+create policy "Allow public select on scheduled_rides" on public.scheduled_rides for select using (true);
+drop policy if exists "Allow public insert on scheduled_rides" on public.scheduled_rides;
+create policy "Allow public insert on scheduled_rides" on public.scheduled_rides for insert with check (true);
+drop policy if exists "Allow public update on scheduled_rides" on public.scheduled_rides;
+create policy "Allow public update on scheduled_rides" on public.scheduled_rides for update using (true);
+drop policy if exists "Allow public delete on scheduled_rides" on public.scheduled_rides;
+create policy "Allow public delete on scheduled_rides" on public.scheduled_rides for delete using (true);
+
+-- BOOKINGS FOR SCHEDULED RIDES
+create table if not exists public.scheduled_ride_bookings (
+  id uuid primary key default uuid_generate_v4(),
+  scheduled_ride_id uuid not null,
+  commuter_id text not null,
+  commuter_name text not null,
+  commuter_phone text,
+  commuter_avatar text,
+  seats_booked integer not null default 1,
+  total_fare numeric not null default 0,
+  pickup text,
+  drop_location text,
+  status text not null default 'confirmed', -- 'confirmed', 'cancelled', 'completed'
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
+create index if not exists idx_scheduled_bookings_ride_id on public.scheduled_ride_bookings(scheduled_ride_id);
+create index if not exists idx_scheduled_bookings_commuter_id on public.scheduled_ride_bookings(commuter_id);
+
+alter table public.scheduled_ride_bookings enable row level security;
+drop policy if exists "Allow public select on scheduled_ride_bookings" on public.scheduled_ride_bookings;
+create policy "Allow public select on scheduled_ride_bookings" on public.scheduled_ride_bookings for select using (true);
+drop policy if exists "Allow public insert on scheduled_ride_bookings" on public.scheduled_ride_bookings;
+create policy "Allow public insert on scheduled_ride_bookings" on public.scheduled_ride_bookings for insert with check (true);
+drop policy if exists "Allow public update on scheduled_ride_bookings" on public.scheduled_ride_bookings;
+create policy "Allow public update on scheduled_ride_bookings" on public.scheduled_ride_bookings for update using (true);
+drop policy if exists "Allow public delete on scheduled_ride_bookings" on public.scheduled_ride_bookings;
+create policy "Allow public delete on scheduled_ride_bookings" on public.scheduled_ride_bookings for delete using (true);
+
+-- ATOMIC RPC FUNCTION TO PRE-BOOK SEATS
+create or replace function public.book_scheduled_ride_seats(
+  p_ride_id uuid,
+  p_commuter_id text,
+  p_commuter_name text,
+  p_commuter_phone text,
+  p_commuter_avatar text,
+  p_seats_booked integer,
+  p_total_fare numeric
+)
+returns json
+language plpgsql
+security definer
+as $$
+declare
+  v_ride record;
+  v_booking_id uuid;
+begin
+  select * into v_ride
+  from public.scheduled_rides
+  where id = p_ride_id
+  for update;
+
+  if not found then
+    return json_build_object('success', false, 'error', 'Scheduled ride not found.');
+  end if;
+
+  if v_ride.status != 'published' then
+    return json_build_object('success', false, 'error', 'This scheduled ride is no longer open for booking.');
+  end if;
+
+  if v_ride.available_seats < p_seats_booked then
+    return json_build_object('success', false, 'error', 'Not enough available seats left on this trip.');
+  end if;
+
+  update public.scheduled_rides
+  set available_seats = available_seats - p_seats_booked
+  where id = p_ride_id;
+
+  insert into public.scheduled_ride_bookings (
+    scheduled_ride_id,
+    commuter_id,
+    commuter_name,
+    commuter_phone,
+    commuter_avatar,
+    seats_booked,
+    total_fare,
+    pickup,
+    drop_location,
+    status
+  ) values (
+    p_ride_id,
+    p_commuter_id,
+    p_commuter_name,
+    p_commuter_phone,
+    p_commuter_avatar,
+    p_seats_booked,
+    p_total_fare,
+    v_ride.pickup,
+    v_ride.drop_location,
+    'confirmed'
+  )
+  returning id into v_booking_id;
+
+  return json_build_object(
+    'success', true,
+    'booking_id', v_booking_id,
+    'remaining_seats', v_ride.available_seats - p_seats_booked
+  );
+end;
+$$;
+
+grant execute on function public.book_scheduled_ride_seats to anon, authenticated, service_role;
+
+
 

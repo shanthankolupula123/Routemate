@@ -463,6 +463,26 @@
           <p class="text-slate-300 text-[11px] mt-0.5">Pay the driver directly upon drop. 100% direct peer-to-peer fuel cost sharing.</p>
         </div>
       </div>
+
+      <!-- Advance Scheduled Rides Option Banner -->
+      <div class="routemate-card p-4 bg-gradient-to-r from-indigo-50 via-blue-50 to-indigo-50 border border-indigo-200/90 shadow-sm flex items-center justify-between gap-3">
+        <div class="flex items-center gap-3 min-w-0">
+          <div class="w-10 h-10 rounded-2xl bg-indigo-600 text-white flex items-center justify-center font-black flex-shrink-0 shadow-sm">
+            <i data-lucide="calendar" class="w-5 h-5"></i>
+          </div>
+          <div class="min-w-0">
+            <div class="flex items-center gap-1.5 flex-wrap">
+              <h4 class="text-xs font-black text-slate-900">Pre-Book Scheduled Rides</h4>
+              <span class="px-1.5 py-0.2 rounded text-[9px] font-black bg-indigo-100 text-indigo-700">Advance Trips</span>
+            </div>
+            <p class="text-[11px] text-slate-500 font-semibold truncate">Browse verified upcoming trips along NH163 & reserve your seat</p>
+          </div>
+        </div>
+        <button type="button" onclick="openBrowseScheduledRidesModal()" class="px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-black transition cursor-pointer shadow active:scale-95 flex items-center gap-1.5 flex-shrink-0">
+          <span>Browse</span>
+          <i data-lucide="arrow-right" class="w-3.5 h-3.5"></i>
+        </button>
+      </div>
     </div>
 
     <!-- ===================================================================== -->
@@ -660,6 +680,26 @@
         <!-- Driver Active Duty / In-Progress Trip Card -->
         <div id="driverActiveTripCard" class="hidden"></div>
 
+        <!-- DRIVER ADVANCE TRIP SCHEDULING CARD -->
+        <div class="routemate-card p-4 bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white border-0 shadow-lg flex items-center justify-between gap-3">
+          <div class="flex items-center gap-3 min-w-0">
+            <div class="w-10 h-10 rounded-2xl bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 flex items-center justify-center font-black flex-shrink-0">
+              <i data-lucide="calendar" class="w-5 h-5"></i>
+            </div>
+            <div class="min-w-0">
+              <div class="flex items-center gap-1.5 flex-wrap">
+                <h4 class="text-xs font-black text-white">Schedule Future Ride</h4>
+                <span class="px-1.5 py-0.2 rounded text-[9px] font-black bg-cyan-400/20 text-cyan-300 border border-cyan-400/30">Pool in Advance</span>
+              </div>
+              <p class="text-[11px] text-slate-300 truncate">Publish departure time & route. Pre-fill seats before you hit the road.</p>
+            </div>
+          </div>
+          <button type="button" onclick="openScheduleRideModal()" class="px-3.5 py-2 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white text-xs font-black transition cursor-pointer shadow active:scale-95 flex items-center gap-1.5 flex-shrink-0">
+            <i data-lucide="plus-circle" class="w-3.5 h-3.5"></i>
+            <span>Schedule Trip</span>
+          </button>
+        </div>
+
         <!-- Live Broadcast Section: Incoming Commuter Requests -->
         <div id="driverBroadcastSection" class="space-y-3">
           <div class="flex items-center justify-between px-1">
@@ -713,6 +753,23 @@
             </button>
           </div>
         </div>
+
+        <!-- Upcoming Scheduled Trips Section -->
+        <div id="scheduledTripsSection" class="space-y-3 mb-5 pb-4 border-b border-slate-100 hidden">
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-2">
+              <span class="w-2.5 h-2.5 rounded-full bg-indigo-600 live-dot"></span>
+              <h3 class="text-xs font-black text-slate-900 uppercase tracking-wider">Upcoming Scheduled Trips</h3>
+            </div>
+            <span id="scheduledTripsBadge" class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-800">
+              0 Scheduled
+            </span>
+          </div>
+          <div id="scheduledTripsList" class="space-y-2.5">
+            <!-- Dynamically populated from scheduled_rides & scheduled_ride_bookings -->
+          </div>
+        </div>
+
         <div id="activityList" class="space-y-3">
           <!-- Dynamically populated from Supabase rides table -->
         </div>
@@ -2670,6 +2727,248 @@
         </button>
         <button type="button" onclick="closeNotificationDetailModal()" class="px-4 py-2.5 rounded-xl border border-slate-200 hover:bg-slate-50 text-xs font-bold text-slate-600 transition cursor-pointer">
           Close
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========================================================================= -->
+  <!-- MODAL: SCHEDULE A FUTURE RIDE (DRIVER ADVANCE ROUTE PUBLISHING) -->
+  <!-- ========================================================================= -->
+  <div id="scheduleRideModal" class="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm hidden flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+    <div class="bg-white rounded-3xl max-w-md w-full p-5 sm:p-6 shadow-2xl space-y-4 border border-slate-100 my-auto animate-in fade-in zoom-in-95 duration-150">
+      <div class="flex items-center justify-between pb-3 border-b border-slate-100">
+        <div class="flex items-center gap-3">
+          <div class="w-10 h-10 rounded-2xl bg-indigo-50 text-indigo-600 border border-indigo-100 flex items-center justify-center font-black">
+            <i data-lucide="calendar" class="w-5 h-5"></i>
+          </div>
+          <div>
+            <h3 class="text-sm font-black text-slate-900">Schedule Future Ride</h3>
+            <p class="text-[11px] font-semibold text-slate-400">Publish departure time & pool seats in advance</p>
+          </div>
+        </div>
+        <button type="button" onclick="closeScheduleRideModal()" class="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-500 flex items-center justify-center transition cursor-pointer">
+          ✕
+        </button>
+      </div>
+
+      <form onsubmit="handlePublishScheduledRide(event)" class="space-y-3.5">
+        <!-- Verified Vehicle Mode (KYC Locked) -->
+        <div>
+          <label class="block text-[11px] font-black uppercase text-slate-400 tracking-wider mb-1.5">
+            Verified Vehicle Category *
+          </label>
+          <div id="scheduleVehicleSelectContainer" class="grid grid-cols-3 gap-2">
+            <!-- Dynamically populated from driver's verified KYC vehicles -->
+          </div>
+          <p id="scheduleVehicleLockHint" class="text-[10px] text-slate-400 mt-1 flex items-center gap-1">
+            <i data-lucide="shield-check" class="w-3 h-3 text-emerald-600"></i>
+            <span>Mode locked strictly to your approved KYC documents.</span>
+          </p>
+        </div>
+
+        <!-- Departure Date & Time Grid -->
+        <div class="grid grid-cols-2 gap-2.5">
+          <div>
+            <label class="block text-[11px] font-black uppercase text-slate-400 tracking-wider mb-1">
+              Departure Date *
+            </label>
+            <input type="date" id="inputScheduleDate" required class="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-900 focus:outline-none focus:border-indigo-600 focus:bg-white transition cursor-pointer" />
+          </div>
+          <div>
+            <label class="block text-[11px] font-black uppercase text-slate-400 tracking-wider mb-1">
+              Departure Time *
+            </label>
+            <input type="time" id="inputScheduleTime" value="08:30" required class="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-900 focus:outline-none focus:border-indigo-600 focus:bg-white transition cursor-pointer" />
+          </div>
+        </div>
+
+        <!-- Route: Pickup & Drop -->
+        <div class="space-y-2">
+          <div>
+            <label class="block text-[11px] font-black uppercase text-slate-400 tracking-wider mb-1">
+              Pickup Point *
+            </label>
+            <div class="relative flex items-center">
+              <span class="w-2.5 h-2.5 rounded-full bg-emerald-500 absolute left-3 z-10"></span>
+              <input type="text" id="inputSchedulePickup" value="Uppal Metro, Hyderabad" required oninput="onScheduleRouteInputsChanged()" class="w-full pl-8 pr-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-900 focus:outline-none focus:border-indigo-600 focus:bg-white transition" />
+            </div>
+          </div>
+          <div>
+            <label class="block text-[11px] font-black uppercase text-slate-400 tracking-wider mb-1">
+              Drop Destination *
+            </label>
+            <div class="relative flex items-center">
+              <span class="w-2.5 h-2.5 rounded-full bg-blue-600 absolute left-3 z-10"></span>
+              <input type="text" id="inputScheduleDrop" value="Jangaon Bus Depot" required oninput="onScheduleRouteInputsChanged()" class="w-full pl-8 pr-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-900 focus:outline-none focus:border-indigo-600 focus:bg-white transition" />
+            </div>
+          </div>
+        </div>
+
+        <!-- Quick Route Presets -->
+        <div class="flex items-center gap-1.5 overflow-x-auto pb-1 no-scrollbar">
+          <button type="button" onclick="setScheduleQuickRoute('Uppal Metro, Hyderabad', 'Jangaon Bus Depot', 84)" class="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-[10px] font-bold rounded-lg whitespace-nowrap transition cursor-pointer">
+            Uppal ➔ Jangaon (84 km)
+          </button>
+          <button type="button" onclick="setScheduleQuickRoute('Ghatkesar Toll Plaza', 'Bhongir Fort Road', 22)" class="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-[10px] font-bold rounded-lg whitespace-nowrap transition cursor-pointer">
+            Ghatkesar ➔ Bhongir (22 km)
+          </button>
+          <button type="button" onclick="setScheduleQuickRoute('Bhongir Fort Road', 'Aler Railway Gate', 18)" class="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-[10px] font-bold rounded-lg whitespace-nowrap transition cursor-pointer">
+            Bhongir ➔ Aler (18 km)
+          </button>
+        </div>
+
+        <!-- Available Seats Selector -->
+        <div>
+          <div class="flex items-center justify-between mb-1.5">
+            <label class="text-[11px] font-black uppercase text-slate-400 tracking-wider">
+              Available Seats for Pooling
+            </label>
+            <span id="scheduleSeatsBadge" class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200">
+              1 Seat Offered
+            </span>
+          </div>
+          <div id="scheduleSeatsOptionsGrid" class="grid grid-cols-4 gap-2">
+            <!-- Dynamically populated (1 for bike, 1..3 for auto, 1..4 for car) -->
+          </div>
+        </div>
+
+        <!-- Public Transport Aligned Fuel-Share Fare Card -->
+        <div class="p-3.5 rounded-2xl bg-gradient-to-r from-indigo-50/90 via-blue-50/80 to-indigo-50/90 border border-indigo-100 flex items-center justify-between text-xs">
+          <div>
+            <div class="flex items-center gap-1.5">
+              <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+              <span class="font-black text-slate-800">Public Transit-Aligned Fare</span>
+            </div>
+            <span id="scheduleFareBreakdown" class="text-[10px] text-slate-500 font-semibold block mt-0.5">
+              ~84 km • RTC Bus Aligned
+            </span>
+          </div>
+          <div class="text-right">
+            <span id="scheduleFareDisplay" class="text-base font-black text-indigo-700">₹116</span>
+            <span class="text-[9px] font-bold text-slate-400 block uppercase">Per Seat</span>
+          </div>
+        </div>
+
+        <!-- Trip Notes -->
+        <div>
+          <label class="block text-[11px] font-black uppercase text-slate-400 tracking-wider mb-1">
+            Trip Notes / Meeting Point (Optional)
+          </label>
+          <input type="text" id="inputScheduleNotes" placeholder="e.g. Leaving on time from Uppal Gate 2, AC on" class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 focus:outline-none focus:border-indigo-600 focus:bg-white transition" />
+        </div>
+
+        <!-- Action Buttons -->
+        <div class="pt-2 flex items-center gap-2">
+          <button type="button" onclick="closeScheduleRideModal()" class="w-1/3 py-3 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition cursor-pointer active:scale-95">
+            Cancel
+          </button>
+          <button type="submit" id="btnPublishSchedule" class="w-2/3 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-black transition cursor-pointer shadow-md flex items-center justify-center gap-1.5 active:scale-95">
+            <i data-lucide="send" class="w-4 h-4"></i>
+            <span>Publish Scheduled Trip</span>
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ========================================================================= -->
+  <!-- MODAL: BROWSE UPCOMING SCHEDULED RIDES (COMMUTER ADVANCE PRE-BOOKING) -->
+  <!-- ========================================================================= -->
+  <div id="browseScheduledRidesModal" class="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm hidden flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+    <div class="bg-white rounded-3xl max-w-lg w-full p-5 sm:p-6 shadow-2xl space-y-4 border border-slate-100 my-auto animate-in fade-in zoom-in-95 duration-150 max-h-[90vh] flex flex-col">
+      <div class="flex items-center justify-between pb-3 border-b border-slate-100 flex-shrink-0">
+        <div class="flex items-center gap-3">
+          <div class="w-10 h-10 rounded-2xl bg-indigo-50 text-indigo-600 border border-indigo-100 flex items-center justify-center font-black">
+            <i data-lucide="calendar" class="w-5 h-5"></i>
+          </div>
+          <div>
+            <h3 class="text-sm font-black text-slate-900">Upcoming Scheduled Trips</h3>
+            <p class="text-[11px] font-semibold text-slate-400">Pre-book your seat on advance corridor rides</p>
+          </div>
+        </div>
+        <div class="flex items-center gap-1.5">
+          <button type="button" onclick="loadBrowseScheduledRides(true)" title="Refresh Scheduled Rides" class="p-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 transition cursor-pointer active:scale-95">
+            <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i>
+          </button>
+          <button type="button" onclick="closeBrowseScheduledRidesModal()" class="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-500 flex items-center justify-center transition cursor-pointer">
+            ✕
+          </button>
+        </div>
+      </div>
+
+      <!-- Scrollable Rides List -->
+      <div id="browseScheduledRidesContainer" class="space-y-3 overflow-y-auto flex-1 pr-0.5">
+        <!-- Dynamically rendered via renderBrowseScheduledRides() -->
+      </div>
+    </div>
+  </div>
+
+  <!-- ========================================================================= -->
+  <!-- MODAL: PRE-BOOK SEAT CONFIRMATION DIALOG -->
+  <!-- ========================================================================= -->
+  <div id="bookScheduledSeatModal" class="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm hidden flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+    <div class="bg-white rounded-3xl max-w-sm w-full p-5 sm:p-6 shadow-2xl space-y-4 border border-slate-100 my-auto animate-in fade-in zoom-in-95 duration-150">
+      <div class="flex items-center justify-between pb-2 border-b border-slate-100">
+        <div class="flex items-center gap-2.5">
+          <div class="w-9 h-9 rounded-2xl bg-indigo-50 text-indigo-600 border border-indigo-100 flex items-center justify-center font-black">
+            <i data-lucide="ticket" class="w-4 h-4"></i>
+          </div>
+          <div>
+            <h4 class="text-xs font-black text-slate-900">Confirm Pre-Booking</h4>
+            <span class="text-[10px] text-slate-400 font-semibold">Reserve pooled passenger seats</span>
+          </div>
+        </div>
+        <button type="button" onclick="closeBookScheduledSeatModal()" class="w-7 h-7 rounded-full bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-500 font-bold transition cursor-pointer">
+          ✕
+        </button>
+      </div>
+
+      <!-- Selected Trip Details Card -->
+      <div id="bookScheduledTripSummary" class="p-3.5 bg-slate-50 rounded-2xl border border-slate-200/80 space-y-2 text-xs">
+        <!-- Dynamically populated -->
+      </div>
+
+      <!-- Seats Selector -->
+      <div>
+        <div class="flex items-center justify-between mb-1.5">
+          <label class="text-[11px] font-black uppercase text-slate-400 tracking-wider">
+            Select Seats to Book
+          </label>
+          <span id="bookScheduledSeatBadge" class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200">
+            1 Seat
+          </span>
+        </div>
+        <div id="bookScheduledSeatGrid" class="grid grid-cols-4 gap-2">
+          <!-- Dynamically populated -->
+        </div>
+      </div>
+
+      <!-- Total Fare Breakdown Card -->
+      <div class="p-3 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-2xl border border-blue-100 flex items-center justify-between text-xs">
+        <div>
+          <span class="font-bold text-slate-700 block">Total Fuel-Share Fare</span>
+          <span id="bookScheduledFareRate" class="text-[10px] text-slate-500">₹116 × 1 seat</span>
+        </div>
+        <div class="text-right">
+          <span id="bookScheduledTotalFare" class="text-base font-black text-blue-700">₹116</span>
+          <span class="text-[9px] font-bold text-slate-400 block uppercase">P2P Settlement</span>
+        </div>
+      </div>
+
+      <div class="p-2.5 rounded-xl bg-amber-50 border border-amber-200/80 text-[10px] font-semibold text-amber-800 flex items-center gap-2">
+        <i data-lucide="info" class="w-4 h-4 text-amber-600 flex-shrink-0"></i>
+        <span>Direct settlement: Pay the verified driver via UPI / Cash upon boarding or completion.</span>
+      </div>
+
+      <!-- Confirm Action Buttons -->
+      <div class="pt-1 flex items-center gap-2">
+        <button type="button" onclick="closeBookScheduledSeatModal()" class="w-1/3 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition cursor-pointer active:scale-95">
+          Cancel
+        </button>
+        <button type="button" id="btnConfirmScheduledBooking" onclick="confirmScheduledBookingAction()" class="w-2/3 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-black transition cursor-pointer shadow-md flex items-center justify-center gap-1.5 active:scale-95">
+          <i data-lucide="check-circle" class="w-4 h-4"></i>
+          <span>Confirm Booking</span>
         </button>
       </div>
     </div>

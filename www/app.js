@@ -37,6 +37,10 @@
     driverActiveVehicle: null,
     driverActiveVehicleType: 'bike',
     approvedVehicleTypes: ['bike'],
+    selectedScheduleVehicleType: 'bike',
+    selectedScheduleSeats: 1,
+    currentBookingScheduledRide: null,
+    currentBookingSeats: 1,
     driverOnline: true,
     incomingRides: [],
     declinedRideIds: new Set(),
@@ -4650,7 +4654,10 @@
     if (!list) return;
 
     const user = state.currentUser;
+    const scheduledSection = document.getElementById('scheduledTripsSection');
+
     if (!user) {
+      if (scheduledSection) scheduledSection.classList.add('hidden');
       list.innerHTML = `
         <div class="routemate-card p-8 text-center bg-white border border-slate-200/80">
           <div class="w-12 h-12 rounded-2xl bg-slate-100 text-slate-400 mx-auto flex items-center justify-center mb-2">
@@ -4665,6 +4672,11 @@
     }
 
     if (showToastMsg) showToast('Refreshing ride activity...', 'info');
+
+    // Trigger upcoming scheduled trips render
+    if (typeof renderScheduledTripsSection === 'function') {
+      renderScheduledTripsSection();
+    }
 
     // Show clean loading spinner state while fetching
     list.innerHTML = `
@@ -5053,6 +5065,993 @@
 
     showToast('Ride activity permanently deleted from database ✓', 'success');
     renderActivityList();
+  };
+
+  // =========================================================================
+  // SCHEDULED RIDES & ADVANCE ROUTE PRE-BOOKING CONTROLLER
+  // =========================================================================
+
+  // 1. OPEN SCHEDULE RIDE MODAL (DRIVER)
+  window.openScheduleRideModal = function () {
+    const user = state.currentUser;
+    if (!user) {
+      showToast('Please sign in to schedule trips.', 'warning');
+      if (typeof openSignInModal === 'function') openSignInModal();
+      return;
+    }
+
+    const modal = document.getElementById('scheduleRideModal');
+    if (!modal) return;
+
+    // Set default departure date (tomorrow if after 7 PM, else today)
+    const dateInput = document.getElementById('inputScheduleDate');
+    const now = new Date();
+    const todayStr = now.toISOString().split('T')[0];
+    if (dateInput) {
+      dateInput.min = todayStr;
+      if (!dateInput.value || dateInput.value < todayStr) {
+        if (now.getHours() >= 19) {
+          const tomorrow = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+          dateInput.value = tomorrow.toISOString().split('T')[0];
+        } else {
+          dateInput.value = todayStr;
+        }
+      }
+    }
+
+    // Set default departure time
+    const timeInput = document.getElementById('inputScheduleTime');
+    if (timeInput && !timeInput.value) {
+      timeInput.value = '08:30';
+    }
+
+    // Determine initial vehicle mode from approved KYC vehicles
+    const approved = (state.approvedVehicleTypes && state.approvedVehicleTypes.length > 0)
+      ? state.approvedVehicleTypes
+      : [state.driverActiveVehicleType || 'bike'];
+
+    let initialMode = state.driverActiveVehicleType || approved[0] || 'bike';
+    if (!approved.includes(initialMode)) initialMode = approved[0] || 'bike';
+    state.selectedScheduleVehicleType = initialMode;
+
+    renderScheduleVehicleSelector();
+    renderScheduleSeatsSelector(initialMode);
+    updateScheduleFareCalculation();
+
+    modal.classList.remove('hidden');
+    if (window.lucide) lucide.createIcons();
+  };
+
+  window.closeScheduleRideModal = function () {
+    const modal = document.getElementById('scheduleRideModal');
+    if (modal) modal.classList.add('hidden');
+  };
+
+  // Render Vehicle Category Options for Driver Scheduling
+  function renderScheduleVehicleSelector() {
+    const container = document.getElementById('scheduleVehicleSelectContainer');
+    if (!container) return;
+
+    const approved = (state.approvedVehicleTypes && state.approvedVehicleTypes.length > 0)
+      ? state.approvedVehicleTypes
+      : [state.driverActiveVehicleType || 'bike'];
+
+    const vehicles = [
+      { type: 'bike', label: 'Bike', icon: '🛵', cap: '1 Pillion' },
+      { type: 'car', label: 'Car', icon: '🚗', cap: 'Up to 4 Seats' },
+      { type: 'auto', label: 'Auto', icon: '🛺', cap: 'Up to 3 Seats' }
+    ];
+
+    container.innerHTML = vehicles.map(v => {
+      const isApproved = approved.includes(v.type);
+      const isSelected = state.selectedScheduleVehicleType === v.type;
+
+      if (!isApproved) {
+        return `
+          <div class="py-2.5 px-2 text-center rounded-2xl border border-slate-200/60 bg-slate-100/70 opacity-60 cursor-not-allowed select-none">
+            <span class="text-xl block mb-0.5">${v.icon}</span>
+            <span class="text-xs font-bold text-slate-400 block">${v.label}</span>
+            <span class="text-[9px] font-black text-slate-400 flex items-center justify-center gap-0.5 mt-0.5">
+              <i data-lucide="lock" class="w-2.5 h-2.5"></i> KYC Req
+            </span>
+          </div>
+        `;
+      }
+
+      const activeBorder = isSelected
+        ? 'border-indigo-600 bg-indigo-50/80 ring-2 ring-indigo-500/30'
+        : 'border-slate-200 bg-white hover:border-indigo-300';
+
+      return `
+        <div onclick="selectScheduleVehicleType('${v.type}')" class="py-2.5 px-2 text-center rounded-2xl border transition cursor-pointer ${activeBorder}">
+          <span class="text-xl block mb-0.5">${v.icon}</span>
+          <span class="text-xs font-black text-slate-900 block">${v.label}</span>
+          <span class="text-[9px] font-bold text-indigo-700 block mt-0.5">${v.cap}</span>
+        </div>
+      `;
+    }).join('');
+
+    const hint = document.getElementById('scheduleVehicleLockHint');
+    if (hint) {
+      if (approved.length === 1) {
+        hint.innerHTML = `<i data-lucide="shield-check" class="w-3 h-3 text-emerald-600 inline"></i> <span>Locked to your verified <strong>${approved[0].toUpperCase()}</strong> KYC. Add vehicle in Profile to unlock other modes.</span>`;
+      } else {
+        hint.innerHTML = `<i data-lucide="shield-check" class="w-3 h-3 text-emerald-600 inline"></i> <span>Showing your verified categories: <strong>${approved.map(a => a.toUpperCase()).join(', ')}</strong>.</span>`;
+      }
+    }
+
+    if (window.lucide) lucide.createIcons();
+  }
+  window.renderScheduleVehicleSelector = renderScheduleVehicleSelector;
+
+  window.selectScheduleVehicleType = function (type) {
+    const approved = (state.approvedVehicleTypes && state.approvedVehicleTypes.length > 0)
+      ? state.approvedVehicleTypes
+      : [state.driverActiveVehicleType || 'bike'];
+
+    if (!approved.includes(type)) {
+      showToast(`Cannot select ${type.toUpperCase()}: requires verified KYC documents on file.`, 'warning');
+      return;
+    }
+
+    state.selectedScheduleVehicleType = type;
+    renderScheduleVehicleSelector();
+    renderScheduleSeatsSelector(type);
+    updateScheduleFareCalculation();
+  };
+
+  // Render Available Seats Buttons for Driver Scheduling
+  function renderScheduleSeatsSelector(vehicleType) {
+    const grid = document.getElementById('scheduleSeatsOptionsGrid');
+    const badge = document.getElementById('scheduleSeatsBadge');
+    if (!grid) return;
+
+    const vType = String(vehicleType || 'bike').toLowerCase();
+    let maxSeats = 1;
+    if (vType === 'auto') maxSeats = 3;
+    else if (vType === 'car') maxSeats = 4;
+
+    // Reset default selected seats
+    state.selectedScheduleSeats = Math.min(state.selectedScheduleSeats || 1, maxSeats);
+
+    if (vType === 'bike') {
+      state.selectedScheduleSeats = 1;
+      grid.innerHTML = `
+        <div class="col-span-4 py-2 px-3 text-center rounded-xl bg-indigo-50 border border-indigo-200 text-xs font-bold text-indigo-900 flex items-center justify-center gap-1.5">
+          <i data-lucide="user-check" class="w-4 h-4 text-indigo-600"></i>
+          <span>Strictly 1 Pillion Passenger Seat (Bike Safety Regulation)</span>
+        </div>
+      `;
+      if (badge) badge.textContent = '1 Seat (Full Pillion)';
+    } else {
+      let buttonsHtml = '';
+      for (let i = 1; i <= maxSeats; i++) {
+        const isSelected = state.selectedScheduleSeats === i;
+        const btnClass = isSelected
+          ? 'bg-indigo-600 text-white border-indigo-600 font-black shadow-xs'
+          : 'bg-slate-50 text-slate-700 border-slate-200 hover:border-indigo-400 font-bold';
+
+        buttonsHtml += `
+          <button type="button" onclick="selectScheduleSeats(${i})" class="py-2 text-center rounded-xl border text-xs transition cursor-pointer ${btnClass}">
+            ${i} ${i === 1 ? 'Seat' : 'Seats'}
+          </button>
+        `;
+      }
+      grid.innerHTML = buttonsHtml;
+      if (badge) badge.textContent = `${state.selectedScheduleSeats} ${state.selectedScheduleSeats === 1 ? 'Seat' : 'Seats'} Offered`;
+    }
+
+    if (window.lucide) lucide.createIcons();
+  }
+  window.renderScheduleSeatsSelector = renderScheduleSeatsSelector;
+
+  window.selectScheduleSeats = function (seats) {
+    state.selectedScheduleSeats = seats;
+    const badge = document.getElementById('scheduleSeatsBadge');
+    if (badge) badge.textContent = `${seats} ${seats === 1 ? 'Seat' : 'Seats'} Offered`;
+
+    const grid = document.getElementById('scheduleSeatsOptionsGrid');
+    if (grid) {
+      const buttons = grid.querySelectorAll('button');
+      buttons.forEach((btn, idx) => {
+        const seatNum = idx + 1;
+        if (seatNum === seats) {
+          btn.className = 'py-2 text-center rounded-xl border text-xs transition cursor-pointer bg-indigo-600 text-white border-indigo-600 font-black shadow-xs';
+        } else {
+          btn.className = 'py-2 text-center rounded-xl border text-xs transition cursor-pointer bg-slate-50 text-slate-700 border-slate-200 hover:border-indigo-400 font-bold';
+        }
+      });
+    }
+  };
+
+  window.setScheduleQuickRoute = function (pickup, drop, distKm) {
+    const pInput = document.getElementById('inputSchedulePickup');
+    const dInput = document.getElementById('inputScheduleDrop');
+    if (pInput) pInput.value = pickup;
+    if (dInput) dInput.value = drop;
+    updateScheduleFareCalculation(distKm);
+  };
+
+  window.onScheduleRouteInputsChanged = function () {
+    updateScheduleFareCalculation();
+  };
+
+  function updateScheduleFareCalculation(overrideDist = null) {
+    const pInput = document.getElementById('inputSchedulePickup');
+    const dInput = document.getElementById('inputScheduleDrop');
+    const fareDisplay = document.getElementById('scheduleFareDisplay');
+    const fareBreakdown = document.getElementById('scheduleFareBreakdown');
+
+    let dist = overrideDist;
+    if (!dist) {
+      const pText = (pInput ? pInput.value : '').toLowerCase();
+      const dText = (dInput ? dInput.value : '').toLowerCase();
+      if (pText.includes('uppal') && dText.includes('jangaon')) dist = 84;
+      else if (pText.includes('ghatkesar') && dText.includes('bhongir')) dist = 22;
+      else if (pText.includes('bhongir') && dText.includes('aler')) dist = 18;
+      else if (pText.includes('aler') && dText.includes('jangaon')) dist = 24;
+      else dist = state.distanceKm || 84;
+    }
+
+    const vType = state.selectedScheduleVehicleType || 'bike';
+    const fareCalc = (typeof window.calculateTieredFuelShareFare === 'function')
+      ? window.calculateTieredFuelShareFare(dist, vType, 1)
+      : { baseFarePerSeat: 116, transitComparison: 'RTC Bus Aligned' };
+
+    if (fareDisplay) fareDisplay.textContent = `₹${fareCalc.baseFarePerSeat}`;
+    if (fareBreakdown) fareBreakdown.textContent = `~${dist} km • ${fareCalc.transitComparison}`;
+  }
+  window.updateScheduleFareCalculation = updateScheduleFareCalculation;
+
+  // Handle Driver Form Submission: Publish Scheduled Trip
+  window.handlePublishScheduledRide = async function (event) {
+    if (event && event.preventDefault) event.preventDefault();
+
+    const user = state.currentUser;
+    if (!user) {
+      showToast('Please sign in to schedule rides.', 'warning');
+      return;
+    }
+
+    const date = document.getElementById('inputScheduleDate')?.value;
+    const time = document.getElementById('inputScheduleTime')?.value;
+    const pickup = document.getElementById('inputSchedulePickup')?.value?.trim();
+    const drop = document.getElementById('inputScheduleDrop')?.value?.trim();
+    const notes = document.getElementById('inputScheduleNotes')?.value?.trim();
+    const vType = state.selectedScheduleVehicleType || 'bike';
+    const seats = state.selectedScheduleSeats || 1;
+
+    if (!date || !time) {
+      showToast('Please specify departure date and time.', 'warning');
+      return;
+    }
+    if (!pickup || !drop) {
+      showToast('Please provide pickup and drop locations.', 'warning');
+      return;
+    }
+
+    const btn = document.getElementById('btnPublishSchedule');
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = `<span class="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span> Publishing...`;
+    }
+
+    // Resolve distance & per-seat fare
+    let dist = 84;
+    const pText = pickup.toLowerCase();
+    const dText = drop.toLowerCase();
+    if (pText.includes('uppal') && dText.includes('jangaon')) dist = 84;
+    else if (pText.includes('ghatkesar') && dText.includes('bhongir')) dist = 22;
+    else if (pText.includes('bhongir') && dText.includes('aler')) dist = 18;
+    else dist = state.distanceKm || 84;
+
+    const fareCalc = (typeof window.calculateTieredFuelShareFare === 'function')
+      ? window.calculateTieredFuelShareFare(dist, vType, 1)
+      : { baseFarePerSeat: 116 };
+
+    // Resolve driver vehicle info
+    let vehName = state.driverActiveVehicle?.vehicle_name || state.kyc?.submission?.vehicle_name || 'Verified Commuter Vehicle';
+    let vehNumber = state.driverActiveVehicle?.vehicle_number || state.kyc?.submission?.vehicle_number || 'TG 08 AB 1234';
+    let driverUpi = (typeof getResolvedUserUpiId === 'function') ? getResolvedUserUpiId() : (state.driverUpi?.upiId || '');
+
+    const payload = {
+      driverId: user.id || user.phone,
+      driverName: user.name || 'Verified Driver',
+      driverPhone: user.phone || '',
+      driverAvatar: user.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=256&q=80',
+      driverRating: parseFloat(user.rating || 5.0),
+      driverUpi: driverUpi,
+      vehicleType: vType,
+      vehicleName: vehName,
+      vehicleNumber: vehNumber,
+      pickup: pickup,
+      drop: drop,
+      pickupLat: state.pickupCoords?.lat || 17.4018,
+      pickupLng: state.pickupCoords?.lng || 78.5602,
+      dropLat: state.dropCoords?.lat || 17.7265,
+      dropLng: state.dropCoords?.lng || 79.1554,
+      distanceKm: dist,
+      departureDate: date,
+      departureTime: time,
+      scheduledDatetime: new Date(`${date}T${time}:00`).toISOString(),
+      totalSeats: seats,
+      perSeatFare: fareCalc.baseFarePerSeat,
+      notes: notes || ''
+    };
+
+    try {
+      const resp = await window.db.scheduledRides.publishRide(payload);
+      if (resp && resp.success) {
+        showToast(`🎉 Scheduled trip published for ${date} at ${time}!`, 'success');
+        closeScheduleRideModal();
+
+        // Refresh activity and notify
+        if (typeof renderActivityList === 'function') {
+          renderActivityList();
+        }
+        if (typeof renderScheduledTripsSection === 'function') {
+          renderScheduledTripsSection();
+        }
+      } else {
+        throw new Error(resp?.error || 'Could not publish scheduled ride');
+      }
+    } catch (err) {
+      console.error('Publish scheduled ride error:', err);
+      showToast(`Error: ${err.message || 'Failed to publish trip.'}`, 'error');
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = `<i data-lucide="send" class="w-4 h-4"></i> <span>Publish Scheduled Trip</span>`;
+        if (window.lucide) lucide.createIcons();
+      }
+    }
+  };
+
+  // 2. COMMUTER BROWSE SCHEDULED RIDES MODAL
+  window.openBrowseScheduledRidesModal = function () {
+    const modal = document.getElementById('browseScheduledRidesModal');
+    if (!modal) return;
+    modal.classList.remove('hidden');
+    loadBrowseScheduledRides();
+    if (window.lucide) lucide.createIcons();
+  };
+
+  window.closeBrowseScheduledRidesModal = function () {
+    const modal = document.getElementById('browseScheduledRidesModal');
+    if (modal) modal.classList.add('hidden');
+  };
+
+  window.loadBrowseScheduledRides = async function (showToastMsg = false) {
+    const container = document.getElementById('browseScheduledRidesContainer');
+    if (!container) return;
+
+    container.innerHTML = `
+      <div class="p-8 text-center text-slate-400 space-y-2">
+        <div class="w-6 h-6 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin mx-auto"></div>
+        <p class="text-xs font-semibold">Scanning upcoming scheduled trips...</p>
+      </div>
+    `;
+
+    try {
+      const rides = await window.db.scheduledRides.getScheduledRides({ all: false });
+
+      if (!rides || rides.length === 0) {
+        container.innerHTML = `
+          <div class="p-8 text-center bg-slate-50 rounded-2xl border border-slate-200/80 space-y-2">
+            <div class="w-12 h-12 rounded-2xl bg-indigo-50 text-indigo-600 mx-auto flex items-center justify-center font-black">
+              <i data-lucide="calendar" class="w-6 h-6"></i>
+            </div>
+            <h4 class="text-xs font-bold text-slate-700">No scheduled trips found right now</h4>
+            <p class="text-[11px] text-slate-400 max-w-xs mx-auto">
+              Drivers haven't published trips for this date yet. Check back soon or request an instant ride!
+            </p>
+            <div class="pt-2">
+              <button type="button" onclick="closeBrowseScheduledRidesModal(); navigateToTab('book');" class="px-4 py-2 rounded-xl bg-indigo-600 text-white text-xs font-bold transition cursor-pointer">
+                Find Instant Ride
+              </button>
+            </div>
+          </div>
+        `;
+        if (window.lucide) lucide.createIcons();
+        if (showToastMsg) showToast('No upcoming scheduled trips found.', 'info');
+        return;
+      }
+
+      const user = state.currentUser;
+      const userId = user ? String(user.id || user.phone) : '';
+
+      container.innerHTML = rides.map(ride => {
+        const isOwnTrip = userId && String(ride.driver_id) === userId;
+        const vType = String(ride.vehicle_type || 'bike').toLowerCase();
+        const vEmoji = vType === 'car' ? '🚗' : (vType === 'auto' ? '🛺' : '🛵');
+        const vLabel = vType === 'car' ? 'Car' : (vType === 'auto' ? 'Auto' : 'Bike');
+        const availSeats = Number(ride.available_seats !== undefined ? ride.available_seats : ride.total_seats || 1);
+        const totalSeats = Number(ride.total_seats || 1);
+
+        // Date & time formatting
+        let formattedDate = ride.departure_date || '';
+        try {
+          const dObj = new Date(ride.scheduled_datetime || `${ride.departure_date}T${ride.departure_time}:00`);
+          formattedDate = dObj.toLocaleDateString('en-IN', { weekday: 'short', month: 'short', day: 'numeric' });
+        } catch (e) {}
+
+        return `
+          <div class="routemate-card p-4 border border-slate-200/90 hover:border-indigo-300 transition shadow-xs space-y-3 bg-white">
+            <div class="flex items-start justify-between gap-3">
+              <div class="flex items-center gap-2.5">
+                <img src="${ride.driver_avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=256&q=80'}" alt="${ride.driver_name}" class="w-10 h-10 rounded-full object-cover border-2 border-indigo-500 shadow-xs flex-shrink-0" />
+                <div>
+                  <div class="flex items-center gap-1.5">
+                    <h4 class="text-xs font-black text-slate-900">${ride.driver_name}</h4>
+                    <span class="px-1.5 py-0.2 rounded text-[9px] font-bold bg-emerald-100 text-emerald-800">Verified</span>
+                  </div>
+                  <div class="flex items-center gap-1.5 text-[10px] text-slate-500 font-semibold mt-0.5">
+                    <span class="text-amber-500">★ ${ride.driver_rating || '5.0'}</span>
+                    <span>•</span>
+                    <span>${vEmoji} ${ride.vehicle_name || vLabel}</span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="text-right flex-shrink-0">
+                <span class="text-sm font-black text-indigo-700 block">₹${ride.per_seat_fare || 116}</span>
+                <span class="text-[9px] font-bold text-slate-400 uppercase">Per Seat</span>
+              </div>
+            </div>
+
+            <!-- Departure Time & Route -->
+            <div class="p-2.5 bg-slate-50 rounded-xl space-y-1.5 text-xs">
+              <div class="flex items-center justify-between text-[11px] font-black text-indigo-900 pb-1 border-b border-slate-200/60">
+                <span class="flex items-center gap-1">
+                  <i data-lucide="clock" class="w-3.5 h-3.5 text-indigo-600"></i>
+                  <span>${formattedDate} at ${ride.departure_time}</span>
+                </span>
+                <span class="px-2 py-0.5 rounded-full ${availSeats > 0 ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'} text-[10px] font-bold">
+                  ${availSeats > 0 ? `${availSeats} of ${totalSeats} Seats Left` : 'Sold Out'}
+                </span>
+              </div>
+              <div class="flex items-start gap-2 pt-0.5">
+                <span class="w-2 h-2 rounded-full bg-emerald-500 mt-1 flex-shrink-0"></span>
+                <p class="text-slate-800 font-bold truncate"><strong>From:</strong> ${ride.pickup}</p>
+              </div>
+              <div class="flex items-start gap-2">
+                <span class="w-2 h-2 rounded-full bg-blue-600 mt-1 flex-shrink-0"></span>
+                <p class="text-slate-800 font-bold truncate"><strong>To:</strong> ${ride.drop_location || ride.drop}</p>
+              </div>
+            </div>
+
+            ${ride.notes ? `
+              <p class="text-[10px] text-slate-500 italic px-1 flex items-center gap-1">
+                <i data-lucide="message-square" class="w-3 h-3 text-slate-400"></i>
+                <span>"${ride.notes}"</span>
+              </p>
+            ` : ''}
+
+            <!-- Pre-Book Action Button -->
+            <div class="pt-1">
+              ${isOwnTrip ? `
+                <div class="w-full py-2 rounded-xl bg-slate-100 text-slate-500 text-xs font-bold text-center">
+                  Your Published Trip
+                </div>
+              ` : (availSeats <= 0 ? `
+                <div class="w-full py-2 rounded-xl bg-slate-100 text-slate-400 text-xs font-bold text-center">
+                  All Seats Booked
+                </div>
+              ` : `
+                <button type="button" onclick="openBookScheduledSeatModal('${ride.id}')" class="w-full py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-black transition cursor-pointer shadow-sm active:scale-95 flex items-center justify-center gap-1.5">
+                  <i data-lucide="ticket" class="w-4 h-4"></i>
+                  <span>Pre-Book Seat (₹${ride.per_seat_fare || 116}/seat)</span>
+                </button>
+              `)}
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      if (window.lucide) lucide.createIcons();
+      if (showToastMsg) showToast(`Loaded ${rides.length} upcoming scheduled trips.`, 'success');
+    } catch (err) {
+      console.error('Load scheduled rides error:', err);
+      container.innerHTML = `
+        <div class="p-6 text-center bg-rose-50 border border-rose-200 rounded-2xl text-rose-700 text-xs space-y-2">
+          <p class="font-bold">Failed to load scheduled rides.</p>
+          <button type="button" onclick="loadBrowseScheduledRides(true)" class="px-4 py-2 bg-white border border-rose-200 rounded-xl text-xs font-bold hover:bg-rose-100 transition cursor-pointer">
+            Retry
+          </button>
+        </div>
+      `;
+    }
+  };
+
+  // 3. PRE-BOOK CONFIRMATION MODAL
+  window.openBookScheduledSeatModal = async function (rideId) {
+    const user = state.currentUser;
+    if (!user) {
+      showToast('Please sign in to pre-book a seat.', 'warning');
+      if (typeof openSignInModal === 'function') openSignInModal();
+      return;
+    }
+
+    const modal = document.getElementById('bookScheduledSeatModal');
+    if (!modal) return;
+
+    // Fetch ride
+    let ride = null;
+    const allRides = await window.db.scheduledRides.getScheduledRides({ all: true });
+    ride = allRides.find(r => String(r.id) === String(rideId));
+
+    if (!ride) {
+      showToast('Ride details not found.', 'error');
+      return;
+    }
+
+    state.currentBookingScheduledRide = ride;
+    state.currentBookingSeats = 1;
+
+    // Render trip summary
+    const summary = document.getElementById('bookScheduledTripSummary');
+    if (summary) {
+      const vType = String(ride.vehicle_type || 'bike').toLowerCase();
+      const vEmoji = vType === 'car' ? '🚗' : (vType === 'auto' ? '🛺' : '🛵');
+
+      summary.innerHTML = `
+        <div class="flex items-center justify-between pb-2 border-b border-slate-200/80">
+          <div class="flex items-center gap-2">
+            <img src="${ride.driver_avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=256&q=80'}" class="w-8 h-8 rounded-full object-cover border border-indigo-400" />
+            <div>
+              <span class="text-xs font-black text-slate-900 block leading-tight">${ride.driver_name}</span>
+              <span class="text-[10px] text-slate-400">${vEmoji} ${ride.vehicle_name || vType.toUpperCase()}</span>
+            </div>
+          </div>
+          <span class="px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-800 text-[10px] font-black">
+            ${ride.departure_date} • ${ride.departure_time}
+          </span>
+        </div>
+        <div class="space-y-1 text-[11px] pt-1">
+          <p class="text-slate-700 truncate"><strong>Pickup:</strong> ${ride.pickup}</p>
+          <p class="text-slate-700 truncate"><strong>Drop:</strong> ${ride.drop_location || ride.drop}</p>
+        </div>
+      `;
+    }
+
+    // Render seat selection buttons
+    const grid = document.getElementById('bookScheduledSeatGrid');
+    const badge = document.getElementById('bookScheduledSeatBadge');
+    const rateDisplay = document.getElementById('bookScheduledFareRate');
+    const totalDisplay = document.getElementById('bookScheduledTotalFare');
+
+    const vType = String(ride.vehicle_type || 'bike').toLowerCase();
+    const maxAvailable = Number(ride.available_seats !== undefined ? ride.available_seats : ride.total_seats || 1);
+    const maxAllowed = vType === 'bike' ? 1 : (vType === 'auto' ? Math.min(3, maxAvailable) : Math.min(4, maxAvailable));
+
+    if (vType === 'bike') {
+      state.currentBookingSeats = 1;
+      if (grid) {
+        grid.innerHTML = `
+          <div class="col-span-4 py-2 px-3 text-center rounded-xl bg-blue-50 border border-blue-200 text-xs font-bold text-blue-900">
+            1 Pillion Seat Available
+          </div>
+        `;
+      }
+    } else {
+      let btnsHtml = '';
+      for (let i = 1; i <= maxAllowed; i++) {
+        const isSel = i === 1;
+        const cls = isSel
+          ? 'bg-indigo-600 text-white border-indigo-600 font-black shadow-xs'
+          : 'bg-slate-50 text-slate-700 border-slate-200 hover:border-indigo-400 font-bold';
+        btnsHtml += `
+          <button type="button" onclick="selectBookingSeats(${i})" class="py-2 text-center rounded-xl border text-xs transition cursor-pointer ${cls}">
+            ${i} ${i === 1 ? 'Seat' : 'Seats'}
+          </button>
+        `;
+      }
+      if (grid) grid.innerHTML = btnsHtml;
+    }
+
+    const perFare = Number(ride.per_seat_fare || 116);
+    if (badge) badge.textContent = `1 Seat Selected`;
+    if (rateDisplay) rateDisplay.textContent = `₹${perFare} × 1 seat`;
+    if (totalDisplay) totalDisplay.textContent = `₹${perFare}`;
+
+    modal.classList.remove('hidden');
+    if (window.lucide) lucide.createIcons();
+  };
+
+  window.closeBookScheduledSeatModal = function () {
+    const modal = document.getElementById('bookScheduledSeatModal');
+    if (modal) modal.classList.add('hidden');
+  };
+
+  window.selectBookingSeats = function (count) {
+    state.currentBookingSeats = count;
+    const ride = state.currentBookingScheduledRide;
+    const perFare = Number(ride?.per_seat_fare || 116);
+    const total = perFare * count;
+
+    const badge = document.getElementById('bookScheduledSeatBadge');
+    const rateDisplay = document.getElementById('bookScheduledFareRate');
+    const totalDisplay = document.getElementById('bookScheduledTotalFare');
+
+    if (badge) badge.textContent = `${count} ${count === 1 ? 'Seat' : 'Seats'} Selected`;
+    if (rateDisplay) rateDisplay.textContent = `₹${perFare} × ${count} ${count === 1 ? 'seat' : 'seats'}`;
+    if (totalDisplay) totalDisplay.textContent = `₹${total}`;
+
+    const grid = document.getElementById('bookScheduledSeatGrid');
+    if (grid) {
+      const buttons = grid.querySelectorAll('button');
+      buttons.forEach((btn, idx) => {
+        const num = idx + 1;
+        if (num === count) {
+          btn.className = 'py-2 text-center rounded-xl border text-xs transition cursor-pointer bg-indigo-600 text-white border-indigo-600 font-black shadow-xs';
+        } else {
+          btn.className = 'py-2 text-center rounded-xl border text-xs transition cursor-pointer bg-slate-50 text-slate-700 border-slate-200 hover:border-indigo-400 font-bold';
+        }
+      });
+    }
+  };
+
+  window.confirmScheduledBookingAction = async function () {
+    const user = state.currentUser;
+    if (!user) {
+      showToast('Please sign in to confirm booking.', 'warning');
+      return;
+    }
+
+    const ride = state.currentBookingScheduledRide;
+    if (!ride) {
+      showToast('Trip not selected.', 'error');
+      return;
+    }
+
+    const seats = state.currentBookingSeats || 1;
+    const perFare = Number(ride.per_seat_fare || 116);
+    const totalFare = perFare * seats;
+
+    const btn = document.getElementById('btnConfirmScheduledBooking');
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = `<span class="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span> Reserving...`;
+    }
+
+    try {
+      const resp = await window.db.scheduledRides.bookScheduledRide({
+        rideId: ride.id,
+        commuter: user,
+        seatsBooked: seats,
+        totalFare: totalFare
+      });
+
+      if (resp && resp.success) {
+        showToast(`🎉 Success! Reserved ${seats} seat(s) for ${ride.departure_date} at ${ride.departure_time}!`, 'success');
+        closeBookScheduledSeatModal();
+        closeBrowseScheduledRidesModal();
+
+        // Refresh activity and notify
+        if (typeof renderActivityList === 'function') {
+          renderActivityList();
+        }
+        if (typeof renderScheduledTripsSection === 'function') {
+          renderScheduledTripsSection();
+        }
+      } else {
+        throw new Error(resp?.error || 'Could not complete booking.');
+      }
+    } catch (err) {
+      console.error('Confirm scheduled booking error:', err);
+      showToast(`Booking failed: ${err.message || 'Please try again.'}`, 'error');
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = `<i data-lucide="check-circle" class="w-4 h-4"></i> <span>Confirm Booking</span>`;
+        if (window.lucide) lucide.createIcons();
+      }
+    }
+  };
+
+  // 4. ACTIVITY VIEW INTEGRATION: UPCOMING SCHEDULED TRIPS SECTION
+  async function renderScheduledTripsSection() {
+    const section = document.getElementById('scheduledTripsSection');
+    const list = document.getElementById('scheduledTripsList');
+    const badge = document.getElementById('scheduledTripsBadge');
+    if (!section || !list) return;
+
+    const user = state.currentUser;
+    if (!user) {
+      section.classList.add('hidden');
+      return;
+    }
+
+    const userId = String(user.id || user.phone || '');
+
+    try {
+      const allRides = await window.db.scheduledRides.getScheduledRides({ all: true });
+
+      // Find user's published trips (as Driver) and booked trips (as Commuter)
+      const driverTrips = allRides.filter(r => String(r.driver_id) === userId && r.status !== 'cancelled' && r.status !== 'completed');
+      const commuterBookedTrips = allRides.filter(r => {
+        if (String(r.driver_id) === userId) return false;
+        if (r.status === 'cancelled') return false;
+        if (Array.isArray(r.bookings)) {
+          return r.bookings.some(b => String(b.commuter_id) === userId && b.status !== 'cancelled');
+        }
+        return false;
+      });
+
+      const totalCount = driverTrips.length + commuterBookedTrips.length;
+      if (totalCount === 0) {
+        section.classList.add('hidden');
+        return;
+      }
+
+      section.classList.remove('hidden');
+      if (badge) badge.textContent = `${totalCount} Upcoming ${totalCount === 1 ? 'Trip' : 'Trips'}`;
+
+      let cardsHtml = '';
+
+      // 1. Render Driver's Published Trips
+      driverTrips.forEach(ride => {
+        const vType = String(ride.vehicle_type || 'bike').toLowerCase();
+        const vEmoji = vType === 'car' ? '🚗' : (vType === 'auto' ? '🛺' : '🛵');
+        const bookings = Array.isArray(ride.bookings) ? ride.bookings.filter(b => b.status !== 'cancelled') : [];
+        const bookedSeats = bookings.reduce((sum, b) => sum + Number(b.seats_booked || 1), 0);
+        const totalSeats = Number(ride.total_seats || 1);
+
+        let passengersHtml = '';
+        if (bookings.length > 0) {
+          passengersHtml = `
+            <div class="mt-2.5 pt-2 border-t border-slate-100 space-y-1.5">
+              <span class="text-[10px] font-black uppercase text-slate-400 tracking-wider block">Booked Commuters (${bookedSeats}/${totalSeats} Seats):</span>
+              <div class="space-y-1">
+                ${bookings.map(b => `
+                  <div class="flex items-center justify-between text-[11px] p-1.5 bg-slate-50 rounded-xl">
+                    <div class="flex items-center gap-1.5 min-w-0">
+                      <img src="${b.commuter_avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=256&q=80'}" class="w-5 h-5 rounded-full object-cover flex-shrink-0" />
+                      <span class="font-bold text-slate-900 truncate">${b.commuter_name}</span>
+                      <span class="text-[10px] text-slate-400">(${b.commuter_phone || 'Verified'})</span>
+                    </div>
+                    <span class="font-black text-indigo-700 flex-shrink-0">${b.seats_booked} ${b.seats_booked === 1 ? 'Seat' : 'Seats'} (₹${b.total_fare || 0})</span>
+                  </div>
+                `).join('')}
+              </div>
+            </div>
+          `;
+        } else {
+          passengersHtml = `
+            <div class="mt-2 pt-2 border-t border-slate-100 text-[10px] text-slate-400 font-semibold flex items-center gap-1">
+              <i data-lucide="users" class="w-3 h-3 text-slate-400"></i>
+              <span>No passengers pre-booked yet (${totalSeats} seats open on radar).</span>
+            </div>
+          `;
+        }
+
+        cardsHtml += `
+          <div class="p-4 rounded-2xl border-2 border-indigo-500/30 bg-gradient-to-br from-indigo-50/40 via-white to-indigo-50/20 shadow-sm space-y-2.5">
+            <div class="flex items-start justify-between gap-2">
+              <div class="flex items-center gap-2">
+                <span class="px-2 py-0.5 rounded-full bg-indigo-600 text-white text-[10px] font-black">
+                  Driver: Published Trip
+                </span>
+                <span class="text-[11px] font-bold text-slate-500">
+                  ${vEmoji} ${vType.toUpperCase()}
+                </span>
+              </div>
+              <span class="text-xs font-black text-indigo-900">
+                ${ride.departure_date} • ${ride.departure_time}
+              </span>
+            </div>
+
+            <div class="space-y-1 text-xs">
+              <div class="flex items-start gap-2">
+                <span class="w-2 h-2 rounded-full bg-emerald-500 mt-1 flex-shrink-0"></span>
+                <p class="text-slate-800 font-bold truncate"><strong>From:</strong> ${ride.pickup}</p>
+              </div>
+              <div class="flex items-start gap-2">
+                <span class="w-2 h-2 rounded-full bg-blue-600 mt-1 flex-shrink-0"></span>
+                <p class="text-slate-800 font-bold truncate"><strong>To:</strong> ${ride.drop_location || ride.drop}</p>
+              </div>
+            </div>
+
+            ${passengersHtml}
+
+            <!-- Action buttons for Driver -->
+            <div class="pt-2 flex items-center gap-2">
+              <button type="button" onclick="handleCancelScheduledRide('${ride.id}')" class="w-1/3 py-2 rounded-xl bg-slate-100 hover:bg-rose-50 hover:text-rose-600 text-slate-600 text-[11px] font-bold transition cursor-pointer">
+                Cancel Trip
+              </button>
+              <button type="button" onclick="handleStartScheduledRide('${ride.id}')" class="w-2/3 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-[11px] font-black transition cursor-pointer shadow active:scale-95 flex items-center justify-center gap-1.5">
+                <i data-lucide="play" class="w-3.5 h-3.5 text-cyan-300"></i>
+                <span>Start Scheduled Ride</span>
+              </button>
+            </div>
+          </div>
+        `;
+      });
+
+      // 2. Render Commuter's Pre-Booked Trips
+      commuterBookedTrips.forEach(ride => {
+        const vType = String(ride.vehicle_type || 'bike').toLowerCase();
+        const vEmoji = vType === 'car' ? '🚗' : (vType === 'auto' ? '🛺' : '🛵');
+        const userBooking = (ride.bookings || []).find(b => String(b.commuter_id) === userId && b.status !== 'cancelled');
+        const bookedSeats = userBooking ? Number(userBooking.seats_booked || 1) : 1;
+        const totalFare = userBooking ? Number(userBooking.total_fare || (Number(ride.per_seat_fare || 116) * bookedSeats)) : (Number(ride.per_seat_fare || 116) * bookedSeats);
+
+        cardsHtml += `
+          <div class="p-4 rounded-2xl border-2 border-emerald-500/30 bg-gradient-to-br from-emerald-50/40 via-white to-blue-50/20 shadow-sm space-y-2.5">
+            <div class="flex items-start justify-between gap-2">
+              <div class="flex items-center gap-2">
+                <span class="px-2 py-0.5 rounded-full bg-emerald-600 text-white text-[10px] font-black">
+                  Pre-Booked Commuter Trip
+                </span>
+                <span class="text-[11px] font-bold text-slate-500">
+                  ${vEmoji} ${vType.toUpperCase()}
+                </span>
+              </div>
+              <span class="text-xs font-black text-emerald-950">
+                ${ride.departure_date} • ${ride.departure_time}
+              </span>
+            </div>
+
+            <div class="flex items-center justify-between text-xs py-1 px-2.5 bg-slate-50 rounded-xl">
+              <div class="flex items-center gap-2 min-w-0">
+                <img src="${ride.driver_avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=256&q=80'}" class="w-6 h-6 rounded-full object-cover border border-emerald-400 flex-shrink-0" />
+                <span class="font-bold text-slate-900 truncate">${ride.driver_name} (${ride.vehicle_name || vType.toUpperCase()})</span>
+              </div>
+              <span class="font-black text-emerald-700 flex-shrink-0">${bookedSeats} ${bookedSeats === 1 ? 'Seat' : 'Seats'} (₹${totalFare})</span>
+            </div>
+
+            <div class="space-y-1 text-xs">
+              <div class="flex items-start gap-2">
+                <span class="w-2 h-2 rounded-full bg-emerald-500 mt-1 flex-shrink-0"></span>
+                <p class="text-slate-800 font-bold truncate"><strong>Pickup:</strong> ${ride.pickup}</p>
+              </div>
+              <div class="flex items-start gap-2">
+                <span class="w-2 h-2 rounded-full bg-blue-600 mt-1 flex-shrink-0"></span>
+                <p class="text-slate-800 font-bold truncate"><strong>To:</strong> ${ride.drop_location || ride.drop}</p>
+              </div>
+            </div>
+
+            <div class="pt-1 flex items-center justify-between text-[11px]">
+              <span class="text-slate-400 font-semibold flex items-center gap-1">
+                <i data-lucide="shield-check" class="w-3.5 h-3.5 text-emerald-600"></i>
+                <span>Direct P2P settlement upon boarding</span>
+              </span>
+              ${userBooking ? `
+                <button type="button" onclick="handleCancelScheduledBooking('${userBooking.id}', '${ride.id}', ${bookedSeats})" class="px-3 py-1 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-lg font-bold transition cursor-pointer">
+                  Cancel Booking
+                </button>
+              ` : ''}
+            </div>
+          </div>
+        `;
+      });
+
+      list.innerHTML = cardsHtml;
+      if (window.lucide) lucide.createIcons();
+    } catch (err) {
+      console.warn('Failed to render scheduled trips section:', err);
+      section.classList.add('hidden');
+    }
+  }
+  window.renderScheduledTripsSection = renderScheduledTripsSection;
+
+  // 5. TRIP LIFECYCLE: START SCHEDULED RIDE
+  window.handleStartScheduledRide = async function (rideId) {
+    if (!confirm('Start this scheduled ride now? This will activate your live Driver HUD with route navigation & passenger PIN verification.')) return;
+
+    try {
+      const allRides = await window.db.scheduledRides.getScheduledRides({ all: true });
+      const targetRide = allRides.find(r => String(r.id) === String(rideId));
+
+      if (!targetRide) {
+        showToast('Scheduled ride not found.', 'error');
+        return;
+      }
+
+      // Mark active
+      await window.db.scheduledRides.startScheduledRide(rideId, state.currentUser);
+
+      const activeVehType = String(targetRide.vehicle_type || state.driverActiveVehicleType || 'bike').toLowerCase();
+      const bookings = Array.isArray(targetRide.bookings) ? targetRide.bookings.filter(b => b.status !== 'cancelled') : [];
+
+      let activeTrips = [];
+
+      if (bookings.length > 0) {
+        // Convert bookings into active driver trips
+        activeTrips = bookings.map((b, idx) => ({
+          id: 'live_sched_' + b.id,
+          dbId: targetRide.id,
+          riderId: b.commuter_id,
+          riderName: b.commuter_name || 'Passenger',
+          riderPhone: b.commuter_phone || '+91 98480 23145',
+          riderAvatar: b.commuter_avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=256&q=80',
+          riderRating: 5.0,
+          riderRole: 'Scheduled Passenger',
+          pickup: targetRide.pickup,
+          drop: targetRide.drop_location || targetRide.drop,
+          seatsBooked: Number(b.seats_booked || 1),
+          fare: Number(b.total_fare || (Number(targetRide.per_seat_fare || 116) * Number(b.seats_booked || 1))),
+          distance: targetRide.distance_km || 84,
+          pin: '4821',
+          vehicleType: activeVehType,
+          status: 'driver_accepted',
+          paymentMethod: 'upi',
+          paymentSettled: false,
+          driver: {
+            ...state.currentUser,
+            vehicleType: activeVehType,
+            vehicleName: targetRide.vehicle_name || 'Verified Commuter Vehicle',
+            vehicleNumber: targetRide.vehicle_number || 'TG 08 AB 1234'
+          }
+        }));
+      } else {
+        // Single trip representing the driver's route
+        activeTrips = [{
+          id: 'live_sched_' + targetRide.id,
+          dbId: targetRide.id,
+          riderId: 'commuters_open',
+          riderName: 'Open Commuter Route',
+          riderPhone: '+91 98480 23145',
+          riderAvatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=256&q=80',
+          riderRating: 5.0,
+          riderRole: 'Advance Route',
+          pickup: targetRide.pickup,
+          drop: targetRide.drop_location || targetRide.drop,
+          seatsBooked: 0,
+          fare: Number(targetRide.per_seat_fare || 116),
+          distance: targetRide.distance_km || 84,
+          pin: '4821',
+          vehicleType: activeVehType,
+          status: 'driver_accepted',
+          paymentMethod: 'upi',
+          paymentSettled: false,
+          driver: {
+            ...state.currentUser,
+            vehicleType: activeVehType,
+            vehicleName: targetRide.vehicle_name || 'Verified Commuter Vehicle',
+            vehicleNumber: targetRide.vehicle_number || 'TG 08 AB 1234'
+          }
+        }];
+      }
+
+      state.activeDriverTrips = activeTrips;
+      state.activeDriverTrip = activeTrips[0];
+      state.driverActiveVehicleType = activeVehType;
+
+      // Switch to Driver Tab & render Active Duty Card
+      if (typeof switchMode === 'function') switchMode('driver');
+      if (typeof navigateToTab === 'function') navigateToTab('drive');
+      if (typeof renderDriverActiveTripCard === 'function') renderDriverActiveTripCard();
+
+      showToast(`🚀 Scheduled ride is now active! Live route HUD enabled.`, 'success');
+    } catch (err) {
+      console.error('Start scheduled ride error:', err);
+      showToast(`Could not start trip: ${err.message}`, 'error');
+    }
+  };
+
+  window.handleCancelScheduledRide = async function (rideId) {
+    if (!confirm('Are you sure you want to cancel this scheduled ride? Any booked passengers will be notified.')) return;
+    try {
+      await window.db.scheduledRides.cancelScheduledRide(rideId);
+      showToast('Scheduled trip cancelled successfully.', 'info');
+      renderScheduledTripsSection();
+      if (typeof renderActivityList === 'function') renderActivityList();
+    } catch (err) {
+      showToast(`Error: ${err.message}`, 'error');
+    }
+  };
+
+  window.handleCancelScheduledBooking = async function (bookingId, rideId, seatsBooked) {
+    if (!confirm(`Cancel this booking for ${seatsBooked} seat(s)?`)) return;
+    try {
+      await window.db.scheduledRides.cancelScheduledBooking(bookingId, rideId, seatsBooked);
+      showToast('Booking cancelled. Reserved seats released.', 'info');
+      renderScheduledTripsSection();
+      if (typeof renderActivityList === 'function') renderActivityList();
+    } catch (err) {
+      showToast(`Error: ${err.message}`, 'error');
+    }
   };
 
   // =========================================================================

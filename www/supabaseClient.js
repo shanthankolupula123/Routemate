@@ -2868,6 +2868,386 @@
     }
   };
 
+  // ============================================================================
+  // SCHEDULED RIDES & ADVANCE PRE-BOOKING MODULE
+  // ============================================================================
+  const scheduledRides = {
+    async publishRide(ridePayload) {
+      const apiBase = (typeof window !== 'undefined' && window.location && window.location.origin)
+        ? window.location.origin
+        : 'https://www.routemate.pro';
+
+      let publishedRide = null;
+
+      // 1. Try local API first
+      try {
+        const resp = await fetch(`${apiBase}/api/scheduled-rides`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'publish', ...ridePayload })
+        });
+        const data = await resp.json().catch(() => ({}));
+        if (data.success && data.ride) {
+          publishedRide = data.ride;
+        }
+      } catch (apiErr) {
+        console.warn('api/scheduled-rides publish notice:', apiErr.message);
+      }
+
+      // 2. Try Supabase direct if not already saved
+      if (!publishedRide) {
+        try {
+          const client = getSupabase();
+          const record = {
+            driver_id: String(ridePayload.driverId || ''),
+            driver_name: String(ridePayload.driverName || 'Verified Driver'),
+            driver_phone: String(ridePayload.driverPhone || ''),
+            driver_avatar: String(ridePayload.driverAvatar || ''),
+            driver_rating: parseFloat(ridePayload.driverRating || 5.0),
+            driver_upi: String(ridePayload.driverUpi || ''),
+            vehicle_type: String(ridePayload.vehicleType || 'bike'),
+            vehicle_name: String(ridePayload.vehicleName || 'Verified Vehicle'),
+            vehicle_number: String(ridePayload.vehicleNumber || ''),
+            pickup: String(ridePayload.pickup || ''),
+            drop_location: String(ridePayload.drop || ''),
+            pickup_lat: ridePayload.pickupLat || 17.4018,
+            pickup_lng: ridePayload.pickupLng || 78.5602,
+            drop_lat: ridePayload.dropLat || 17.7265,
+            drop_lng: ridePayload.dropLng || 79.1554,
+            distance_km: ridePayload.distanceKm || 84,
+            scheduled_datetime: ridePayload.scheduledDatetime || new Date(`${ridePayload.departureDate}T${ridePayload.departureTime}:00`).toISOString(),
+            departure_date: String(ridePayload.departureDate || ''),
+            departure_time: String(ridePayload.departureTime || ''),
+            total_seats: parseInt(ridePayload.totalSeats || 1, 10),
+            available_seats: parseInt(ridePayload.totalSeats || 1, 10),
+            per_seat_fare: Number(ridePayload.perSeatFare || 0),
+            status: 'published',
+            notes: String(ridePayload.notes || '')
+          };
+
+          if (client) {
+            const { data, error } = await client
+              .from('scheduled_rides')
+              .insert([record])
+              .select()
+              .single();
+            if (!error && data) {
+              publishedRide = data;
+            }
+          }
+        } catch (dbErr) {
+          console.warn('Supabase scheduled_rides insert notice:', dbErr.message);
+        }
+      }
+
+      // 3. Fallback to local generation
+      if (!publishedRide) {
+        const id = 'sched_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8);
+        publishedRide = {
+          id,
+          driver_id: String(ridePayload.driverId || ''),
+          driver_name: String(ridePayload.driverName || 'Verified Driver'),
+          driver_phone: String(ridePayload.driverPhone || ''),
+          driver_avatar: String(ridePayload.driverAvatar || ''),
+          driver_rating: parseFloat(ridePayload.driverRating || 5.0),
+          driver_upi: String(ridePayload.driverUpi || ''),
+          vehicle_type: String(ridePayload.vehicleType || 'bike'),
+          vehicle_name: String(ridePayload.vehicleName || 'Verified Vehicle'),
+          vehicle_number: String(ridePayload.vehicleNumber || ''),
+          pickup: String(ridePayload.pickup || ''),
+          drop_location: String(ridePayload.drop || ''),
+          pickup_lat: ridePayload.pickupLat || 17.4018,
+          pickup_lng: ridePayload.pickupLng || 78.5602,
+          drop_lat: ridePayload.dropLat || 17.7265,
+          drop_lng: ridePayload.dropLng || 79.1554,
+          distance_km: ridePayload.distanceKm || 84,
+          scheduled_datetime: ridePayload.scheduledDatetime || new Date(`${ridePayload.departureDate}T${ridePayload.departureTime}:00`).toISOString(),
+          departure_date: String(ridePayload.departureDate || ''),
+          departure_time: String(ridePayload.departureTime || ''),
+          total_seats: parseInt(ridePayload.totalSeats || 1, 10),
+          available_seats: parseInt(ridePayload.totalSeats || 1, 10),
+          per_seat_fare: Number(ridePayload.perSeatFare || 0),
+          status: 'published',
+          notes: String(ridePayload.notes || ''),
+          created_at: new Date().toISOString(),
+          bookings: []
+        };
+      }
+
+      // Sync to localStorage
+      try {
+        const localList = JSON.parse(localStorage.getItem('routemate_scheduled_rides') || '[]');
+        localList.unshift(publishedRide);
+        localStorage.setItem('routemate_scheduled_rides', JSON.stringify(localList));
+      } catch (e) {}
+
+      // Broadcast via Realtime channel
+      try {
+        const client = getSupabase();
+        if (client) {
+          const ch = client.channel('routemate-scheduled-rides');
+          ch.send({
+            type: 'broadcast',
+            event: 'new_scheduled_ride',
+            payload: publishedRide
+          });
+        }
+      } catch (e) {}
+
+      return { success: true, ride: publishedRide };
+    },
+
+    async getScheduledRides(filters = {}) {
+      const apiBase = (typeof window !== 'undefined' && window.location && window.location.origin)
+        ? window.location.origin
+        : 'https://www.routemate.pro';
+
+      let items = [];
+
+      // 1. Try API
+      try {
+        let q = '';
+        if (filters.driverId) q += `?driver_id=${encodeURIComponent(filters.driverId)}`;
+        else if (filters.commuterId) q += `?commuter_id=${encodeURIComponent(filters.commuterId)}`;
+        else if (filters.all) q += `?all=true`;
+
+        const resp = await fetch(`${apiBase}/api/scheduled-rides${q}`);
+        const data = await resp.json().catch(() => ({}));
+        if (data.success && Array.isArray(data.rides)) {
+          items = data.rides;
+        }
+      } catch (e) {}
+
+      // 2. Try Supabase if empty
+      if (items.length === 0) {
+        try {
+          const client = getSupabase();
+          if (client) {
+            let query = client.from('scheduled_rides').select('*').order('scheduled_datetime', { ascending: true });
+            if (filters.driverId) query = query.eq('driver_id', filters.driverId);
+            else if (!filters.all) query = query.eq('status', 'published').gt('available_seats', 0);
+            const { data } = await query;
+            if (Array.isArray(data)) items = data;
+          }
+        } catch (e) {}
+      }
+
+      // 3. Merge with localStorage
+      try {
+        const localList = JSON.parse(localStorage.getItem('routemate_scheduled_rides') || '[]');
+        const localBookings = JSON.parse(localStorage.getItem('routemate_scheduled_bookings') || '[]');
+        const seen = new Set(items.map(r => String(r.id)));
+        localList.forEach(lr => {
+          if (!seen.has(String(lr.id))) {
+            items.push(lr);
+          }
+        });
+
+        // Attach bookings
+        items.forEach(r => {
+          if (!r.bookings) {
+            r.bookings = localBookings.filter(b => String(b.scheduled_ride_id) === String(r.id) && b.status !== 'cancelled');
+          }
+        });
+      } catch (e) {}
+
+      // Apply client-side filters if needed
+      if (filters.driverId) {
+        items = items.filter(r => String(r.driver_id) === String(filters.driverId));
+      } else if (filters.commuterId) {
+        items = items.filter(r => {
+          if (Array.isArray(r.bookings)) {
+            return r.bookings.some(b => String(b.commuter_id) === String(filters.commuterId));
+          }
+          return false;
+        });
+      } else if (!filters.all) {
+        items = items.filter(r => r.status === 'published' && (r.available_seats || 0) > 0);
+      }
+
+      return items;
+    },
+
+    async bookScheduledRide({ rideId, commuter, seatsBooked, totalFare }) {
+      const apiBase = (typeof window !== 'undefined' && window.location && window.location.origin)
+        ? window.location.origin
+        : 'https://www.routemate.pro';
+
+      let result = null;
+
+      // 1. Try API first
+      try {
+        const resp = await fetch(`${apiBase}/api/scheduled-rides`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'book',
+            rideId,
+            commuterId: commuter.id || commuter.phone,
+            commuterName: commuter.name || 'Commuter Passenger',
+            commuterPhone: commuter.phone || '',
+            commuterAvatar: commuter.avatar || '',
+            seatsBooked: seatsBooked || 1,
+            totalFare: totalFare || 0
+          })
+        });
+        const data = await resp.json().catch(() => ({}));
+        if (data.success) {
+          result = data;
+        }
+      } catch (e) {}
+
+      // 2. Try Supabase atomic RPC if available
+      if (!result) {
+        try {
+          const client = getSupabase();
+          if (client) {
+            const { data, error } = await client.rpc('book_scheduled_ride_seats', {
+              p_ride_id: rideId,
+              p_commuter_id: String(commuter.id || commuter.phone || ''),
+              p_commuter_name: String(commuter.name || 'Commuter Passenger'),
+              p_commuter_phone: String(commuter.phone || ''),
+              p_commuter_avatar: String(commuter.avatar || ''),
+              p_seats_booked: parseInt(seatsBooked || 1, 10),
+              p_total_fare: Number(totalFare || 0)
+            });
+            if (!error && data && data.success) {
+              result = data;
+            }
+          }
+        } catch (e) {}
+      }
+
+      // 3. Fallback to localStorage booking update
+      const bookingRecord = {
+        id: 'book_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8),
+        scheduled_ride_id: String(rideId),
+        commuter_id: String(commuter.id || commuter.phone || ''),
+        commuter_name: String(commuter.name || 'Commuter Passenger'),
+        commuter_phone: String(commuter.phone || ''),
+        commuter_avatar: String(commuter.avatar || ''),
+        seats_booked: parseInt(seatsBooked || 1, 10),
+        total_fare: Number(totalFare || 0),
+        status: 'confirmed',
+        created_at: new Date().toISOString()
+      };
+
+      try {
+        const localBookings = JSON.parse(localStorage.getItem('routemate_scheduled_bookings') || '[]');
+        localBookings.unshift(bookingRecord);
+        localStorage.setItem('routemate_scheduled_bookings', JSON.stringify(localBookings));
+
+        const localRides = JSON.parse(localStorage.getItem('routemate_scheduled_rides') || '[]');
+        const r = localRides.find(x => String(x.id) === String(rideId));
+        if (r) {
+          r.available_seats = Math.max(0, (r.available_seats || r.total_seats) - bookingRecord.seats_booked);
+          if (!r.bookings) r.bookings = [];
+          r.bookings.push(bookingRecord);
+          localStorage.setItem('routemate_scheduled_rides', JSON.stringify(localRides));
+        }
+      } catch (e) {}
+
+      // Broadcast update
+      try {
+        const client = getSupabase();
+        if (client) {
+          const ch = client.channel('routemate-scheduled-rides');
+          ch.send({
+            type: 'broadcast',
+            event: 'scheduled_ride_booked',
+            payload: { rideId, seatsBooked, booking: bookingRecord }
+          });
+        }
+      } catch (e) {}
+
+      return { success: true, booking: bookingRecord, ...(result || {}) };
+    },
+
+    async startScheduledRide(rideId, driver) {
+      const apiBase = (typeof window !== 'undefined' && window.location && window.location.origin)
+        ? window.location.origin
+        : 'https://www.routemate.pro';
+
+      // 1. Mark scheduled ride active via API
+      try {
+        await fetch(`${apiBase}/api/scheduled-rides`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'start', rideId })
+        });
+      } catch (e) {}
+
+      // 2. Mark local storage scheduled ride active
+      try {
+        const localRides = JSON.parse(localStorage.getItem('routemate_scheduled_rides') || '[]');
+        const target = localRides.find(r => String(r.id) === String(rideId));
+        if (target) {
+          target.status = 'active';
+          localStorage.setItem('routemate_scheduled_rides', JSON.stringify(localRides));
+        }
+      } catch (e) {}
+
+      return { success: true };
+    },
+
+    async cancelScheduledRide(rideId, reason = '') {
+      const apiBase = (typeof window !== 'undefined' && window.location && window.location.origin)
+        ? window.location.origin
+        : 'https://www.routemate.pro';
+
+      try {
+        await fetch(`${apiBase}/api/scheduled-rides`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'cancel', rideId, reason })
+        });
+      } catch (e) {}
+
+      try {
+        const localRides = JSON.parse(localStorage.getItem('routemate_scheduled_rides') || '[]');
+        const target = localRides.find(r => String(r.id) === String(rideId));
+        if (target) {
+          target.status = 'cancelled';
+          localStorage.setItem('routemate_scheduled_rides', JSON.stringify(localRides));
+        }
+      } catch (e) {}
+
+      return { success: true };
+    },
+
+    async cancelScheduledBooking(bookingId, rideId, seatsBooked = 1) {
+      const apiBase = (typeof window !== 'undefined' && window.location && window.location.origin)
+        ? window.location.origin
+        : 'https://www.routemate.pro';
+
+      try {
+        await fetch(`${apiBase}/api/scheduled-rides`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'cancel', bookingId, rideId })
+        });
+      } catch (e) {}
+
+      try {
+        const localBookings = JSON.parse(localStorage.getItem('routemate_scheduled_bookings') || '[]');
+        const b = localBookings.find(x => String(x.id) === String(bookingId));
+        if (b) {
+          b.status = 'cancelled';
+          localStorage.setItem('routemate_scheduled_bookings', JSON.stringify(localBookings));
+        }
+
+        const localRides = JSON.parse(localStorage.getItem('routemate_scheduled_rides') || '[]');
+        const r = localRides.find(x => String(x.id) === String(rideId));
+        if (r) {
+          r.available_seats = Math.min(r.total_seats, (r.available_seats || 0) + (seatsBooked || 1));
+          localStorage.setItem('routemate_scheduled_rides', JSON.stringify(localRides));
+        }
+      } catch (e) {}
+
+      return { success: true };
+    }
+  };
+
   // Export clean global database object
   window.db = {
     getSupabase,
@@ -2876,6 +3256,7 @@
     feedbacks,
     broadcast,
     notifications,
+    scheduledRides,
     supabaseRest,
     matching,
     isSelfBookedRide,
