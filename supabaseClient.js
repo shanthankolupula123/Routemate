@@ -1446,6 +1446,7 @@
     const pin = String(notes.pin || '4821');
     const vehicleType = notes.vehicleType || row.vehicle_type || 'bike';
     const status = notes.status || row.status || 'searching';
+    const seatsBooked = Math.max(1, Number(notes.seatsBooked || notes.seats_booked || notes.seats || row.seats_booked || 1));
 
     const riderName = notes.riderName || (row.driver_name ? String(row.driver_name).replace(/\s*\([^)]*\)/g, '').trim() : 'Commuter');
     const riderAvatar = (notes.riderAvatar && !notes.riderAvatar.includes('unsplash')) ? notes.riderAvatar : getSvgInitialsAvatar(riderName);
@@ -1470,6 +1471,9 @@
       distance,
       pin,
       vehicleType,
+      seatsBooked,
+      seats_booked: seatsBooked,
+      seats: seatsBooked,
       status,
       riderId: notes.riderId || 'rider_1',
       riderName,
@@ -1549,6 +1553,7 @@
       const dist = Math.round(Number(reqData.distance) || 84);
       const vehicleType = reqData.vehicleType || 'bike';
       const rName = reqData.riderName || 'Commuter';
+      const seatsBooked = Math.max(1, Number(reqData.seatsBooked || reqData.seats_booked || reqData.seats || 1));
 
       const notesPayload = {
         isRequest: true,
@@ -1570,20 +1575,27 @@
         dropLat: reqData.dropLat || 17.7265,
         dropLng: reqData.dropLng || 79.1554,
         vehicleType: vehicleType,
+        seatsBooked: seatsBooked,
+        seats_booked: seatsBooked,
+        seats: seatsBooked,
         createdAt: new Date().toISOString()
       };
+
+      const vehTypeStr = vehicleType === 'car' ? 'car' : (vehicleType === 'auto' ? 'auto' : 'bike');
+      const vehNameStr = vehicleType === 'car' ? `Car (${seatsBooked} ${seatsBooked === 1 ? 'Seat' : 'Seats'})` : (vehicleType === 'auto' ? `Auto (${seatsBooked} ${seatsBooked === 1 ? 'Seat' : 'Seats'})` : 'Bike Pillion');
 
       const dbRow = {
         driver_name: `${notesPayload.riderName} (Rider Request)`,
         driver_role: 'Commuter',
         avatar: notesPayload.riderAvatar,
-        vehicle_type: vehicleType === 'car' ? 'car' : 'bike',
-        vehicle_name: vehicleType === 'car' ? 'Car Seat' : 'Bike Pillion',
+        vehicle_type: vehTypeStr,
+        vehicle_name: vehNameStr,
         vehicle_number: requestId,
         pickup: reqData.pickup,
         drop_location: reqData.drop,
         departure_time: 'Immediate',
-        seats_available: 1,
+        seats_available: seatsBooked,
+        seats_booked: seatsBooked,
         per_seat_price: fare,
         payment_preference: 'upi',
         verified: true,
@@ -1712,6 +1724,15 @@
                 if (msg.payload) handleStatusPayload(msg.payload);
               }
             )
+            .on(
+              'broadcast',
+              { event: 'driver_gps_update' },
+              (msg) => {
+                if (msg.payload && typeof window.handleLiveDriverGpsUpdate === 'function') {
+                  window.handleLiveDriverGpsUpdate(msg.payload);
+                }
+              }
+            )
             .subscribe();
         } catch(e) {
           console.warn('Realtime rider channel error:', e);
@@ -1817,6 +1838,21 @@
         const normalized = normalizeRideData(row);
         if (!normalized) return;
 
+        // Strict Vehicle Mode Filter (Bike drivers NEVER receive Car/Auto requests; Car drivers only see Car requests; Auto drivers only see Auto requests)
+        const driverActiveType = String(options?.activeVehicleType || currentUser?.activeVehicleType || '').toLowerCase();
+        const reqVehicleType = String(normalized.vehicleType || 'bike').toLowerCase();
+        if (driverActiveType && reqVehicleType !== driverActiveType) {
+          removeRideById(normalized.id);
+          return;
+        }
+
+        // Remaining Seat Capacity Check (Multi-seat Pooling for Car & Auto):
+        const maxAvailableSeats = Number(options?.remainingSeats !== undefined ? options.remainingSeats : 99);
+        if (normalized.seatsBooked > maxAvailableSeats) {
+          removeRideById(normalized.id);
+          return;
+        }
+
         // Geo-Radius Proximity Filtering (within 10-15 km of driver's live GPS)
         const driverLoc = getDriverLocation();
         if (driverLoc && driverLoc.lat && driverLoc.lng && normalized.pickupLat && normalized.pickupLng) {
@@ -1884,6 +1920,19 @@
 
             const normalized = normalizeRideData(row);
             if (!normalized) continue;
+
+            // Strict Vehicle Mode Filter (Bike drivers NEVER receive Car/Auto requests; Car drivers only see Car requests; Auto drivers only see Auto requests)
+            const driverActiveType = String(options?.activeVehicleType || currentUser?.activeVehicleType || '').toLowerCase();
+            const reqVehicleType = String(normalized.vehicleType || 'bike').toLowerCase();
+            if (driverActiveType && reqVehicleType !== driverActiveType) {
+              continue;
+            }
+
+            // Remaining Seat Capacity Check (Multi-seat Pooling for Car & Auto):
+            const maxAvailableSeats = Number(options?.remainingSeats !== undefined ? options.remainingSeats : 99);
+            if (normalized.seatsBooked > maxAvailableSeats) {
+              continue;
+            }
 
             // Geo-Radius Proximity Filtering (within 10-15 km of driver's live GPS)
             if (driverLoc && driverLoc.lat && driverLoc.lng && normalized.pickupLat && normalized.pickupLng) {
@@ -2105,6 +2154,17 @@
       const ageSec = Math.floor((Date.now() - createdMs) / 1000);
       if (ageSec > 90 && (existingNotes.status === 'expired' || currentStatus === 'expired')) {
         return { success: false, expired: true, message: 'This ride request has expired.' };
+      }
+
+      // Strict Vehicle Mode Compatibility Check (Bike cannot accept Car/Auto; Car/Auto cannot accept mismatched vehicles)
+      const reqVehicleType = String(existingNotes.vehicleType || existingRow.vehicle_type || 'bike').toLowerCase();
+      const driverVehicleType = String(driverPayload.vehicleType || driverPayload.vehicle_type || 'bike').toLowerCase();
+      if (reqVehicleType && driverVehicleType && reqVehicleType !== driverVehicleType) {
+        return {
+          success: false,
+          vehicleMismatch: true,
+          message: `Vehicle mismatch: This ride requires a ${reqVehicleType}, but your active driving vehicle is ${driverVehicleType}.`
+        };
       }
 
       const mergedNotes = {
@@ -2671,6 +2731,38 @@
       }
 
       return data;
+    },
+
+    /**
+     * Broadcast live driver GPS coordinates smoothly over Supabase Realtime
+     */
+    broadcastDriverGPS(driverId, coords, tripIds = []) {
+      const client = getSupabase();
+      if (!client || !coords || !coords.lat || !coords.lng) return;
+
+      const payload = {
+        lat: Number(coords.lat),
+        lng: Number(coords.lng),
+        heading: Number(coords.heading || 0),
+        speed: Number(coords.speed || 0),
+        driverId: driverId,
+        timestamp: Date.now()
+      };
+
+      try {
+        const drCh = client.channel(`routemate-driver-gps-${driverId}`);
+        drCh.send({ type: 'broadcast', event: 'driver_gps_update', payload });
+
+        if (Array.isArray(tripIds)) {
+          tripIds.forEach(tId => {
+            if (!tId) return;
+            const rCh = client.channel(`rider-ride-${tId}`);
+            rCh.send({ type: 'broadcast', event: 'driver_gps_update', payload: { ...payload, tripId: tId } });
+          });
+        }
+      } catch (err) {
+        console.warn('Realtime GPS broadcast notice:', err.message);
+      }
     }
   };
 

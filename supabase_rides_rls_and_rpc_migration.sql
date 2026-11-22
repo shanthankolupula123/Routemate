@@ -3,7 +3,7 @@
 -- Run this in your Supabase SQL Editor: https://supabase.com/dashboard/project/hjieeilzfbvubkhmlmdg/sql
 -- ==============================================================================
 
--- 1. UPGRADE RIDES STATUS CHECK CONSTRAINT
+-- 1. UPGRADE RIDES STATUS & VEHICLE TYPE CHECK CONSTRAINTS & SEATS BOOKED COLUMN
 -- Removes old restrictive check (status in ('active', 'completed', 'cancelled'))
 -- to support full ride lifecycle: searching, accepted, driver_assigned, ride_started, completed, cancelled, expired.
 DO $$
@@ -14,6 +14,18 @@ BEGIN
 EXCEPTION WHEN OTHERS THEN
   NULL;
 END $$;
+
+DO $$
+BEGIN
+  ALTER TABLE public.rides DROP CONSTRAINT IF EXISTS rides_vehicle_type_check;
+  ALTER TABLE public.rides ADD CONSTRAINT rides_vehicle_type_check
+    CHECK (vehicle_type IN ('bike', 'car', 'auto'));
+EXCEPTION WHEN OTHERS THEN
+  NULL;
+END $$;
+
+-- Add seats_booked column for multi-seat commuter bookings and capacity management
+ALTER TABLE public.rides ADD COLUMN IF NOT EXISTS seats_booked integer NOT NULL DEFAULT 1;
 
 -- 2. ROW LEVEL SECURITY (RLS) POLICIES FOR RIDES
 ALTER TABLE public.rides ENABLE ROW LEVEL SECURITY;
@@ -113,6 +125,19 @@ BEGIN
   -- 3. Cancellation Check
   IF v_current_status = 'cancelled' OR v_ride.status = 'cancelled' THEN
     RETURN jsonb_build_object('success', false, 'cancelled', true, 'message', 'This ride was cancelled by the commuter.');
+  END IF;
+
+  -- 4. Vehicle Type Compatibility Check (Strict Mode Locking)
+  -- Bike drivers must never claim Car/Auto requests; Car/Auto drivers only accept matching requests
+  IF p_vehicle_type IS NOT NULL AND p_vehicle_type <> '' THEN
+    IF lower(COALESCE(v_notes->>'vehicleType', v_ride.vehicle_type, '')) <> '' AND
+       lower(COALESCE(v_notes->>'vehicleType', v_ride.vehicle_type, '')) <> lower(p_vehicle_type) THEN
+      RETURN jsonb_build_object(
+        'success', false, 
+        'vehicleMismatch', true, 
+        'message', 'Vehicle type mismatch: This ride requires ' || COALESCE(v_notes->>'vehicleType', v_ride.vehicle_type) || ', but your active driving vehicle is ' || p_vehicle_type || '.'
+      );
+    END IF;
   END IF;
 
   -- Build merged notes JSON payload

@@ -1162,6 +1162,19 @@ module.exports = async (req, res) => {
         });
       }
 
+      const cleanCarDlPhoto = body.car_dl_photo || body.carDlPhoto || body.dl_photo || body.dlPhoto;
+      if (cleanVehType === 'car') {
+        const listCheck = getStore();
+        const existingSub = listCheck.find(s => s.user_id === cleanUserId || s.id === cleanUserId || s.driver_email === body.driver_email);
+        const hasExistingDl = Boolean(existingSub && (existingSub.dl_front_photo || existingSub.dl_number));
+        if (!hasExistingDl && !cleanCarDlPhoto) {
+          return res.status(400).json({
+            success: false,
+            error: 'A valid Car Driving License (LMV / 4-Wheeler) document is required to register a Car.'
+          });
+        }
+      }
+
       const list = getStore();
       let sub = list.find(s => s.user_id === cleanUserId || s.id === cleanUserId || s.driver_email === body.driver_email);
 
@@ -1201,6 +1214,7 @@ module.exports = async (req, res) => {
         vehicle_name: cleanVehName,
         vehicle_color: cleanVehColor,
         rc_photo: cleanRcPhoto,
+        dl_photo: cleanCarDlPhoto || null,
         status: 'pending', // Strictly Pending Super Admin review
         is_default: sub.vehicles.length === 0,
         submitted_at: new Date().toISOString()
@@ -1609,6 +1623,17 @@ module.exports = async (req, res) => {
 
         if (currentStatus === 'cancelled' || existingNotes.status === 'cancelled') {
           return res.status(200).json({ success: false, cancelled: true, message: 'This ride was cancelled by the commuter.' });
+        }
+
+        // Vehicle Mode Lock Check: Ensure driver's active vehicle matches ride's required vehicle
+        const reqVehicleType = String(existingNotes.vehicleType || existingRow.vehicle_type || 'bike').toLowerCase();
+        const driverVehicleType = String(driver.vehicleType || driver.vehicle_type || 'bike').toLowerCase();
+        if (reqVehicleType && driverVehicleType && reqVehicleType !== driverVehicleType) {
+          return res.status(400).json({
+            success: false,
+            vehicleMismatch: true,
+            message: `Vehicle mismatch: This ride requires a ${reqVehicleType}, but your active vehicle is ${driverVehicleType}.`
+          });
         }
 
         const mergedNotes = {

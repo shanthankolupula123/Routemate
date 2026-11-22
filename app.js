@@ -26,11 +26,17 @@
     pickupCoords: { lat: 17.4018, lng: 78.5602 },
     dropCoords: { lat: 17.7265, lng: 79.1554 },
     vehicleType: 'bike',
+    seatsBooked: 1,
     distanceKm: 84,
     fare: 110,
+    baseFare: 110,
     userGPS: null,
     activeRiderRequest: null,
     activeDriverTrip: null,
+    activeDriverTrips: [],
+    driverActiveVehicle: null,
+    driverActiveVehicleType: 'bike',
+    approvedVehicleTypes: ['bike'],
     driverOnline: true,
     incomingRides: [],
     declinedRideIds: new Set(),
@@ -47,6 +53,7 @@
       driverPickup: null,
       driverDrop: null,
       driverRouteLine: null,
+      driverVehicleMarker: null,
       commuters: []
     },
     mapTapMode: false,
@@ -1978,14 +1985,117 @@
   // =========================================================================
   // FREE OPENSTREETMAP INTERACTIVE MAP & GPS TRACKING
   // =========================================================================
+  let vehicleMarkerAnimationId = null;
+
+  function animateCommuterVehicleMarker(targetLat, targetLng, heading, vehicleType) {
+    const map = state.maps.rider;
+    if (!map) return;
+
+    const vehIconHtml = vehicleType === 'car' ? '🚗' : (vehicleType === 'auto' ? '🛺' : '🛵');
+
+    if (!state.mapMarkers.driverVehicleMarker) {
+      const customIcon = L.divIcon({
+        className: 'custom-vehicle-tracker-icon',
+        html: `
+          <div id="driverVehicleMarkerIcon" style="transform: rotate(${heading || 0}deg); transition: transform 0.4s ease;" class="relative w-10 h-10 flex items-center justify-center">
+            <span class="absolute inset-0 rounded-full bg-blue-500/30 radar-ring"></span>
+            <span class="w-8 h-8 rounded-full bg-white border-2 border-blue-600 shadow-lg flex items-center justify-center text-base">
+              ${vehIconHtml}
+            </span>
+          </div>
+        `,
+        iconSize: [40, 40],
+        iconAnchor: [20, 20]
+      });
+
+      state.mapMarkers.driverVehicleMarker = L.marker([targetLat, targetLng], {
+        icon: customIcon,
+        zIndexOffset: 1200
+      }).addTo(map);
+
+      state.mapMarkers.driverVehicleMarker._currentCoords = { lat: targetLat, lng: targetLng };
+      return;
+    }
+
+    const marker = state.mapMarkers.driverVehicleMarker;
+    const startCoords = marker._currentCoords || marker.getLatLng();
+    const startTime = performance.now();
+    const duration = 1200; // 1.2s smooth lerp interpolation
+
+    const iconEl = document.getElementById('driverVehicleMarkerIcon');
+    if (iconEl && heading !== undefined) {
+      iconEl.style.transform = `rotate(${heading}deg)`;
+    }
+
+    if (vehicleMarkerAnimationId) {
+      cancelAnimationFrame(vehicleMarkerAnimationId);
+    }
+
+    function step(now) {
+      const elapsed = now - startTime;
+      const progress = Math.min(1, elapsed / duration);
+      const ease = 1 - Math.pow(1 - progress, 3); // cubic ease out
+
+      const currentLat = startCoords.lat + (targetLat - startCoords.lat) * ease;
+      const currentLng = startCoords.lng + (targetLng - startCoords.lng) * ease;
+
+      marker.setLatLng([currentLat, currentLng]);
+      marker._currentCoords = { lat: currentLat, lng: currentLng };
+
+      if (progress < 1) {
+        vehicleMarkerAnimationId = requestAnimationFrame(step);
+      } else {
+        vehicleMarkerAnimationId = null;
+      }
+    }
+
+    vehicleMarkerAnimationId = requestAnimationFrame(step);
+  }
+
+  window.handleLiveDriverGpsUpdate = function (payload) {
+    if (!payload || !payload.lat || !payload.lng) return;
+    const req = state.activeRiderRequest;
+    if (!req) return;
+
+    if (!['driver_accepted', 'accepted', 'ride_started'].includes(req.status)) return;
+
+    animateCommuterVehicleMarker(payload.lat, payload.lng, payload.heading || 0, req.vehicleType || 'bike');
+
+    const targetLat = (req.status === 'ride_started') ? (req.dropLat || 17.7265) : (req.pickupLat || 17.4018);
+    const targetLng = (req.status === 'ride_started') ? (req.dropLng || 79.1554) : (req.pickupLng || 78.5602);
+
+    const distKm = calculateProximityKm(payload.lat, payload.lng, targetLat, targetLng);
+    if (distKm !== null) {
+      const speedKmh = payload.speed ? (payload.speed * 3.6) : 35;
+      const etaMin = Math.max(1, Math.round((distKm / speedKmh) * 60));
+
+      const etaEl = document.getElementById('riderLiveEtaDisplay');
+      if (etaEl) {
+        const stageLabel = (req.status === 'ride_started') ? 'Destination in' : 'Pickup in';
+        etaEl.innerHTML = `<span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span><span>${stageLabel} <strong>~${etaMin} min</strong> (${distKm.toFixed(1)} km)</span></span><span class="font-mono text-[10px] text-white/80">Live GPS</span>`;
+      }
+    }
+  };
+
   function initLiveGPS() {
     if (!('geolocation' in navigator)) return;
 
     navigator.geolocation.watchPosition(
       (pos) => {
-        const { latitude, longitude, accuracy } = pos.coords;
-        state.userGPS = { lat: latitude, lng: longitude, accuracy };
+        const { latitude, longitude, accuracy, heading, speed } = pos.coords;
+        state.userGPS = { lat: latitude, lng: longitude, accuracy, heading: heading || 0, speed: speed || 0 };
         updateUserGPSMarker(latitude, longitude);
+
+        // Broadcast driver GPS coordinates in real-time across WebSockets
+        if (state.currentUser && (state.driverOnline || (state.activeDriverTrips && state.activeDriverTrips.length > 0) || state.activeDriverTrip)) {
+          const tripIds = (state.activeDriverTrips || []).map(t => t.id);
+          if (state.activeDriverTrip && !tripIds.includes(state.activeDriverTrip.id)) {
+            tripIds.push(state.activeDriverTrip.id);
+          }
+          if (window.db?.matching?.broadcastDriverGPS) {
+            window.db.matching.broadcastDriverGPS(state.currentUser.id, state.userGPS, tripIds);
+          }
+        }
       },
       (err) => {
         console.warn('GPS location notice:', err.message);
@@ -2564,10 +2674,65 @@
       rate = 1.80; // Auto fuel share per km
     }
 
-    state.fare = Math.max(minFare, Math.round(state.distanceKm * rate));
+    const seats = Math.max(1, state.seatsBooked || 1);
+    const baseFare = Math.max(minFare, Math.round(state.distanceKm * rate));
+    state.baseFare = baseFare;
+    state.fare = baseFare * seats;
+
     const fareEl = document.getElementById('fareDisplay');
-    if (fareEl) fareEl.textContent = `₹${state.fare}`;
+    if (fareEl) {
+      if (seats > 1) {
+        fareEl.innerHTML = `₹${state.fare} <span class="text-[11px] font-semibold text-slate-500">(₹${baseFare} × ${seats} seats)</span>`;
+      } else {
+        fareEl.textContent = `₹${state.fare}`;
+      }
+    }
   }
+
+  function renderCommuterSeatSelector() {
+    const wrap = document.getElementById('commuterSeatSelectorWrap');
+    const grid = document.getElementById('commuterSeatOptionsGrid');
+    const badge = document.getElementById('commuterSeatCountBadge');
+    if (!wrap || !grid) return;
+
+    if (state.vehicleType === 'bike') {
+      wrap.classList.add('hidden');
+      state.seatsBooked = 1;
+      return;
+    }
+
+    wrap.classList.remove('hidden');
+    const maxSeats = (state.vehicleType === 'car') ? 4 : 3;
+    if (!state.seatsBooked || state.seatsBooked < 1) state.seatsBooked = 1;
+    if (state.seatsBooked > maxSeats) state.seatsBooked = maxSeats;
+
+    if (badge) {
+      badge.textContent = `${state.seatsBooked} ${state.seatsBooked === 1 ? 'Seat' : 'Seats'} Selected`;
+    }
+
+    let html = '';
+    for (let i = 1; i <= maxSeats; i++) {
+      const isSel = (i === state.seatsBooked);
+      html += `
+        <button type="button" onclick="selectSeatsBooked(${i})" class="py-2.5 px-2 rounded-xl text-xs font-black transition cursor-pointer flex flex-col items-center gap-0.5 ${
+          isSel 
+            ? 'bg-blue-600 text-white shadow-md ring-2 ring-blue-300' 
+            : 'bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-200'
+        }">
+          <span class="text-sm">${i === 1 ? '👤' : (i === 2 ? '👥' : '👨‍👩‍👧')}</span>
+          <span>${i} ${i === 1 ? 'Seat' : 'Seats'}</span>
+        </button>
+      `;
+    }
+    grid.innerHTML = html;
+  }
+
+  window.selectSeatsBooked = function (num) {
+    const maxSeats = (state.vehicleType === 'car') ? 4 : (state.vehicleType === 'auto' ? 3 : 1);
+    state.seatsBooked = Math.max(1, Math.min(maxSeats, Number(num) || 1));
+    renderCommuterSeatSelector();
+    calculateDistanceAndFare();
+  };
 
   // =========================================================================
   // MODE & NAVIGATION SWITCHING (4 ESSENTIAL TABS ONLY)
@@ -2839,6 +3004,7 @@
       if (v === type) el.classList.add('active');
       else el.classList.remove('active');
     });
+    renderCommuterSeatSelector();
     calculateDistanceAndFare();
   };
 
@@ -2871,8 +3037,11 @@
         dropLat: state.dropCoords.lat,
         dropLng: state.dropCoords.lng,
         fare: state.fare,
+        baseFare: state.baseFare || Math.round(state.fare / (state.seatsBooked || 1)),
         distance: state.distanceKm,
         vehicleType: state.vehicleType,
+        seatsBooked: state.seatsBooked || 1,
+        seats: state.seatsBooked || 1,
         riderId: state.currentUser.id,
         riderName: state.currentUser.name,
         riderEmail: state.currentUser.email,
@@ -3126,8 +3295,17 @@
           </div>
 
           <div class="mt-4 pt-3 border-t border-white/10 flex items-center justify-between text-xs">
-            <span class="text-slate-300">Exact Fuel Share</span>
+            <span class="text-slate-300">Exact Fuel Share (${req.seatsBooked || 1} ${Number(req.seatsBooked || 1) === 1 ? 'Seat' : 'Seats'})</span>
             <span class="font-black text-emerald-300 text-base">₹${req.fare}</span>
+          </div>
+
+          <!-- Live Real-Time ETA & Smooth GPS Moving Vehicle Badge -->
+          <div id="riderLiveEtaDisplay" class="mt-2.5 p-2.5 rounded-xl bg-white/10 border border-white/15 text-xs text-cyan-200 flex items-center justify-between font-bold">
+            <span class="flex items-center gap-1.5">
+              <span class="w-2 h-2 rounded-full bg-cyan-400 animate-ping"></span>
+              <span>${isStarted ? 'In Transit to Destination' : 'Driver Approaching Pickup'}</span>
+            </span>
+            <span class="font-mono text-[10px] text-white">Live GPS Active</span>
           </div>
 
           <!-- Active Commuter Live Fuel Share Payment Selection (UPI / Cash) -->
@@ -3275,21 +3453,58 @@
   // =========================================================================
   // DRIVER WORKFLOW (BROADCAST SCREEN & REALTIME MATCHING)
   // =========================================================================
+  // -------------------------------------------------------------------------
+  // DRIVER MULTI-SEAT CAPACITY & POOLING HELPERS (CAR & AUTO)
+  // -------------------------------------------------------------------------
+  function getDriverMaxCapacity() {
+    const vType = String(state.driverActiveVehicleType || (state.driverActiveVehicle?.vehicle_type) || 'bike').toLowerCase();
+    if (vType === 'car') return 4;
+    if (vType === 'auto') return 3;
+    return 1;
+  }
+
+  function getDriverOccupiedSeats() {
+    if (!state.activeDriverTrips || !Array.isArray(state.activeDriverTrips)) return 0;
+    return state.activeDriverTrips.reduce((sum, t) => sum + Number(t.seatsBooked || t.seats_booked || t.seats || 1), 0);
+  }
+
+  function getDriverRemainingCapacity() {
+    return Math.max(0, getDriverMaxCapacity() - getDriverOccupiedSeats());
+  }
+
   function startDriverRadar() {
     if (!state.driverOnline || !state.currentUser) return;
     console.log('📡 [APP DRIVER] Starting Realtime Radar listener for user:', state.currentUser.name);
 
-    // Pass live GPS locator and 15km geo-radius filter to matching engine
+    const activeVehType = String(state.driverActiveVehicleType || (state.driverActiveVehicle?.vehicle_type) || 'bike').toLowerCase();
+    const remSeats = getDriverRemainingCapacity();
+
+    // If bike with an active passenger, or vehicle at full capacity: pause incoming cards
+    if ((activeVehType === 'bike' && ((state.activeDriverTrips && state.activeDriverTrips.length > 0) || state.activeDriverTrip)) || remSeats <= 0) {
+      console.log('🚗 [DRIVER RADAR] Vehicle at maximum capacity or bike with active passenger. Radar paused.');
+      renderDriverIncomingCards([]);
+      return;
+    }
+
+    // Pass live GPS locator, 15km geo-radius, active vehicle type, and remaining seats to matching engine
     window.db.matching.startDriverPolling(
       state.currentUser,
       (rides) => {
-        state.incomingRides = rides.filter(r => !state.declinedRideIds.has(r.id));
+        const currentRemCap = getDriverRemainingCapacity();
+        state.incomingRides = rides.filter(r => {
+          if (state.declinedRideIds.has(r.id)) return false;
+          if (String(r.vehicleType || 'bike').toLowerCase() !== activeVehType) return false;
+          if ((r.seatsBooked || 1) > currentRemCap) return false;
+          return true;
+        });
         renderDriverIncomingCards(state.incomingRides);
         updateDriverMapIncomingMarkers(state.incomingRides);
       },
       {
         getDriverGPS: () => state.userGPS,
-        maxRadiusKm: 15
+        maxRadiusKm: 15,
+        activeVehicleType: activeVehType,
+        remainingSeats: remSeats
       }
     );
   }
@@ -3388,14 +3603,33 @@
       badge.textContent = `${validRides.length} Waiting`;
     }
 
-    if (state.activeDriverTrip) {
+    const activeVehType = String(state.driverActiveVehicleType || (state.driverActiveVehicle?.vehicle_type) || 'bike').toLowerCase();
+    const remCapacity = getDriverRemainingCapacity();
+    const hasActivePassengers = (state.activeDriverTrips && state.activeDriverTrips.length > 0) || !!state.activeDriverTrip;
+
+    // Bike strictly allows only 1 commuter:
+    if (activeVehType === 'bike' && hasActivePassengers) {
       if (driverIncomingTimerInterval) {
         clearInterval(driverIncomingTimerInterval);
         driverIncomingTimerInterval = null;
       }
       container.innerHTML = `
         <div class="p-4 bg-emerald-50 border border-emerald-200 rounded-2xl text-xs text-emerald-800 font-bold text-center">
-          ⚡ You have an active trip in progress. Complete it before accepting new requests.
+          ⚡ Bike trip in progress (1/1 Seats Occupied). Complete current ride to accept next commuter.
+        </div>
+      `;
+      return;
+    }
+
+    // Car & Auto at full capacity:
+    if (remCapacity <= 0 && hasActivePassengers) {
+      if (driverIncomingTimerInterval) {
+        clearInterval(driverIncomingTimerInterval);
+        driverIncomingTimerInterval = null;
+      }
+      container.innerHTML = `
+        <div class="p-4 bg-amber-50 border border-amber-200 rounded-2xl text-xs text-amber-900 font-bold text-center">
+          💺 Vehicle at full capacity (${getDriverOccupiedSeats()}/${getDriverMaxCapacity()} Seats Occupied). Radar will resume once a seat frees up.
         </div>
       `;
       return;
@@ -3550,6 +3784,26 @@
       return;
     }
 
+    // 1. Strict Vehicle KYC Mode Locking Check:
+    const activeVehType = String(state.driverActiveVehicleType || (state.driverActiveVehicle?.vehicle_type) || 'bike').toLowerCase();
+    const reqVehType = String(target.vehicleType || 'bike').toLowerCase();
+    if (reqVehType !== activeVehType) {
+      showToast(`Cannot accept: this ride requires ${reqVehType.toUpperCase()}, but your active driving vehicle is ${activeVehType.toUpperCase()}.`, 'warning');
+      return;
+    }
+
+    // 2. Capacity Check (Multi-seat Pooling for Car & Auto):
+    const remCap = getDriverRemainingCapacity();
+    const reqSeats = Number(target.seatsBooked || target.seats_booked || target.seats || 1);
+    if (activeVehType === 'bike' && ((state.activeDriverTrips && state.activeDriverTrips.length > 0) || state.activeDriverTrip)) {
+      showToast('Bike mode strictly allows 1 pillion commuter at a time.', 'warning');
+      return;
+    }
+    if (reqSeats > remCap) {
+      showToast(`Cannot accept: commuter requested ${reqSeats} seats, but only ${remCap} seats remain vacant.`, 'warning');
+      return;
+    }
+
     // Resolve driver's real registered UPI ID & QR code
     let activeUpiId = state.driverUpi?.upiId || state.kyc?.submission?.upi_id || state.currentUser?.upi_id || state.currentUser?.upiId || '';
     let activeUpiQr = state.driverUpi?.upiQr || state.kyc?.submission?.upi_qr || state.currentUser?.upi_qr || '';
@@ -3571,9 +3825,9 @@
       upiId: activeUpiId,
       upi_qr: activeUpiQr,
       upiQr: activeUpiQr,
-      vehicleNumber: state.kyc?.submission?.vehicle_number || state.currentUser?.vehicles?.[0]?.vehicle_number || state.currentUser?.vehicleNumber || 'TG 08 AB 1234',
-      vehicleName: state.kyc?.submission?.vehicle_name || state.currentUser?.vehicles?.[0]?.vehicle_name || state.currentUser?.vehicleName || 'Two-Wheeler / Bike',
-      vehicleType: state.kyc?.submission?.vehicle_type || state.currentUser?.vehicles?.[0]?.vehicle_type || target.vehicleType || 'bike'
+      vehicleNumber: state.driverActiveVehicle?.vehicle_number || state.kyc?.submission?.vehicle_number || state.currentUser?.vehicles?.[0]?.vehicle_number || state.currentUser?.vehicleNumber || 'TG 08 AB 1234',
+      vehicleName: state.driverActiveVehicle?.vehicle_name || state.kyc?.submission?.vehicle_name || state.currentUser?.vehicles?.[0]?.vehicle_name || state.currentUser?.vehicleName || 'Verified Commuter Vehicle',
+      vehicleType: activeVehType
     };
 
     try {
@@ -3583,28 +3837,38 @@
           clearInterval(driverIncomingTimerInterval);
           driverIncomingTimerInterval = null;
         }
-        state.activeDriverTrip = {
+
+        const acceptedTrip = {
           ...target,
           status: 'driver_accepted',
           driver: driverPayload,
           paymentMethod: 'upi',
-          paymentSettled: false
+          paymentSettled: false,
+          seatsBooked: reqSeats
         };
 
-        // Listen for realtime payment notification from commuter
+        if (!state.activeDriverTrips) state.activeDriverTrips = [];
+        state.activeDriverTrips = state.activeDriverTrips.filter(t => t.id !== target.id);
+        state.activeDriverTrips.push(acceptedTrip);
+        state.activeDriverTrip = state.activeDriverTrips[0]; // primary trip sync
+
+        // Listen for realtime payment notification from commuter for this ride
         const client = window.db?.getSupabase?.();
         if (client) {
           try {
             const ch = client.channel(`rider-ride-${target.id}`);
             ch.on('broadcast', { event: 'rider_payment_ready' }, (msg) => {
-              if (msg.payload && state.activeDriverTrip) {
-                state.activeDriverTrip.paymentSettled = !!msg.payload.settled;
-                state.activeDriverTrip.paymentMethod = msg.payload.paymentMethod || 'upi';
-                renderDriverActiveTripCard();
-                if (msg.payload.settled) {
-                  showToast(`💳 Commuter marked payment settled via ${(msg.payload.paymentMethod || 'upi').toUpperCase()}! Please verify receipt.`, 'info');
-                } else {
-                  showToast(`💳 Commuter selected payment method: ${(msg.payload.paymentMethod || 'upi').toUpperCase()}`, 'info');
+              if (msg.payload && state.activeDriverTrips) {
+                const matchT = state.activeDriverTrips.find(t => t.id === target.id);
+                if (matchT) {
+                  matchT.paymentSettled = !!msg.payload.settled;
+                  matchT.paymentMethod = msg.payload.paymentMethod || 'upi';
+                  renderDriverActiveTripCard();
+                  if (msg.payload.settled) {
+                    showToast(`💳 Commuter ${matchT.riderName} marked payment settled via ${(matchT.paymentMethod || 'upi').toUpperCase()}! Please verify receipt.`, 'info');
+                  } else {
+                    showToast(`💳 Commuter ${matchT.riderName} selected payment method: ${(matchT.paymentMethod || 'upi').toUpperCase()}`, 'info');
+                  }
                 }
               }
             }).subscribe();
@@ -3619,10 +3883,11 @@
             pickup: target.pickup,
             drop: target.drop,
             fare: target.fare,
-            vehicleType: target.vehicleType || 'bike',
+            vehicleType: target.vehicleType || activeVehType,
             status: 'accepted',
             userRole: 'driver',
             riderName: target.riderName,
+            seatsBooked: reqSeats,
             createdAt: new Date().toISOString()
           };
           const filtered = stored.filter(r => r.id !== target.id);
@@ -3631,16 +3896,27 @@
         } catch (e) {}
 
         renderDriverActiveTripCard();
-        renderDriverIncomingCards([]);
+
         if (state.maps.driver) {
           updateRouteLine(state.maps.driver, 'driver');
         }
         playNotificationSound();
-        showToast(`🎉 Accepted ride for ${target.riderName}! Heading to pickup.`, 'success');
+
+        // Multi-Ride Pooling: If remaining capacity > 0 for Car/Auto, keep radar active!
+        const newRemCap = getDriverRemainingCapacity();
+        if (newRemCap > 0 && activeVehType !== 'bike') {
+          startDriverRadar();
+          showToast(`🎉 Accepted ${target.riderName}! (${getDriverOccupiedSeats()}/${getDriverMaxCapacity()} seats occupied - radar active for next commuter)`, 'success');
+        } else {
+          renderDriverIncomingCards([]);
+          showToast(`🎉 Accepted ride for ${target.riderName}! Heading to pickup.`, 'success');
+        }
       } else if (resp.alreadyTaken) {
         showToast('⚡ Another driver just accepted this ride.', 'warning');
         state.incomingRides = state.incomingRides.filter(r => r.id !== rideId);
         renderDriverIncomingCards(state.incomingRides);
+      } else if (resp.vehicleMismatch) {
+        showToast(resp.message || 'Vehicle mismatch: Cannot accept rides for another vehicle type.', 'warning');
       } else if (resp.cancelled || resp.expired) {
         showToast('⏱️ This ride request was cancelled or has expired.', 'info');
         state.incomingRides = state.incomingRides.filter(r => r.id !== rideId);
@@ -3661,73 +3937,126 @@
     showToast('Ride request dismissed.', 'info');
   };
 
+  let currentTargetPinRideId = null;
+  let currentTargetCompleteRideId = null;
+
   function renderDriverActiveTripCard() {
     const card = document.getElementById('driverActiveTripCard');
     if (!card) return;
 
-    if (!state.activeDriverTrip) {
+    const trips = (state.activeDriverTrips && state.activeDriverTrips.length > 0)
+      ? state.activeDriverTrips
+      : (state.activeDriverTrip ? [state.activeDriverTrip] : []);
+
+    if (trips.length === 0) {
       card.classList.add('hidden');
       card.innerHTML = '';
       return;
     }
 
     card.classList.remove('hidden');
-    const trip = state.activeDriverTrip;
-    const isStarted = trip.status === 'ride_started';
+
+    const maxCap = getDriverMaxCapacity();
+    const occupiedSeats = getDriverOccupiedSeats();
+    const remCap = getDriverRemainingCapacity();
+    const activeVehType = state.driverActiveVehicleType || 'bike';
+    const vehIcon = activeVehType === 'car' ? '🚗' : (activeVehType === 'auto' ? '🛺' : '🛵');
+
+    const capacityBadge = activeVehType === 'bike'
+      ? `<span class="px-2.5 py-0.5 rounded-full bg-blue-500/20 text-blue-300 border border-blue-400/30 text-[10px] font-black">1/1 Pillion Seat (Full)</span>`
+      : (remCap > 0
+          ? `<span class="px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 text-[10px] font-black animate-pulse">💺 ${occupiedSeats}/${maxCap} Seats Occupied (${remCap} Vacant - Radar Active)</span>`
+          : `<span class="px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-400/30 text-[10px] font-black">💺 ${occupiedSeats}/${maxCap} Seats (Trip Full)</span>`
+        );
 
     card.innerHTML = `
-      <div class="routemate-card p-5 bg-gradient-to-br from-blue-900 via-slate-900 to-indigo-950 text-white shadow-xl relative overflow-hidden animate-in fade-in duration-300">
-        <div class="flex items-center justify-between pb-3 border-b border-white/10">
+      <div class="routemate-card p-4 sm:p-5 bg-gradient-to-br from-blue-950 via-slate-900 to-indigo-950 text-white shadow-xl relative overflow-hidden animate-in fade-in duration-300 space-y-4">
+        <!-- Live Capacity & Trip Mode Header -->
+        <div class="flex items-center justify-between pb-3 border-b border-white/10 flex-wrap gap-2">
           <div class="flex items-center gap-2">
-            <span class="w-2.5 h-2.5 rounded-full ${isStarted ? 'bg-cyan-400' : 'bg-emerald-400'} live-dot"></span>
-            <span class="text-xs font-black uppercase tracking-wider text-cyan-300">
-              ${isStarted ? 'Ride Started • Live GPS Active' : 'Commuter Awaiting Pickup'}
-            </span>
-          </div>
-          <span class="text-xs font-bold text-slate-300">Exact Fuel Share: <strong class="text-white text-sm">₹${trip.fare}</strong></span>
-        </div>
-
-        <div class="mt-3.5 flex items-center justify-between">
-          <div class="flex items-center gap-3">
-            <img src="${trip.riderAvatar}" alt="${trip.riderName}" class="w-12 h-12 rounded-full object-cover border-2 border-cyan-400 shadow-md" />
-            <div class="text-xs">
-              <h4 class="font-black text-white text-sm">${trip.riderName}</h4>
-              <p class="text-slate-300 text-[11px]">${trip.riderPhone}</p>
+            <span class="text-base">${vehIcon}</span>
+            <div class="flex flex-col">
+              <span class="text-xs font-black uppercase tracking-wider text-cyan-300">
+                ${activeVehType.toUpperCase()} ${trips.length > 1 ? 'POOLING TRIP' : 'ACTIVE TRIP'}
+              </span>
+              <span class="text-[10px] text-slate-300">${trips.length} Active Passenger${trips.length > 1 ? 's' : ''}</span>
             </div>
           </div>
-          <a href="tel:${trip.riderPhone}" class="w-10 h-10 rounded-full bg-cyan-600 hover:bg-cyan-500 text-white flex items-center justify-center shadow-lg transition">
-            <i data-lucide="phone" class="w-4 h-4"></i>
-          </a>
+          <div>${capacityBadge}</div>
         </div>
 
-        <div class="mt-3.5 space-y-1.5 text-xs text-slate-200">
-          <p><strong class="text-white">Pickup:</strong> ${trip.pickup}</p>
-          <p><strong class="text-white">Drop:</strong> ${trip.drop}</p>
-        </div>
+        <!-- Passengers List -->
+        <div class="space-y-3">
+          ${trips.map((trip) => {
+            const isStarted = trip.status === 'ride_started';
+            const tripSeats = Number(trip.seatsBooked || trip.seats_booked || trip.seats || 1);
+            return `
+              <div class="p-3.5 rounded-2xl bg-white/5 border border-white/10 backdrop-blur-sm space-y-3 relative overflow-hidden">
+                <div class="flex items-center justify-between">
+                  <div class="flex items-center gap-2">
+                    <span class="w-2.5 h-2.5 rounded-full ${isStarted ? 'bg-cyan-400' : 'bg-emerald-400'} live-dot"></span>
+                    <span class="text-[11px] font-black uppercase tracking-wider text-cyan-300">
+                      ${isStarted ? 'Ride Started • Live GPS Active' : 'Commuter Awaiting Pickup'}
+                    </span>
+                  </div>
+                  <div class="flex items-center gap-1.5">
+                    <span class="px-2 py-0.5 rounded-md bg-white/10 text-[10px] font-bold text-slate-200">
+                      💺 ${tripSeats} Seat${tripSeats > 1 ? 's' : ''}
+                    </span>
+                    <span class="text-xs font-bold text-slate-200">
+                      Fuel Share: <strong class="text-white text-sm">₹${trip.fare}</strong>
+                    </span>
+                  </div>
+                </div>
 
-        <!-- Commuter Payment Settlement Status -->
-        <div class="mt-3 p-2.5 rounded-xl ${trip.paymentSettled ? 'bg-emerald-500/20 border border-emerald-400/30 text-emerald-300' : 'bg-amber-500/20 border border-amber-400/30 text-amber-200'} text-xs font-bold flex items-center justify-between">
-          <span class="flex items-center gap-1.5">
-            <i data-lucide="${(trip.paymentMethod === 'cash') ? 'banknote' : 'smartphone'}" class="w-3.5 h-3.5"></i>
-            <span>Payment Status:</span>
-          </span>
-          <span class="font-black ${trip.paymentSettled ? 'text-emerald-300' : 'text-amber-300'}">
-            ${trip.paymentSettled ? `✓ Settled via ${(trip.paymentMethod || 'upi').toUpperCase()}` : (trip.paymentMethod === 'cash' ? '💵 Cash in Hand (Awaiting Drop)' : '📱 Direct UPI / QR (Awaiting Pay)')}
-          </span>
-        </div>
+                <div class="flex items-center justify-between">
+                  <div class="flex items-center gap-3">
+                    <img src="${trip.riderAvatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=120&q=80'}" alt="${trip.riderName || 'Commuter'}" class="w-10 h-10 rounded-full object-cover border-2 border-cyan-400 shadow-md" />
+                    <div class="text-xs">
+                      <h4 class="font-black text-white text-sm">${trip.riderName || 'Commuter'}</h4>
+                      <p class="text-slate-300 text-[11px]">${trip.riderPhone || 'No phone'}</p>
+                    </div>
+                  </div>
+                  ${trip.riderPhone ? `
+                    <a href="tel:${trip.riderPhone}" class="w-9 h-9 rounded-full bg-cyan-600 hover:bg-cyan-500 text-white flex items-center justify-center shadow-lg transition active:scale-95">
+                      <i data-lucide="phone" class="w-4 h-4"></i>
+                    </a>
+                  ` : ''}
+                </div>
 
-        <div class="mt-4 pt-3 border-t border-white/10">
-          ${!isStarted ? `
-            <button type="button" onclick="openPinModal()" class="w-full py-3 btn-pill-primary text-xs flex items-center justify-center gap-2 cursor-pointer">
-              <i data-lucide="key" class="w-4 h-4"></i>
-              <span>Verify Commuter PIN & Start Ride</span>
-            </button>
-          ` : `
-            <button type="button" onclick="openDriverTripCompletionModal()" class="w-full py-3.5 bg-emerald-600 hover:bg-emerald-500 text-white font-black rounded-full text-xs flex items-center justify-center gap-2 shadow-lg transition cursor-pointer active:scale-95">
-              <i data-lucide="check-check" class="w-4 h-4"></i>
-              <span>Verify Payment & Complete Trip (₹${trip.fare})</span>
-            </button>
-          `}
+                <div class="space-y-1 text-xs text-slate-200 bg-black/20 p-2.5 rounded-xl border border-white/5">
+                  <p class="truncate"><strong class="text-cyan-200 font-bold">Pickup:</strong> ${trip.pickup}</p>
+                  <p class="truncate"><strong class="text-emerald-200 font-bold">Drop:</strong> ${trip.drop || trip.drop_location || 'Destination'}</p>
+                </div>
+
+                <!-- Commuter Payment Settlement Status -->
+                <div class="p-2.5 rounded-xl ${trip.paymentSettled ? 'bg-emerald-500/20 border border-emerald-400/30 text-emerald-300' : 'bg-amber-500/20 border border-amber-400/30 text-amber-200'} text-xs font-bold flex items-center justify-between">
+                  <span class="flex items-center gap-1.5">
+                    <i data-lucide="${(trip.paymentMethod === 'cash') ? 'banknote' : 'smartphone'}" class="w-3.5 h-3.5"></i>
+                    <span>Payment Status:</span>
+                  </span>
+                  <span class="font-black ${trip.paymentSettled ? 'text-emerald-300' : 'text-amber-300'} text-[11px]">
+                    ${trip.paymentSettled ? `✓ Settled via ${(trip.paymentMethod || 'upi').toUpperCase()}` : (trip.paymentMethod === 'cash' ? '💵 Cash in Hand (Awaiting Drop)' : '📱 Direct UPI / QR (Awaiting Pay)')}
+                  </span>
+                </div>
+
+                <!-- Action Button for this Commuter -->
+                <div class="pt-1">
+                  ${!isStarted ? `
+                    <button type="button" onclick="openPinModal('${trip.id}')" class="w-full py-2.5 btn-pill-primary text-xs flex items-center justify-center gap-2 cursor-pointer active:scale-95 transition">
+                      <i data-lucide="key" class="w-4 h-4"></i>
+                      <span>Verify Commuter PIN & Start Ride</span>
+                    </button>
+                  ` : `
+                    <button type="button" onclick="openDriverTripCompletionModal('${trip.id}')" class="w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-black rounded-full text-xs flex items-center justify-center gap-2 shadow-lg transition cursor-pointer active:scale-95">
+                      <i data-lucide="check-check" class="w-4 h-4"></i>
+                      <span>Verify Payment & Complete Trip (₹${trip.fare})</span>
+                    </button>
+                  `}
+                </div>
+              </div>
+            `;
+          }).join('')}
         </div>
       </div>
     `;
@@ -3735,7 +4064,8 @@
     if (window.lucide) lucide.createIcons();
   }
 
-  window.openPinModal = function () {
+  window.openPinModal = function (rideId) {
+    currentTargetPinRideId = rideId || (state.activeDriverTrips && state.activeDriverTrips[0]?.id) || state.activeDriverTrip?.id || null;
     const modal = document.getElementById('pinModal');
     if (modal) modal.classList.remove('hidden');
   };
@@ -3749,17 +4079,22 @@
     const input = document.getElementById('inputVerifyPin');
     const entered = (input?.value || '').trim();
 
-    if (!state.activeDriverTrip) return;
-    const requiredPin = String(state.activeDriverTrip.pin || '4821').trim();
+    const trips = state.activeDriverTrips || [];
+    const trip = (currentTargetPinRideId ? trips.find(t => t.id === currentTargetPinRideId) : null) || state.activeDriverTrip;
+    if (!trip) return;
 
+    const requiredPin = String(trip.pin || '4821').trim();
     if (entered !== requiredPin && entered !== '4821') {
       showToast('Incorrect PIN. Please ask commuter for their 4-digit PIN.', 'warning');
       return;
     }
 
     closePinModal();
-    await window.db.matching.startRide(state.activeDriverTrip.id);
-    state.activeDriverTrip.status = 'ride_started';
+    await window.db.matching.startRide(trip.id);
+    trip.status = 'ride_started';
+    if (state.activeDriverTrip && state.activeDriverTrip.id === trip.id) {
+      state.activeDriverTrip.status = 'ride_started';
+    }
     renderDriverActiveTripCard();
     if (state.maps.driver) {
       updateRouteLine(state.maps.driver, 'driver');
@@ -3819,9 +4154,11 @@
   }
   window.calculateDynamicCommission = calculateDynamicCommission;
 
-  window.openDriverTripCompletionModal = function () {
-    if (!state.activeDriverTrip) return;
-    const trip = state.activeDriverTrip;
+  window.openDriverTripCompletionModal = function (rideId) {
+    currentTargetCompleteRideId = rideId || (state.activeDriverTrips && state.activeDriverTrips[0]?.id) || state.activeDriverTrip?.id || null;
+    const trips = state.activeDriverTrips || [];
+    const trip = (currentTargetCompleteRideId ? trips.find(t => t.id === currentTargetCompleteRideId) : null) || state.activeDriverTrip;
+    if (!trip) return;
     const modal = document.getElementById('driverTripCompletionModal');
     if (!modal) return;
 
@@ -3926,14 +4263,15 @@
   };
 
   window.executeDriverPaymentVerificationAndCompletion = async function () {
-    if (!state.activeDriverTrip) return;
+    const trips = state.activeDriverTrips || [];
+    const trip = (currentTargetCompleteRideId ? trips.find(t => t.id === currentTargetCompleteRideId) : null) || state.activeDriverTrip;
+    if (!trip) return;
+
     const chk = document.getElementById('driverConfirmPaymentCheckbox');
     if (chk && !chk.checked) {
       showToast('Please confirm verification of payment receipt to complete trip.', 'warning');
       return;
     }
-
-    const trip = state.activeDriverTrip;
     const fare = trip.fare;
     const distance = trip.distance || trip.distanceKm || 0;
     const vehicleType = (trip.vehicle || trip.vehicle_type || 'bike').toLowerCase();
@@ -4061,15 +4399,19 @@
         }
       }
 
-      // 3. Clear driver route markers
-      if (state.maps.driver) {
+      // 3. Remove completed passenger from active driver trips
+      state.activeDriverTrips = (state.activeDriverTrips || []).filter(t => t.id !== trip.id);
+      state.activeDriverTrip = state.activeDriverTrips[0] || null;
+      currentTargetCompleteRideId = null;
+
+      // 4. Clear driver route markers if no remaining active passengers
+      if (state.activeDriverTrips.length === 0 && state.maps.driver) {
         if (state.mapMarkers.driverRouteLine) { state.maps.driver.removeLayer(state.mapMarkers.driverRouteLine); state.mapMarkers.driverRouteLine = null; }
         if (state.mapMarkers.driverPickup) { state.maps.driver.removeLayer(state.mapMarkers.driverPickup); state.mapMarkers.driverPickup = null; }
         if (state.mapMarkers.driverDrop) { state.maps.driver.removeLayer(state.mapMarkers.driverDrop); state.mapMarkers.driverDrop = null; }
       }
 
       closeDriverTripCompletionModal();
-      state.activeDriverTrip = null;
       renderDriverActiveTripCard();
       startDriverRadar();
 
@@ -5018,6 +5360,7 @@
           </div>
         `;
 
+        renderDriverActiveVehicleCard();
         startDriverRadar();
         if (forceRefresh) showToast('KYC Verified! You can now offer rides.', 'success');
       }
@@ -5207,6 +5550,7 @@
         `;
       }
 
+      renderDriverActiveVehicleCard();
       if (window.lucide) lucide.createIcons();
     } catch (err) {
       console.warn('Driver KYC status check warning:', err);
@@ -5761,12 +6105,52 @@
   // PROFILE VEHICLE MANAGEMENT ("MY VEHICLES" / "ADD ANOTHER VEHICLE")
   // -------------------------------------------------------------------------
   let addVehicleRcCompressedBase64 = null;
+  let addVehicleCarDlCompressedBase64 = null;
+
+  window.handleAddVehicleTypeChange = function (type) {
+    const carDlWrap = document.getElementById('addVehicleCarDlWrap');
+    if (!carDlWrap) return;
+    if (type === 'car') {
+      carDlWrap.classList.remove('hidden');
+    } else {
+      carDlWrap.classList.add('hidden');
+    }
+  };
+
+  window.handleAddVehicleCarDlFile = async function (e) {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+
+    const previewContainer = document.getElementById('addVehicleCarDlPreviewContainer');
+    const promptContainer = document.getElementById('addVehicleCarDlPrompt');
+    const previewImg = document.getElementById('addVehicleCarDlPreviewImg');
+    const errBox = document.getElementById('addVehicleErrorMsg');
+
+    try {
+      if (errBox) errBox.classList.add('hidden');
+      showToast('Compressing Car Driving License (LMV)...', 'info');
+      const compressed = await compressImage(file, 1200, 0.8);
+      addVehicleCarDlCompressedBase64 = compressed;
+
+      if (previewImg) previewImg.src = compressed;
+      if (previewContainer) previewContainer.classList.remove('hidden');
+      if (promptContainer) promptContainer.classList.add('hidden');
+      showToast('Car Driving License attached', 'success');
+    } catch (err) {
+      console.error('Car DL compression failed:', err);
+      if (errBox) {
+        errBox.textContent = 'Failed to process Car DL image. Please choose a standard JPG or PNG.';
+        errBox.classList.remove('hidden');
+      }
+    }
+  };
 
   window.openAddVehicleModal = function () {
     const modal = document.getElementById('addVehicleModal');
     if (!modal) return;
 
     addVehicleRcCompressedBase64 = null;
+    addVehicleCarDlCompressedBase64 = null;
 
     const form = document.getElementById('addVehicleForm');
     if (form) form.reset();
@@ -5776,9 +6160,20 @@
     const previewImg = document.getElementById('addVehicleRcPreviewImg');
     const errBox = document.getElementById('addVehicleErrorMsg');
 
+    const carDlWrap = document.getElementById('addVehicleCarDlWrap');
+    const carDlPreview = document.getElementById('addVehicleCarDlPreviewContainer');
+    const carDlPrompt = document.getElementById('addVehicleCarDlPrompt');
+    const carDlImg = document.getElementById('addVehicleCarDlPreviewImg');
+
     if (previewContainer) previewContainer.classList.add('hidden');
     if (promptContainer) promptContainer.classList.remove('hidden');
     if (previewImg) previewImg.src = '';
+
+    if (carDlWrap) carDlWrap.classList.add('hidden');
+    if (carDlPreview) carDlPreview.classList.add('hidden');
+    if (carDlPrompt) carDlPrompt.classList.remove('hidden');
+    if (carDlImg) carDlImg.src = '';
+
     if (errBox) {
       errBox.classList.add('hidden');
       errBox.textContent = '';
@@ -5881,6 +6276,17 @@
       return;
     }
 
+    if (vehicleType === 'car') {
+      const hasExistingDl = state.kyc?.submission?.dl_photo || state.kyc?.submission?.dl_number;
+      if (!addVehicleCarDlCompressedBase64 && !hasExistingDl) {
+        if (errBox) {
+          errBox.textContent = 'Please upload a photo of your Car Driving License (LMV / 4-Wheeler) to register a Car.';
+          errBox.classList.remove('hidden');
+        }
+        return;
+      }
+    }
+
     if (errBox) errBox.classList.add('hidden');
     if (submitBtn) submitBtn.disabled = true;
     if (submitText) submitText.textContent = 'Submitting...';
@@ -5908,7 +6314,9 @@
         vehicleColor,
         vehicle_color: vehicleColor,
         rcPhoto: addVehicleRcCompressedBase64,
-        rc_photo: addVehicleRcCompressedBase64
+        rc_photo: addVehicleRcCompressedBase64,
+        dlPhoto: addVehicleCarDlCompressedBase64 || state.kyc?.submission?.dl_photo || null,
+        dl_photo: addVehicleCarDlCompressedBase64 || state.kyc?.submission?.dl_photo || null
       };
 
       if (window.db?.kyc?.addDriverVehicle) {
@@ -5920,6 +6328,7 @@
 
       await checkDriverKycStatus(true);
       await renderProfileVehicles();
+      renderDriverActiveVehicleCard();
     } catch (err) {
       console.error('Vehicle submission error:', err);
       if (errBox) {
@@ -5945,10 +6354,153 @@
       }
       await checkDriverKycStatus(true);
       await renderProfileVehicles();
+      renderDriverActiveVehicleCard();
     } catch (err) {
       console.error('Error switching active vehicle:', err);
       showToast(err.message || 'Failed to switch vehicle.', 'danger');
     }
+  };
+
+  function renderDriverActiveVehicleCard() {
+    const card = document.getElementById('driverActiveVehicleCard');
+    if (!card) return;
+
+    const user = state.currentUser;
+    if (!user || state.kyc?.status !== 'approved') {
+      card.classList.add('hidden');
+      return;
+    }
+    card.classList.remove('hidden');
+
+    // Determine approved vehicles
+    let vehicles = state.kyc?.submission?.vehicles || [];
+    let approvedVehicles = vehicles.filter(v => v.status === 'approved');
+
+    // If no multi-vehicles list but main driver KYC is approved, derive from submission/driver
+    if (approvedVehicles.length === 0) {
+      const mainType = (state.kyc?.submission?.vehicle_type || state.kyc?.submission?.vehicle || 'bike').toLowerCase();
+      approvedVehicles = [{
+        id: 'primary',
+        vehicle_type: mainType === 'car' ? 'car' : (mainType === 'auto' ? 'auto' : 'bike'),
+        vehicle_name: state.kyc?.submission?.vehicle_name || (mainType === 'car' ? 'Car Seat' : (mainType === 'auto' ? 'Auto' : 'Bike')),
+        vehicle_number: state.kyc?.submission?.vehicle_number || '--',
+        is_default: true,
+        status: 'approved'
+      }];
+    }
+
+    // Set of approved vehicle types
+    const approvedTypes = Array.from(new Set(approvedVehicles.map(v => v.vehicle_type)));
+    state.approvedVehicleTypes = approvedTypes;
+
+    // Determine currently active vehicle
+    let activeVeh = approvedVehicles.find(v => v.is_default) || approvedVehicles[0];
+    if (state.driverActiveVehicleType && approvedVehicles.some(v => v.vehicle_type === state.driverActiveVehicleType)) {
+      activeVeh = approvedVehicles.find(v => v.vehicle_type === state.driverActiveVehicleType) || activeVeh;
+    }
+
+    state.driverActiveVehicle = activeVeh;
+    state.driverActiveVehicleType = activeVeh?.vehicle_type || 'bike';
+
+    const iconWrap = document.getElementById('driverActiveVehicleIconWrap');
+    const lockBadge = document.getElementById('driverActiveVehicleLockBadge');
+    const nameEl = document.getElementById('driverActiveVehicleName');
+    const plateEl = document.getElementById('driverActiveVehiclePlate');
+    const switchWrap = document.getElementById('driverVehicleSwitchWrap');
+
+    const typeIcons = { bike: '🛵', car: '🚗', auto: '🛺' };
+    const typeNames = { bike: 'Bike', car: 'Car Seat (Pooling)', auto: 'Auto (Pooling)' };
+    const typeLockLabels = {
+      bike: 'Bike Verified Only',
+      car: 'Car Verified (LMV DL)',
+      auto: 'Auto Verified'
+    };
+
+    if (iconWrap) {
+      iconWrap.textContent = typeIcons[state.driverActiveVehicleType] || '🛵';
+      if (state.driverActiveVehicleType === 'car') {
+        iconWrap.className = 'w-9 h-9 rounded-xl bg-indigo-50 text-indigo-700 border border-indigo-200 flex items-center justify-center font-black text-lg flex-shrink-0';
+      } else if (state.driverActiveVehicleType === 'auto') {
+        iconWrap.className = 'w-9 h-9 rounded-xl bg-amber-50 text-amber-700 border border-amber-200 flex items-center justify-center font-black text-lg flex-shrink-0';
+      } else {
+        iconWrap.className = 'w-9 h-9 rounded-xl bg-blue-50 text-blue-700 border border-blue-200 flex items-center justify-center font-black text-lg flex-shrink-0';
+      }
+    }
+
+    if (lockBadge) {
+      lockBadge.textContent = typeLockLabels[state.driverActiveVehicleType] || 'Mode Verified';
+      if (state.driverActiveVehicleType === 'car') {
+        lockBadge.className = 'px-1.5 py-0.2 rounded text-[9px] font-black bg-indigo-100 text-indigo-800 border border-indigo-200';
+      } else if (state.driverActiveVehicleType === 'auto') {
+        lockBadge.className = 'px-1.5 py-0.2 rounded text-[9px] font-black bg-amber-100 text-amber-800 border border-amber-200';
+      } else {
+        lockBadge.className = 'px-1.5 py-0.2 rounded text-[9px] font-black bg-blue-100 text-blue-800 border border-blue-200';
+      }
+    }
+
+    if (nameEl) nameEl.textContent = activeVeh?.vehicle_name || typeNames[state.driverActiveVehicleType] || 'Vehicle';
+    if (plateEl) plateEl.textContent = activeVeh?.vehicle_number || '--';
+
+    if (switchWrap) {
+      if (approvedVehicles.length > 1) {
+        switchWrap.innerHTML = `
+          <div class="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200">
+            ${approvedVehicles.map(v => {
+              const isActive = (v.vehicle_type === state.driverActiveVehicleType);
+              return `
+                <button type="button" onclick="selectDriverActiveVehicleMode('${v.vehicle_type}', '${v.id}')"
+                  class="px-2 py-1 rounded-lg text-[10px] font-bold transition flex items-center gap-1 cursor-pointer ${
+                    isActive ? 'bg-white text-blue-700 shadow-xs font-black' : 'text-slate-600 hover:text-slate-900'
+                  }">
+                  <span>${typeIcons[v.vehicle_type] || '🛵'}</span>
+                  <span class="capitalize">${v.vehicle_type}</span>
+                </button>
+              `;
+            }).join('')}
+          </div>
+        `;
+      } else {
+        const lockedTypes = ['bike', 'car', 'auto'].filter(t => !approvedTypes.includes(t));
+        switchWrap.innerHTML = `
+          <div class="flex items-center gap-1.5">
+            <span class="text-[10px] text-slate-500 font-semibold hidden sm:inline-block">
+              ${lockedTypes.length > 0 ? `(${lockedTypes.join('/')} locked)` : ''}
+            </span>
+            <button type="button" onclick="openAddVehicleModal()" class="px-2.5 py-1 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-700 text-[10px] font-bold transition flex items-center gap-1 cursor-pointer border border-slate-200 active:scale-95">
+              <i data-lucide="plus" class="w-3 h-3"></i>
+              <span>Add Vehicle</span>
+            </button>
+          </div>
+        `;
+      }
+    }
+
+    if (window.lucide) lucide.createIcons();
+  }
+  window.renderDriverActiveVehicleCard = renderDriverActiveVehicleCard;
+
+  window.selectDriverActiveVehicleMode = async function (vType, vehicleId) {
+    if (!state.approvedVehicleTypes.includes(vType)) {
+      showToast(`Cannot switch to ${vType}. Approved documents required in KYC.`, 'warning');
+      return;
+    }
+    if (state.activeDriverTrips && state.activeDriverTrips.length > 0) {
+      showToast('Cannot switch vehicle mode while on an active trip. Complete current ride first.', 'warning');
+      return;
+    }
+    state.driverActiveVehicleType = vType;
+    if (vehicleId && vehicleId !== 'primary') {
+      try {
+        if (window.db?.kyc?.switchDriverVehicle && state.currentUser) {
+          await window.db.kyc.switchDriverVehicle(state.currentUser.id, vehicleId);
+        }
+      } catch (e) {
+        console.warn('Switch driver vehicle notice:', e);
+      }
+    }
+    renderDriverActiveVehicleCard();
+    startDriverRadar();
+    showToast(`Switched active driving mode to ${vType.toUpperCase()}`, 'success');
   };
 
   window.renderProfileVehicles = async function () {

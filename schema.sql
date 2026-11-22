@@ -64,13 +64,14 @@ create table if not exists public.rides (
   driver_role text default 'Commuter',
   rating numeric(3,2) default 4.90,
   avatar text,
-  vehicle_type text not null check (vehicle_type in ('bike', 'car')),
+  vehicle_type text not null check (vehicle_type in ('bike', 'car', 'auto')),
   vehicle_name text not null,
   vehicle_number text not null,
   pickup text not null,
   drop_location text not null,
   departure_time text not null,
   seats_available integer not null default 1,
+  seats_booked integer not null default 1,
   per_seat_price numeric(10,2) not null,
   payment_preference text not null default 'both' check (payment_preference in ('upi', 'cash', 'both')),
   verified boolean default true,
@@ -87,6 +88,10 @@ begin
   alter table public.rides drop constraint if exists rides_status_check;
   alter table public.rides add constraint rides_status_check 
     check (status in ('active', 'searching', 'accepted', 'driver_assigned', 'driver_accepted', 'ride_started', 'completed', 'cancelled', 'expired'));
+  alter table public.rides drop constraint if exists rides_vehicle_type_check;
+  alter table public.rides add constraint rides_vehicle_type_check
+    check (vehicle_type in ('bike', 'car', 'auto'));
+  alter table public.rides add column if not exists seats_booked integer not null default 1;
 exception when others then
   null;
 end $$;
