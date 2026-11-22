@@ -1228,7 +1228,7 @@
      * - Long (> ₹150 / Inter-city): Capped at standard (Bike: ₹5, Auto: ₹10, Car: ₹18)
      */
     calculateDynamicCommission({ fare, distance, vehicleType }) {
-      const numFare = Math.max(0, Number(fare) || 0);
+      const numFare = Math.max(0, Math.round(Number(fare) || 0));
       const numDist = Math.max(0, Number(distance) || 0);
       const vType = String(vehicleType || 'bike').toLowerCase();
 
@@ -1236,16 +1236,17 @@
       if (vType.includes('car')) category = 'car';
       else if (vType.includes('auto')) category = 'auto';
 
+      let commission = 2;
+      let slab = 'short';
+      let label = 'Micro-Fee (Short Ride)';
+
       if (numFare < 50 || (numDist > 0 && numDist <= 5 && numFare < 75)) {
-        const commission = category === 'bike' ? 2 : 3;
-        return {
-          commission,
-          slab: 'short',
-          category,
-          label: 'Micro-Fee (Short Ride)'
-        };
+        slab = 'short';
+        label = 'Micro-Fee (Short Ride)';
+        commission = category === 'bike' ? 2 : 3;
       } else if (numFare <= 150) {
-        let commission = 3;
+        slab = 'medium';
+        label = 'Scaled Fee (Medium Ride)';
         if (category === 'bike') {
           commission = numFare <= 100 ? 3 : 4;
         } else if (category === 'auto') {
@@ -1253,21 +1254,26 @@
         } else {
           commission = numFare <= 100 ? 8 : 12;
         }
-        return {
-          commission,
-          slab: 'medium',
-          category,
-          label: 'Scaled Fee (Medium Ride)'
-        };
       } else {
-        const commission = category === 'bike' ? 5 : (category === 'auto' ? 10 : 18);
-        return {
-          commission,
-          slab: 'long',
-          category,
-          label: 'Standard Cap (Long Ride)'
-        };
+        slab = 'long';
+        label = 'Standard Cap (Long Ride)';
+        commission = category === 'bike' ? 5 : (category === 'auto' ? 10 : 18);
       }
+
+      const roundedCommission = Math.round(commission);
+      const driverPayout = Math.max(0, numFare - roundedCommission);
+
+      return {
+        commission: roundedCommission,
+        commission_amount: roundedCommission,
+        fare: numFare,
+        fare_amount: numFare,
+        driver_payout: driverPayout,
+        driverPayout: driverPayout,
+        slab,
+        category,
+        label
+      };
     },
 
     /**
@@ -1559,6 +1565,10 @@
       const rName = reqData.riderName || 'Commuter';
       const seatsBooked = Math.max(1, Number(reqData.seatsBooked || reqData.seats_booked || reqData.seats || 1));
 
+      const commInfo = (typeof kycManager?.calculateDynamicCommission === 'function')
+        ? kycManager.calculateDynamicCommission({ fare, distance: dist, vehicleType })
+        : { commission: 2, commission_amount: 2, slab: 'short', driverPayout: Math.max(0, fare - 2), driver_payout: Math.max(0, fare - 2) };
+
       const notesPayload = {
         isRequest: true,
         status: 'searching',
@@ -1570,6 +1580,12 @@
         riderAvatar: (reqData.riderAvatar && !reqData.riderAvatar.includes('unsplash')) ? reqData.riderAvatar : getSvgInitialsAvatar(rName),
         riderRating: (reqData.riderRating !== undefined && reqData.riderRating !== null) ? Number(reqData.riderRating) : (reqData.rating ? Number(reqData.rating) : 5.0),
         fare: fare,
+        fare_amount: fare,
+        commission: commInfo.commission,
+        commission_amount: commInfo.commission_amount,
+        commissionSlab: commInfo.slab,
+        driverPayout: commInfo.driverPayout,
+        driver_payout: commInfo.driver_payout,
         distance: dist,
         pin: pin,
         pickup: reqData.pickup,
@@ -2573,10 +2589,13 @@
         pickup: completedData.pickup || existingNotes.pickup || existingRow?.pickup || 'Pickup Location',
         drop: completedData.drop || existingNotes.drop || existingRow?.drop_location || 'Drop Location',
         fare: completedData.fare !== undefined ? completedData.fare : (existingNotes.fare !== undefined ? existingNotes.fare : existingRow?.per_seat_price || 110),
+        fare_amount: completedData.fare_amount !== undefined ? completedData.fare_amount : (completedData.fare !== undefined ? completedData.fare : (existingNotes.fare_amount || existingNotes.fare || existingRow?.per_seat_price || 110)),
         distance: completedData.distance !== undefined ? completedData.distance : (existingNotes.distance !== undefined ? existingNotes.distance : 0),
         vehicleType: completedData.vehicleType || existingNotes.vehicleType || existingRow?.vehicle_type || 'bike',
         paymentMethod: completedData.paymentMethod || existingNotes.paymentMethod || 'upi',
         commissionDeducted: completedData.commissionDeducted !== undefined ? completedData.commissionDeducted : existingNotes.commissionDeducted,
+        commission_amount: completedData.commission_amount !== undefined ? completedData.commission_amount : (completedData.commissionDeducted !== undefined ? completedData.commissionDeducted : existingNotes.commission_amount),
+        driver_payout: completedData.driver_payout !== undefined ? completedData.driver_payout : (completedData.driverPayout !== undefined ? completedData.driverPayout : existingNotes.driver_payout),
         commissionSlab: completedData.commissionSlab || existingNotes.commissionSlab || 'standard',
         vehicleNumber: completedData.vehicleNumber || existingNotes.vehicleNumber || existingRow?.vehicle_number || ''
       };

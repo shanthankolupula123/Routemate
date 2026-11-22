@@ -2655,11 +2655,11 @@
   }
 
   /**
-   * Realistic Peer-to-Peer Fuel-Share Pricing Engine:
-   * - Bike (1 Pillion): Base fare ₹15 + ₹0.90/km (e.g. ~84-87 km calculates to ~₹90-₹95).
-   * - Auto (Per Seat): Base fare ₹20 + ₹1.30/km per seat (multiplied by seats_booked).
-   * - Car (Per Seat): Base fare ₹25 + ₹1.60/km per seat (multiplied by seats_booked).
-   * Fares are cleanly rounded to the nearest whole rupee with Math.round().
+   * Balanced & Realistic Fuel-Share Pricing Engine:
+   * - Car (Per Seat): Base fare ₹35 + ₹2.00/km per seat (sensible ₹45 floor, ~85-87km comes to ~₹205-₹210).
+   * - Auto (Per Seat, 1-3 seats): Base fare ₹25 + ₹1.50/km per seat (sensible ₹30 floor, scaled by seats_booked).
+   * - Bike (Single Pillion, no seat selector): Base fare ₹15 + ₹0.90/km (sensible ₹20 floor, ~84-87km comes to ~₹91-₹93).
+   * All displayed and stored fares are cleanly rounded using Math.round().
    */
   function calculateTieredFuelShareFare(distanceKm, vehicleType, seatsBooked = 1) {
     const dist = Math.max(1, Number(distanceKm) || 1);
@@ -2670,17 +2670,20 @@
     let ratePerKm = 0.90;
 
     if (vType === 'car') {
-      // Car (Per Seat): Base fare ₹25 + ₹1.60/km per seat
-      ratePerKm = 1.60;
-      baseFarePerSeat = 25 + (dist * ratePerKm);
+      // Car (Per Seat): Base fare ₹35 + ₹2.00/km per seat with ₹45 floor (~85-87km = ~₹205-₹210)
+      ratePerKm = 2.00;
+      const minCarFloor = 45;
+      baseFarePerSeat = Math.max(minCarFloor, Math.round(35 + (dist * ratePerKm)));
     } else if (vType === 'auto') {
-      // Auto (Per Seat): Base fare ₹20 + ₹1.30/km per seat
-      ratePerKm = 1.30;
-      baseFarePerSeat = 20 + (dist * ratePerKm);
+      // Auto (Per Seat, 1-3 Seats): Base fare ₹25 + ₹1.50/km per seat with ₹30 floor
+      ratePerKm = 1.50;
+      const minAutoFloor = 30;
+      baseFarePerSeat = Math.max(minAutoFloor, Math.round(25 + (dist * ratePerKm)));
     } else {
-      // Bike (1 Pillion): Base fare ₹15 + ₹0.90/km
+      // Bike (Single Pillion): Base fare ₹15 + ₹0.90/km with ₹20 floor
       ratePerKm = 0.90;
-      baseFarePerSeat = 15 + (dist * ratePerKm);
+      const minBikeFloor = 20;
+      baseFarePerSeat = Math.max(minBikeFloor, Math.round(15 + (dist * ratePerKm)));
     }
 
     const roundedBase = Math.round(baseFarePerSeat);
@@ -3089,6 +3092,12 @@
     }
 
     try {
+      const commCalc = calculateDynamicCommission({
+        fare: state.fare,
+        distance: state.distanceKm,
+        vehicleType: state.vehicleType
+      });
+
       const payload = {
         pickup: state.pickup,
         drop: state.drop,
@@ -3097,7 +3106,13 @@
         dropLat: state.dropCoords.lat,
         dropLng: state.dropCoords.lng,
         fare: state.fare,
+        fare_amount: state.fare,
         baseFare: state.baseFare || Math.round(state.fare / (state.seatsBooked || 1)),
+        commission: commCalc.commission,
+        commission_amount: commCalc.commission_amount,
+        commissionSlab: commCalc.slab,
+        driverPayout: commCalc.driverPayout,
+        driver_payout: commCalc.driver_payout,
         distance: state.distanceKm,
         vehicleType: state.vehicleType,
         seatsBooked: state.seatsBooked || 1,
@@ -4180,7 +4195,7 @@
   // DISTANCE & FARE-SLAB DYNAMIC COMMISSION CALCULATOR
   // -------------------------------------------------------------------------
   function calculateDynamicCommission({ fare, distance, vehicleType }) {
-    const numFare = Math.max(0, Number(fare) || 0);
+    const numFare = Math.max(0, Math.round(Number(fare) || 0));
     const numDist = Math.max(0, Number(distance) || 0);
     const vType = String(vehicleType || 'bike').toLowerCase();
 
@@ -4188,18 +4203,19 @@
     if (vType.includes('car')) category = 'car';
     else if (vType.includes('auto')) category = 'auto';
 
+    let commission = 2;
+    let slab = 'short';
+    let label = 'Micro-Fee (Short Ride)';
+
     if (numFare < 50 || (numDist > 0 && numDist <= 5 && numFare < 75)) {
       // Short / Local Rides (< ₹50)
-      const commission = category === 'bike' ? 2 : 3;
-      return {
-        commission,
-        slab: 'short',
-        category,
-        label: 'Micro-Fee (Short Ride)'
-      };
+      slab = 'short';
+      label = 'Micro-Fee (Short Ride)';
+      commission = category === 'bike' ? 2 : 3;
     } else if (numFare <= 150) {
       // Medium Rides (₹50 - ₹150)
-      let commission = 3;
+      slab = 'medium';
+      label = 'Scaled Fee (Medium Ride)';
       if (category === 'bike') {
         commission = numFare <= 100 ? 3 : 4;
       } else if (category === 'auto') {
@@ -4207,22 +4223,27 @@
       } else {
         commission = numFare <= 100 ? 8 : 12;
       }
-      return {
-        commission,
-        slab: 'medium',
-        category,
-        label: 'Scaled Fee (Medium Ride)'
-      };
     } else {
       // Long Rides (Fare > ₹150 / Inter-city like Jangaon to Uppal)
-      const commission = category === 'bike' ? 5 : (category === 'auto' ? 10 : 18);
-      return {
-        commission,
-        slab: 'long',
-        category,
-        label: 'Standard Cap (Long Ride)'
-      };
+      slab = 'long';
+      label = 'Standard Cap (Long Ride)';
+      commission = category === 'bike' ? 5 : (category === 'auto' ? 10 : 18);
     }
+
+    const roundedCommission = Math.round(commission);
+    const driverPayout = Math.max(0, numFare - roundedCommission);
+
+    return {
+      commission: roundedCommission,
+      commission_amount: roundedCommission,
+      fare: numFare,
+      fare_amount: numFare,
+      driver_payout: driverPayout,
+      driverPayout: driverPayout,
+      slab,
+      category,
+      label
+    };
   }
   window.calculateDynamicCommission = calculateDynamicCommission;
 
@@ -4401,9 +4422,13 @@
         pickup: trip.pickup,
         drop: trip.drop || trip.drop_location,
         fare,
+        fare_amount: fare,
         distance,
         vehicleType,
         commissionDeducted: commissionFee,
+        commission_amount: commissionFee,
+        driver_payout: commInfo.driver_payout || Math.max(0, fare - commissionFee),
+        driverPayout: commInfo.driverPayout || Math.max(0, fare - commissionFee),
         commissionSlab: commInfo.slab,
         vehicleNumber: state.kyc?.submission?.vehicle_number || trip.vehicleNumber || '',
         paymentMethod,
@@ -4430,6 +4455,11 @@
           pickup: trip.pickup,
           drop: trip.drop || trip.drop_location,
           fare: fare,
+          fare_amount: fare,
+          commission: commissionFee,
+          commission_amount: commissionFee,
+          driver_payout: commInfo.driver_payout || Math.max(0, fare - commissionFee),
+          driverPayout: commInfo.driverPayout || Math.max(0, fare - commissionFee),
           distance: distance,
           vehicleType: vehicleType,
           paymentMethod: paymentMethod,
@@ -5283,7 +5313,7 @@
     const vType = state.selectedScheduleVehicleType || 'bike';
     const fareCalc = (typeof window.calculateTieredFuelShareFare === 'function')
       ? window.calculateTieredFuelShareFare(dist, vType, 1)
-      : { baseFarePerSeat: (vType === 'car' ? Math.round(25 + dist * 1.60) : (vType === 'auto' ? Math.round(20 + dist * 1.30) : Math.round(15 + dist * 0.90))) };
+      : { baseFarePerSeat: (vType === 'car' ? Math.max(45, Math.round(35 + dist * 2.00)) : (vType === 'auto' ? Math.max(30, Math.round(25 + dist * 1.50)) : Math.max(20, Math.round(15 + dist * 0.90)))) };
 
     if (fareDisplay) fareDisplay.textContent = `₹${fareCalc.baseFarePerSeat}`;
     if (fareBreakdown) fareBreakdown.textContent = `~${dist} km • Direct Fuel Split`;
@@ -5334,7 +5364,7 @@
 
     const fareCalc = (typeof window.calculateTieredFuelShareFare === 'function')
       ? window.calculateTieredFuelShareFare(dist, vType, 1)
-      : { baseFarePerSeat: (vType === 'car' ? Math.round(25 + dist * 1.60) : (vType === 'auto' ? Math.round(20 + dist * 1.30) : Math.round(15 + dist * 0.90))) };
+      : { baseFarePerSeat: (vType === 'car' ? Math.max(45, Math.round(35 + dist * 2.00)) : (vType === 'auto' ? Math.max(30, Math.round(25 + dist * 1.50)) : Math.max(20, Math.round(15 + dist * 0.90)))) };
 
     // Resolve driver vehicle info
     let vehName = state.driverActiveVehicle?.vehicle_name || state.kyc?.submission?.vehicle_name || 'Verified Commuter Vehicle';
