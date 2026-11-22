@@ -28,8 +28,8 @@
     vehicleType: 'bike',
     seatsBooked: 1,
     distanceKm: 84,
-    fare: 110,
-    baseFare: 110,
+    fare: 116,
+    baseFare: 116,
     userGPS: null,
     activeRiderRequest: null,
     activeDriverTrip: null,
@@ -2650,6 +2650,87 @@
     updateRouteLine(state.maps.rider);
   }
 
+  /**
+   * Public-Transport-Aligned Tiered Fuel Share Calculator
+   * Aligned with public transit economics (RTC Bus, Shared Auto, Carpooling):
+   * - Bike (Single Pillion): Low base (₹20 up to 2km) + affordable per-km tiers (₹1.50/km -> ₹1.25/km -> ₹1.10/km).
+   * - Auto (1-3 Seats): Balanced base (₹25 up to 2km) + per-km tiers (₹2.00/km -> ₹1.70/km -> ₹1.40/km) scaled by seats.
+   * - Car (1-4 Seats): Fair fuel-share (₹35 up to 2km) + per-km tiers (₹2.50/km -> ₹2.10/km -> ₹1.75/km) scaled by seats.
+   */
+  function calculateTieredFuelShareFare(distanceKm, vehicleType, seatsBooked = 1) {
+    const dist = Math.max(1, Number(distanceKm) || 1);
+    const vType = String(vehicleType || 'bike').toLowerCase();
+    const seats = Math.max(1, Number(seatsBooked) || 1);
+
+    let baseFarePerSeat = 0;
+    let slab = 'short';
+    let transitComparison = 'Bus Equivalent';
+
+    if (vType === 'car') {
+      // CAR (1 to 4 Seats) - AC Comfort at Near-Bus/Shared-Taxi Economy
+      const minFare = 35;
+      if (dist <= 2) {
+        baseFarePerSeat = minFare;
+        slab = 'short';
+      } else if (dist <= 10) {
+        baseFarePerSeat = minFare + (dist - 2) * 2.50;
+        slab = 'short';
+      } else if (dist <= 30) {
+        baseFarePerSeat = 35 + (8 * 2.50) + (dist - 10) * 2.10; // ₹55 for 10km + ₹2.10/km
+        slab = 'medium';
+      } else {
+        baseFarePerSeat = 35 + (8 * 2.50) + (20 * 2.10) + (dist - 30) * 1.75; // ₹97 for 30km + ₹1.75/km
+        slab = 'long';
+      }
+      transitComparison = 'Deluxe AC Bus Aligned';
+    } else if (vType === 'auto') {
+      // AUTO (1 to 3 Seats) - Shared Auto Transit Alternative
+      const minFare = 25;
+      if (dist <= 2) {
+        baseFarePerSeat = minFare;
+        slab = 'short';
+      } else if (dist <= 10) {
+        baseFarePerSeat = minFare + (dist - 2) * 2.00;
+        slab = 'short';
+      } else if (dist <= 30) {
+        baseFarePerSeat = 25 + (8 * 2.00) + (dist - 10) * 1.70; // ₹41 for 10km + ₹1.70/km
+        slab = 'medium';
+      } else {
+        baseFarePerSeat = 25 + (8 * 2.00) + (20 * 1.70) + (dist - 30) * 1.40; // ₹75 for 30km + ₹1.40/km
+        slab = 'long';
+      }
+      transitComparison = 'Shared Auto Aligned';
+    } else {
+      // BIKE (Single Pillion) - Low Base & RTC Bus Comparable Rate
+      const minFare = 20;
+      if (dist <= 2) {
+        baseFarePerSeat = minFare;
+        slab = 'short';
+      } else if (dist <= 10) {
+        baseFarePerSeat = minFare + (dist - 2) * 1.50;
+        slab = 'short';
+      } else if (dist <= 30) {
+        baseFarePerSeat = 20 + (8 * 1.50) + (dist - 10) * 1.25; // ₹32 for 10km + ₹1.25/km
+        slab = 'medium';
+      } else {
+        baseFarePerSeat = 20 + (8 * 1.50) + (20 * 1.25) + (dist - 30) * 1.10; // ₹57 for 30km + ₹1.10/km
+        slab = 'long';
+      }
+      transitComparison = 'RTC Bus Aligned';
+    }
+
+    const roundedBase = Math.round(baseFarePerSeat);
+    const totalFare = roundedBase * (vType === 'bike' ? 1 : seats);
+
+    return {
+      baseFarePerSeat: roundedBase,
+      totalFare,
+      slab,
+      transitComparison
+    };
+  }
+  window.calculateTieredFuelShareFare = calculateTieredFuelShareFare;
+
   function calculateDistanceAndFare() {
     const p = state.pickupCoords || { lat: 17.4018, lng: 78.5602 };
     const d = state.dropCoords || { lat: 17.7265, lng: 79.1554 };
@@ -2663,30 +2744,42 @@
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
     state.distanceKm = Math.max(3, Math.round(R * c * 1.2));
 
-    // Locked, vehicle-wise exact fuel share pricing model
-    let minFare = 20;
-    let rate = 1.30; // Two-Wheeler / Bike fuel share per km
-    if (state.vehicleType === 'car') {
-      minFare = 50;
-      rate = 2.60; // Car seat fuel share per km
-    } else if (state.vehicleType === 'auto') {
-      minFare = 35;
-      rate = 1.80; // Auto fuel share per km
-    }
+    const seats = (state.vehicleType === 'bike') ? 1 : Math.max(1, state.seatsBooked || 1);
+    state.seatsBooked = seats;
 
-    const seats = Math.max(1, state.seatsBooked || 1);
-    const baseFare = Math.max(minFare, Math.round(state.distanceKm * rate));
-    state.baseFare = baseFare;
-    state.fare = baseFare * seats;
+    const calc = calculateTieredFuelShareFare(state.distanceKm, state.vehicleType, seats);
+    state.baseFare = calc.baseFarePerSeat;
+    state.fare = calc.totalFare;
+    state.fareSlab = calc.slab;
 
     const fareEl = document.getElementById('fareDisplay');
+    const distEl = document.getElementById('fareDistanceDisplay');
+    const badgeEl = document.getElementById('fareTransitBadge');
+    const detailEl = document.getElementById('fareBreakdownDetail');
+
     if (fareEl) {
       if (seats > 1) {
-        fareEl.innerHTML = `₹${state.fare} <span class="text-[11px] font-semibold text-slate-500">(₹${baseFare} × ${seats} seats)</span>`;
+        fareEl.innerHTML = `₹${state.fare} <span class="text-[11px] font-semibold text-slate-500">(₹${state.baseFare} × ${seats} seats)</span>`;
       } else {
         fareEl.textContent = `₹${state.fare}`;
       }
     }
+
+    if (distEl) {
+      distEl.innerHTML = `<i data-lucide="map-pin" class="w-3 h-3 text-blue-500"></i><span>Distance: ~${state.distanceKm} km</span>`;
+    }
+
+    if (badgeEl) {
+      badgeEl.textContent = calc.transitComparison;
+    }
+
+    if (detailEl) {
+      detailEl.textContent = seats > 1 
+        ? `₹${state.baseFare} / seat (${seats} seats) • Fuel Split` 
+        : `₹${state.baseFare} / seat • Fuel Split`;
+    }
+
+    if (window.lucide) lucide.createIcons();
   }
 
   function renderCommuterSeatSelector() {
