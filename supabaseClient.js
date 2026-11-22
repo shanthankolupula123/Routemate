@@ -1446,7 +1446,7 @@
     const pin = String(notes.pin || '4821');
     const vehicleType = notes.vehicleType || row.vehicle_type || 'bike';
     const status = notes.status || row.status || 'searching';
-    const seatsBooked = Math.max(1, Number(notes.seatsBooked || notes.seats_booked || notes.seats || row.seats_booked || 1));
+    const seatsBooked = Math.max(1, Number(notes.seatsBooked || notes.seats_booked || notes.seats || row.seats_booked || row.seats_available || 1));
 
     const riderName = notes.riderName || (row.driver_name ? String(row.driver_name).replace(/\s*\([^)]*\)/g, '').trim() : 'Commuter');
     const riderAvatar = (notes.riderAvatar && !notes.riderAvatar.includes('unsplash')) ? notes.riderAvatar : getSvgInitialsAvatar(riderName);
@@ -1604,11 +1604,31 @@
       };
 
       console.log('🚀 [ROUTEMATE RIDER] Writing to Supabase rides:', requestId);
-      const resp = await supabaseRest('rides', {
+      let resp = await supabaseRest('rides', {
         method: 'POST',
         body: dbRow,
         prefer: 'return=representation'
       });
+
+      // Schema Compatibility & Constraint Fallback:
+      // If remote Supabase instance schema cache does not have `seats_booked` column or rejects `auto` vehicle_type,
+      // fallback cleanly to universal schema columns while preserving full data in `notesPayload` and `seats_available`
+      if (!resp.ok) {
+        console.warn('⚠️ [ROUTEMATE RIDER] Primary rides insert encountered schema discrepancy:', resp.error);
+        const fallbackRow = { ...dbRow };
+        delete fallbackRow.seats_booked;
+        if (fallbackRow.vehicle_type === 'auto') {
+          fallbackRow.vehicle_type = 'car';
+        }
+        resp = await supabaseRest('rides', {
+          method: 'POST',
+          body: fallbackRow,
+          prefer: 'return=representation'
+        });
+        if (resp.ok) {
+          console.log('✅ [ROUTEMATE RIDER] Fallback schema insert succeeded:', requestId);
+        }
+      }
 
       const activeRide = {
         id: requestId,
@@ -1636,8 +1656,9 @@
       }
 
       return {
-        success: resp.ok,
-        request: activeRide
+        success: resp.ok || Boolean(resp.data?.[0]?.id),
+        request: activeRide,
+        error: resp.ok ? null : resp.error
       };
     },
 

@@ -210,11 +210,15 @@ module.exports = async (req, res) => {
                   })
                 });
               } else if (actionType === 'warning') {
+                const now = new Date();
+                const expiresAt = new Date(now.getTime() + 48 * 60 * 60 * 1000).toISOString();
                 const warningObj = {
                   id: 'warn_' + Date.now().toString(36),
                   feedbackId: feedbackId || null,
                   notes: notes || 'Official Compliance Warning: Please strictly follow safety and community guidelines.',
-                  issuedAt: new Date().toISOString(),
+                  issuedAt: now.toISOString(),
+                  expires_at: expiresAt,
+                  expiresAt: expiresAt,
                   issuedBy: cleanAdmin
                 };
                 if (!Array.isArray(meta.warnings)) meta.warnings = [];
@@ -270,8 +274,15 @@ module.exports = async (req, res) => {
               kycList[kIdx].status = 'suspended';
               kycList[kIdx].rejection_reason = notes || 'Driver account suspended by Super Admin due to safety report';
             } else if (actionType === 'warning') {
+              const now = new Date();
+              const expiresAt = new Date(now.getTime() + 48 * 60 * 60 * 1000).toISOString();
               kycList[kIdx].warning_count = (kycList[kIdx].warning_count || 0) + 1;
-              kycList[kIdx].warning_alert = { notes, issuedAt: new Date().toISOString() };
+              kycList[kIdx].warning_alert = {
+                notes,
+                issuedAt: now.toISOString(),
+                expires_at: expiresAt,
+                expiresAt: expiresAt
+              };
             } else if (actionType === 'unsuspend') {
               kycList[kIdx].status = 'approved';
               kycList[kIdx].rejection_reason = null;

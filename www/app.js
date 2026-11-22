@@ -3059,7 +3059,8 @@
           handleRiderStatusUpdate(statusData);
         });
       } else {
-        showToast('Failed to broadcast ride. Please check connection.', 'danger');
+        const errMsg = result.error?.message || (typeof result.error === 'string' ? result.error : null) || 'Failed to broadcast ride. Please check connection.';
+        showToast(errMsg, 'danger');
       }
     } catch (e) {
       console.error('Booking error:', e);
@@ -5315,26 +5316,51 @@
       if (status === 'approved') {
         if (operationalContainer) operationalContainer.classList.remove('hidden');
 
-        const warning = submission?.warning_alert || user.warning_alert || null;
+        let warning = submission?.warning_alert || user.warning_alert || null;
+        if (warning) {
+          const issued = warning.issuedAt || warning.timestamp || warning.created_at;
+          const expires = warning.expires_at || warning.expiresAt || (issued ? new Date(new Date(issued).getTime() + 48 * 60 * 60 * 1000).toISOString() : null);
+          const isExpired = expires ? (new Date(expires).getTime() <= Date.now()) : false;
+          if (isExpired) {
+            warning = null;
+            if (submission) submission.warning_alert = null;
+            if (user) user.warning_alert = null;
+            try { localStorage.setItem('routemate_user', JSON.stringify(user)); } catch (e) {}
+            try { localStorage.setItem('routemate_driver_kyc', JSON.stringify(submission)); } catch (e) {}
+          }
+        }
+
         let warningHtml = '';
         if (warning && warning.notes) {
+          let timeRemainingLabel = '48-Hour Active Notice';
+          const issued = warning.issuedAt || warning.timestamp || warning.created_at;
+          const expires = warning.expires_at || warning.expiresAt || (issued ? new Date(new Date(issued).getTime() + 48 * 60 * 60 * 1000).toISOString() : null);
+          if (expires) {
+            const msLeft = new Date(expires).getTime() - Date.now();
+            if (msLeft > 0) {
+              const hrsLeft = Math.floor(msLeft / (60 * 60 * 1000));
+              const minsLeft = Math.floor((msLeft % (60 * 60 * 1000)) / (60 * 1000));
+              timeRemainingLabel = hrsLeft > 0 ? `Expires in ${hrsLeft}h ${minsLeft}m` : `Expires in ${minsLeft}m`;
+            }
+          }
+
           warningHtml = `
             <div id="driverWarningBanner" class="p-3.5 mb-3 rounded-2xl bg-amber-500/15 border-2 border-amber-400 text-amber-950 text-xs shadow-sm flex items-start gap-3 animate-in fade-in">
               <div class="w-8 h-8 rounded-xl bg-amber-500 text-slate-950 flex items-center justify-center font-black flex-shrink-0 mt-0.5 shadow-sm">
                 <i data-lucide="alert-triangle" class="w-4 h-4"></i>
               </div>
               <div class="flex-1 min-w-0">
-                <div class="flex items-center justify-between gap-2">
+                <div class="flex items-center justify-between gap-2 flex-wrap">
                   <h4 class="font-black text-amber-950 text-xs">Official Safety Compliance Warning</h4>
-                  <span class="text-[9px] font-black uppercase text-amber-900 px-2 py-0.5 rounded-full bg-amber-200/90 border border-amber-300">Active Notice</span>
+                  <span class="text-[9px] font-black uppercase text-amber-900 px-2 py-0.5 rounded-full bg-amber-200/90 border border-amber-300">${timeRemainingLabel}</span>
                 </div>
                 <p class="text-[11px] text-amber-900 mt-1 leading-snug font-medium">
                   "${warning.notes}"
                 </p>
-                <div class="mt-2.5 flex items-center justify-between text-[10px] text-amber-800">
-                  <span>Please adhere strictly to Routemate safety & speed guidelines.</span>
+                <div class="mt-2.5 flex items-center justify-between text-[10px] text-amber-800 flex-wrap gap-2">
+                  <span>Auto-expires after 48 hours. Please adhere strictly to Routemate safety & speed guidelines.</span>
                   <button type="button" onclick="dismissDriverWarningAlert()" class="px-3 py-1 rounded-lg bg-amber-300/80 hover:bg-amber-300 font-black text-amber-950 transition cursor-pointer shadow-xs active:scale-95">
-                    Acknowledge ✓
+                    Acknowledge & Dismiss ✓
                   </button>
                 </div>
               </div>
@@ -5563,7 +5589,13 @@
     if (banner) banner.classList.add('hidden');
     if (state.currentUser) {
       state.currentUser.warning_alert = null;
+      try { localStorage.setItem('routemate_user', JSON.stringify(state.currentUser)); } catch (e) {}
     }
+    if (state.kyc?.submission) {
+      state.kyc.submission.warning_alert = null;
+      try { localStorage.setItem('routemate_driver_kyc', JSON.stringify(state.kyc.submission)); } catch (e) {}
+    }
+    showToast('✓ Safety Notice Acknowledged & Dismissed.', 'success');
   };
 
   function listenForDriverSafetyAlerts(user) {
@@ -5599,8 +5631,21 @@
           checkDriverKycStatus(true);
         } else if (p.actionType === 'warning') {
           showToast(`⚠️ Official Safety Warning: ${p.notes || 'Please follow community safety guidelines.'}`, 'warning');
+          const now = new Date();
+          const expiresAt = p.expires_at || p.expiresAt || new Date(now.getTime() + 48 * 60 * 60 * 1000).toISOString();
+          const warningData = {
+            notes: p.notes,
+            issuedAt: p.timestamp || now.toISOString(),
+            expires_at: expiresAt,
+            expiresAt: expiresAt
+          };
           if (state.currentUser) {
-            state.currentUser.warning_alert = { notes: p.notes, issuedAt: p.timestamp || new Date().toISOString() };
+            state.currentUser.warning_alert = warningData;
+            try { localStorage.setItem('routemate_user', JSON.stringify(state.currentUser)); } catch (e) {}
+          }
+          if (state.kyc?.submission) {
+            state.kyc.submission.warning_alert = warningData;
+            try { localStorage.setItem('routemate_driver_kyc', JSON.stringify(state.kyc.submission)); } catch (e) {}
           }
           if (typeof pushUserNotification === 'function') {
             pushUserNotification({
@@ -5697,6 +5742,8 @@
 
     updateKycStepUI();
     refreshKycPreviews();
+    const currentKycVehType = document.getElementById('kycSelectVehicleType')?.value || 'bike';
+    handleKycVehicleTypeChange(currentKycVehType);
     modal.classList.remove('hidden');
     if (window.lucide) lucide.createIcons();
   };
@@ -6109,11 +6156,42 @@
 
   window.handleAddVehicleTypeChange = function (type) {
     const carDlWrap = document.getElementById('addVehicleCarDlWrap');
-    if (!carDlWrap) return;
+    if (carDlWrap) {
+      if (type === 'car') {
+        carDlWrap.classList.remove('hidden');
+      } else {
+        carDlWrap.classList.add('hidden');
+      }
+    }
+
+    const nameLabel = document.getElementById('addVehicleNameLabel');
+    const nameInput = document.getElementById('addVehicleNameInput');
+
     if (type === 'car') {
-      carDlWrap.classList.remove('hidden');
+      if (nameLabel) nameLabel.innerHTML = 'Car Name / Model <span class="text-rose-500">*</span>';
+      if (nameInput) nameInput.placeholder = 'e.g. Swift Dzire / Hyundai i20';
+    } else if (type === 'auto') {
+      if (nameLabel) nameLabel.innerHTML = 'Auto Model / Name <span class="text-rose-500">*</span>';
+      if (nameInput) nameInput.placeholder = 'e.g. Bajaj RE / Piaggio Ape';
     } else {
-      carDlWrap.classList.add('hidden');
+      if (nameLabel) nameLabel.innerHTML = 'Bike / Scooter Name <span class="text-rose-500">*</span>';
+      if (nameInput) nameInput.placeholder = 'e.g. Honda Activa 6G / Royal Enfield';
+    }
+  };
+
+  window.handleKycVehicleTypeChange = function (type) {
+    const nameLabel = document.getElementById('kycLabelVehicleName');
+    const nameInput = document.getElementById('kycInputVehicleName');
+
+    if (type === 'car') {
+      if (nameLabel) nameLabel.innerHTML = 'Car Name / Model <span class="text-rose-500">*</span>';
+      if (nameInput) nameInput.placeholder = 'e.g. Swift Dzire / Hyundai i20';
+    } else if (type === 'auto') {
+      if (nameLabel) nameLabel.innerHTML = 'Auto Model / Name <span class="text-rose-500">*</span>';
+      if (nameInput) nameInput.placeholder = 'e.g. Bajaj RE / Piaggio Ape';
+    } else {
+      if (nameLabel) nameLabel.innerHTML = 'Bike / Scooter Name <span class="text-rose-500">*</span>';
+      if (nameInput) nameInput.placeholder = 'e.g. Honda Activa 6G / Royal Enfield';
     }
   };
 
@@ -6179,6 +6257,7 @@
       errBox.textContent = '';
     }
 
+    handleAddVehicleTypeChange('bike');
     modal.classList.remove('hidden');
     if (window.lucide) lucide.createIcons();
   };
@@ -8167,18 +8246,24 @@
 
     let items = [];
 
-    // 1. Admin Safety Alerts & Warnings
+    // 1. Admin Safety Alerts & Warnings (Auto-expires after 48 hours)
     if (user?.warning_alert && user.warning_alert.notes) {
-      items.push({
-        id: 'notif_warn_active',
-        type: 'safety',
-        title: '⚠️ Safety & Compliance Notice',
-        message: user.warning_alert.notes,
-        timestamp: user.warning_alert.issuedAt || new Date().toISOString(),
-        icon: 'shield-alert',
-        iconBg: 'bg-amber-100 text-amber-800',
-        action: { label: 'Acknowledge', type: 'dismiss_warning' }
-      });
+      const w = user.warning_alert;
+      const issued = w.issuedAt || w.timestamp || w.created_at;
+      const expires = w.expires_at || w.expiresAt || (issued ? new Date(new Date(issued).getTime() + 48 * 60 * 60 * 1000).toISOString() : null);
+      const isExpired = expires ? (new Date(expires).getTime() <= Date.now()) : false;
+      if (!isExpired) {
+        items.push({
+          id: 'notif_warn_active',
+          type: 'safety',
+          title: '⚠️ Safety & Compliance Notice',
+          message: user.warning_alert.notes,
+          timestamp: user.warning_alert.issuedAt || new Date().toISOString(),
+          icon: 'shield-alert',
+          iconBg: 'bg-amber-100 text-amber-800',
+          action: { label: 'Acknowledge', type: 'dismiss_warning' }
+        });
+      }
     }
 
     if (Array.isArray(user?.role?.warnings)) {

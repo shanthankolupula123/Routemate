@@ -306,6 +306,22 @@ module.exports = async (req, res) => {
         if (queriedProfileExtra.suspension_reason && !userSub.rejection_reason) userSub.rejection_reason = queriedProfileExtra.suspension_reason;
       }
 
+      // Auto-expire safety compliance warning after 48 hours (2 days)
+      const isWarningActive = (w) => {
+        if (!w || !w.notes) return false;
+        const issued = w.issuedAt || w.timestamp || w.created_at;
+        const expires = w.expires_at || w.expiresAt || (issued ? new Date(new Date(issued).getTime() + 48 * 60 * 60 * 1000).toISOString() : null);
+        if (!expires) return true;
+        return new Date(expires).getTime() > Date.now();
+      };
+
+      if (resolvedSubmission?.warning_alert && !isWarningActive(resolvedSubmission.warning_alert)) {
+        resolvedSubmission.warning_alert = null;
+      }
+      if (userSub?.warning_alert && !isWarningActive(userSub.warning_alert)) {
+        userSub.warning_alert = null;
+      }
+
       return res.status(200).json({
         success: true,
         submission: resolvedSubmission,
@@ -991,10 +1007,14 @@ module.exports = async (req, res) => {
                 });
               } catch (nErr) {}
             } else if (actionType === 'warning') {
+              const now = new Date();
+              const expiresAt = new Date(now.getTime() + 48 * 60 * 60 * 1000).toISOString();
               const warningObj = {
                 id: 'warn_' + Date.now().toString(36),
                 notes: notes || 'Official Compliance Warning: Please adhere strictly to Routemate safety and speed guidelines.',
-                issuedAt: new Date().toISOString(),
+                issuedAt: now.toISOString(),
+                expires_at: expiresAt,
+                expiresAt: expiresAt,
                 issuedBy: cleanAdmin
               };
               if (!Array.isArray(meta.warnings)) meta.warnings = [];
@@ -1032,7 +1052,9 @@ module.exports = async (req, res) => {
                     data: {
                       warningId: warningObj.id,
                       issuedBy: cleanAdmin,
-                      issuedAt: warningObj.issuedAt
+                      issuedAt: warningObj.issuedAt,
+                      expires_at: expiresAt,
+                      expiresAt: expiresAt
                     }
                   })
                 });
