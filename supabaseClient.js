@@ -1324,6 +1324,92 @@
    * Post-Ride Rating & Safety Feedback Helper
    */
   const feedbacks = {
+    /**
+     * Shared Driver Composite Rating & Safety Score Calculator:
+     * - Peer / Rider Star Ratings: Average of submitted reviews (0 reviews = clean "New" state / 5.0 ★).
+     * - Completed Rides Bonus: Rewards consistency & reliability (+0.05 for 5+ rides, +0.10 for 10+, +0.15 for 25+, +0.20 for 50+).
+     * - Penalties:
+     *   - Unresolved Complaints / Severe negative reviews: -0.20 per complaint.
+     *   - Official Compliance Warnings (active 48-hr window): -0.30 per warning.
+     *   - Driver Suspensions / Strikes: -1.00 deduction.
+     * - Final score clamped cleanly between 1.0 and 5.0, rounded to 1 decimal place.
+     */
+    calculateDriverRatingAndSafetyScore({
+      reviews = [],
+      completedRides = 0,
+      warningsCount = 0,
+      isSuspended = false,
+      complaintsCount = null
+    }) {
+      const validReviews = Array.isArray(reviews) ? reviews.filter(r => {
+        const stars = Number(r.rating !== undefined ? r.rating : r);
+        return !isNaN(stars) && stars >= 1 && stars <= 5;
+      }) : [];
+
+      const totalReviews = validReviews.length;
+      let peerAvg = 5.0;
+      const isNew = totalReviews === 0 && Number(completedRides || 0) === 0;
+      if (totalReviews > 0) {
+        const sum = validReviews.reduce((acc, r) => acc + Number(r.rating !== undefined ? r.rating : r), 0);
+        peerAvg = sum / totalReviews;
+      }
+
+      // Reliability bonus from completed rides
+      const numDone = Math.max(0, Number(completedRides || 0));
+      let completionBonus = 0.0;
+      if (numDone >= 50) completionBonus = 0.20;
+      else if (numDone >= 25) completionBonus = 0.15;
+      else if (numDone >= 10) completionBonus = 0.10;
+      else if (numDone >= 5) completionBonus = 0.05;
+
+      // Penalties for complaints, warnings, and suspensions
+      const numComplaints = complaintsCount !== null && complaintsCount !== undefined
+        ? Math.max(0, Number(complaintsCount))
+        : validReviews.filter(r => Boolean(r.is_safety_flag || r.is_flagged || Number(r.rating) <= 2)).length;
+
+      const numWarnings = Math.max(0, Number(warningsCount || 0));
+      const suspensionPenalty = isSuspended ? 1.00 : 0.00;
+
+      const complaintPenalty = numComplaints * 0.20;
+      const warningPenalty = numWarnings * 0.30;
+      const totalPenalty = complaintPenalty + warningPenalty + suspensionPenalty;
+
+      let composite = peerAvg + completionBonus - totalPenalty;
+      if (isNew && totalPenalty === 0) {
+        composite = 5.0;
+      }
+
+      const finalRating = Math.max(1.0, Math.min(5.0, Math.round(composite * 10) / 10));
+      const formattedRating = finalRating.toFixed(1);
+
+      let safetyTier = 'Excellent';
+      if (isSuspended || finalRating < 3.0) {
+        safetyTier = 'Critical Attention';
+      } else if (numWarnings > 0 || numComplaints > 0 || finalRating < 4.0) {
+        safetyTier = 'Moderate / Under Review';
+      } else if (finalRating >= 4.7) {
+        safetyTier = 'Top Rated & Verified';
+      } else {
+        safetyTier = 'Reliable & Safe';
+      }
+
+      return {
+        rating: finalRating,
+        formattedRating,
+        rawPeerAvg: Math.round(peerAvg * 10) / 10,
+        totalReviews,
+        completedRides: numDone,
+        completionBonus,
+        complaintsCount: numComplaints,
+        warningsCount: numWarnings,
+        isSuspended: Boolean(isSuspended),
+        totalPenalty,
+        isNew,
+        safetyTier,
+        reviewsLabel: isNew ? ' (New)' : ` (${totalReviews} review${totalReviews === 1 ? '' : 's'})`
+      };
+    },
+
     async submitFeedback(payload) {
       const apiBase = (typeof window !== 'undefined' && window.location && window.location.origin)
         ? window.location.origin
@@ -3356,6 +3442,7 @@
     auth,
     kyc,
     feedbacks,
+    calculateDriverRatingAndSafetyScore: feedbacks.calculateDriverRatingAndSafetyScore,
     broadcast,
     notifications,
     scheduledRides,

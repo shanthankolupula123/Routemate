@@ -35,6 +35,82 @@ const NEGATIVE_KEYWORDS = [
   'drunk', 'alcohol', 'wrong route', 'lost', 'phone while driving', 'no helmet', 'reckless', 'bad driving'
 ];
 
+/**
+ * Composite Driver Rating & Safety Score Engine:
+ * - Peer / Rider Star Ratings: Average of submitted reviews (Brand-new drivers show clean "New" state / 5.0 ★).
+ * - Completed Rides Bonus: Rewards consistency & reliability (+0.05 for 5+ rides, +0.10 for 10+, +0.15 for 25+, +0.20 for 50+).
+ * - Penalties:
+ *   - Unresolved Complaints / Severe negative reviews: -0.20 per complaint.
+ *   - Official Compliance Warnings (active 48-hr window): -0.30 per warning.
+ *   - Driver Suspensions / Strikes: -1.00 deduction.
+ * - Final score clamped cleanly between 1.0 and 5.0, rounded to 1 decimal place.
+ */
+function computeCompositeRatingAndSafetyScore({
+  ratings = [],
+  completedRides = 0,
+  unresolvedComplaints = 0,
+  activeWarnings = 0,
+  isSuspended = false
+}) {
+  const validRatings = (ratings || []).filter(r => !isNaN(r) && r >= 1 && r <= 5);
+  const totalReviews = validRatings.length;
+
+  let peerAvg = 5.0;
+  const isNew = totalReviews === 0 && Number(completedRides || 0) === 0;
+  if (totalReviews > 0) {
+    const sum = validRatings.reduce((a, b) => a + b, 0);
+    peerAvg = sum / totalReviews;
+  }
+
+  // Completed rides reliability bonus
+  const numDone = Math.max(0, Number(completedRides || 0));
+  let completionBonus = 0.0;
+  if (numDone >= 50) completionBonus = 0.20;
+  else if (numDone >= 25) completionBonus = 0.15;
+  else if (numDone >= 10) completionBonus = 0.10;
+  else if (numDone >= 5) completionBonus = 0.05;
+
+  // Penalties
+  const complaintPenalty = Math.max(0, Number(unresolvedComplaints || 0)) * 0.20;
+  const warningPenalty = Math.max(0, Number(activeWarnings || 0)) * 0.30;
+  const suspensionPenalty = isSuspended ? 1.00 : 0.00;
+  const totalPenalty = complaintPenalty + warningPenalty + suspensionPenalty;
+
+  let composite = peerAvg + completionBonus - totalPenalty;
+  if (isNew && totalPenalty === 0) {
+    composite = 5.0;
+  }
+
+  const finalScore = Math.max(1.0, Math.min(5.0, Math.round(composite * 10) / 10));
+  const formattedScore = finalScore.toFixed(1);
+
+  let safetyTier = 'Excellent';
+  if (isSuspended || finalScore < 3.0) {
+    safetyTier = 'Critical Attention';
+  } else if (activeWarnings > 0 || unresolvedComplaints > 0 || finalScore < 4.0) {
+    safetyTier = 'Moderate / Under Review';
+  } else if (finalScore >= 4.7) {
+    safetyTier = 'Top Rated & Verified';
+  } else {
+    safetyTier = 'Reliable & Safe';
+  }
+
+  return {
+    rating: finalScore,
+    formattedRating: formattedScore,
+    rawPeerAvg: Math.round(peerAvg * 10) / 10,
+    totalReviews,
+    completedRides: numDone,
+    completionBonus,
+    complaintsCount: Math.max(0, Number(unresolvedComplaints || 0)),
+    warningsCount: Math.max(0, Number(activeWarnings || 0)),
+    isSuspended: Boolean(isSuspended),
+    totalPenalty,
+    isNew,
+    safetyTier
+  };
+}
+
 module.exports = async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
@@ -258,6 +334,57 @@ module.exports = async (req, res) => {
                   })
                 });
               }
+
+              // Recalculate composite driver rating & safety score after safety action
+              try {
+                let pastRatings = [];
+                let unresolvedComplaints = 0;
+                const pastRes = await fetch(`${SUPABASE_URL}/rest/v1/feedbacks?driver_id=eq.${encodeURIComponent(targetDriverId)}&select=rating,is_safety_flag,admin_action`, {
+                  headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` },
+                  signal: AbortSignal.timeout(1500)
+                });
+                if (pastRes.ok) {
+                  const pFeedbacks = await pastRes.json();
+                  if (Array.isArray(pFeedbacks)) {
+                    pFeedbacks.forEach(pf => {
+                      const v = parseFloat(pf.rating);
+                      if (!isNaN(v) && v >= 1 && v <= 5) pastRatings.push(v);
+                      if (pf.is_safety_flag && pf.admin_action !== 'resolved') unresolvedComplaints++;
+                    });
+                  }
+                }
+
+                const nowIso = new Date().toISOString();
+                const activeWarns = (meta.warnings || []).filter(w => !w.expires_at || w.expires_at > nowIso).length;
+                const isSusp = Boolean(meta.is_suspended || meta.kyc_status === 'suspended');
+
+                const newComp = computeCompositeRatingAndSafetyScore({
+                  ratings: pastRatings,
+                  completedRides: meta.completed_rides || 0,
+                  unresolvedComplaints,
+                  activeWarnings: activeWarns,
+                  isSuspended: isSusp
+                });
+
+                meta.rating = newComp.rating;
+                meta.safety_score = newComp.rating;
+                meta.safety_tier = newComp.safetyTier;
+
+                await fetch(`${SUPABASE_URL}/rest/v1/profiles?id=eq.${encodeURIComponent(pRow.id)}`, {
+                  method: 'PATCH',
+                  headers: {
+                    'apikey': SUPABASE_KEY,
+                    'Authorization': `Bearer ${SUPABASE_KEY}`,
+                    'Content-Type': 'application/json'
+                  },
+                  body: JSON.stringify({
+                    rating: newComp.rating,
+                    role: JSON.stringify(meta)
+                  })
+                });
+              } catch (reErr) {
+                console.warn('[safety_action] Composite rating recompute warning:', reErr.message);
+              }
             }
           }
         } catch (e) {
@@ -415,14 +542,16 @@ module.exports = async (req, res) => {
       console.warn('[Feedbacks API] Supabase insert notice:', e.message);
     }
 
-    // Dynamic Star Rating Calculation Engine: fetch all historical reviews and calculate real average
+    // Dynamic Composite Star Rating & Safety Score Engine
     let allRatings = [rawRating];
+    let unresolvedComplaints = feedback.is_safety_flag ? 1 : 0;
     try {
-      const pastRes = await fetch(`${SUPABASE_URL}/rest/v1/feedbacks?${targetUserRole === 'driver' ? 'driver_id' : 'rider_id'}=eq.${encodeURIComponent(targetUserId)}&select=rating`, {
+      const pastRes = await fetch(`${SUPABASE_URL}/rest/v1/feedbacks?${targetUserRole === 'driver' ? 'driver_id' : 'rider_id'}=eq.${encodeURIComponent(targetUserId)}&select=rating,is_safety_flag,admin_action`, {
         headers: {
           'apikey': SUPABASE_KEY,
           'Authorization': `Bearer ${SUPABASE_KEY}`
-        }
+        },
+        signal: AbortSignal.timeout(1500)
       });
       if (pastRes.ok) {
         const pastRows = await pastRes.json();
@@ -430,6 +559,7 @@ module.exports = async (req, res) => {
           pastRows.forEach(r => {
             const v = parseFloat(r.rating);
             if (!isNaN(v) && v >= 1 && v <= 5) allRatings.push(v);
+            if (r.is_safety_flag && r.admin_action !== 'resolved') unresolvedComplaints++;
           });
         }
       }
@@ -437,17 +567,25 @@ module.exports = async (req, res) => {
       console.warn('[Feedbacks API] Historical ratings query notice:', dbQueryErr.message);
     }
 
-    const ratingsSum = allRatings.reduce((sum, r) => sum + r, 0);
-    const avgRating = Number((ratingsSum / allRatings.length).toFixed(2));
-    const totalReviews = allRatings.length;
+    // Fetch driver profile metadata for completed rides, active warnings, and suspensions
+    let completedRidesCount = 0;
+    let activeWarningsCount = 0;
+    let isDriverSuspended = false;
+    let finalComposite = computeCompositeRatingAndSafetyScore({
+      ratings: allRatings,
+      completedRides: 0,
+      unresolvedComplaints,
+      activeWarnings: 0,
+      isSuspended: false
+    });
 
-    // Update target user's `profiles` record with dynamically computed rating
     try {
-      const pRes = await fetch(`${SUPABASE_URL}/rest/v1/profiles?or=(id.eq.${encodeURIComponent(targetUserId)},phone.eq.${encodeURIComponent(targetUserId)})`, {
+      const pRes = await fetch(`${SUPABASE_URL}/rest/v1/profiles?or=(id.eq.${encodeURIComponent(targetUserId)},phone.eq.${encodeURIComponent(targetUserId)})&select=*&limit=1`, {
         headers: {
           'apikey': SUPABASE_KEY,
           'Authorization': `Bearer ${SUPABASE_KEY}`
-        }
+        },
+        signal: AbortSignal.timeout(1500)
       });
       if (pRes.ok) {
         const pRows = await pRes.json();
@@ -460,8 +598,23 @@ module.exports = async (req, res) => {
             }
           } catch (e) {}
 
-          meta.rating = avgRating;
-          meta.total_reviews = totalReviews;
+          completedRidesCount = Number(meta.completed_rides || 0);
+          const nowIso = new Date().toISOString();
+          activeWarningsCount = (meta.warnings || []).filter(w => !w.expires_at || w.expires_at > nowIso).length;
+          isDriverSuspended = Boolean(meta.is_suspended || meta.kyc_status === 'suspended');
+
+          finalComposite = computeCompositeRatingAndSafetyScore({
+            ratings: allRatings,
+            completedRides: completedRidesCount,
+            unresolvedComplaints,
+            activeWarnings: activeWarningsCount,
+            isSuspended: isDriverSuspended
+          });
+
+          meta.rating = finalComposite.rating;
+          meta.safety_score = finalComposite.rating;
+          meta.safety_tier = finalComposite.safetyTier;
+          meta.total_reviews = finalComposite.totalReviews;
 
           await fetch(`${SUPABASE_URL}/rest/v1/profiles?id=eq.${encodeURIComponent(pRow.id)}`, {
             method: 'PATCH',
@@ -471,29 +624,31 @@ module.exports = async (req, res) => {
               'Content-Type': 'application/json'
             },
             body: JSON.stringify({
-              rating: avgRating,
-              total_reviews: totalReviews,
+              rating: finalComposite.rating,
+              total_reviews: finalComposite.totalReviews,
               role: JSON.stringify(meta)
             })
           });
+
+          // Also update local KYC store if target is driver
+          if (targetUserRole === 'driver') {
+            try {
+              const { getStore: getKycStore, saveStore: saveKycStore } = require('./_kyc-store');
+              const kycList = getKycStore();
+              const kIdx = kycList.findIndex(s => s.id === targetUserId || s.user_id === targetUserId);
+              if (kIdx !== -1) {
+                kycList[kIdx].rating = finalComposite.rating;
+                kycList[kIdx].safety_score = finalComposite.rating;
+                kycList[kIdx].safety_tier = finalComposite.safetyTier;
+                kycList[kIdx].total_reviews = finalComposite.totalReviews;
+                saveKycStore(kycList);
+              }
+            } catch (e) {}
+          }
         }
       }
     } catch (pErr) {
       console.warn('[Feedbacks API] Profile rating update notice:', pErr.message);
-    }
-
-    // Also update local KYC store if target is driver
-    if (targetUserRole === 'driver') {
-      try {
-        const { getStore: getKycStore, saveStore: saveKycStore } = require('./_kyc-store');
-        const kycList = getKycStore();
-        const kIdx = kycList.findIndex(s => s.id === targetUserId || s.user_id === targetUserId);
-        if (kIdx !== -1) {
-          kycList[kIdx].rating = avgRating;
-          kycList[kIdx].total_reviews = totalReviews;
-          saveKycStore(kycList);
-        }
-      } catch (e) {}
     }
 
     // If flagged as a Safety/Performance Alert, dispatch a push alert to Super Admin
@@ -532,8 +687,11 @@ module.exports = async (req, res) => {
     return res.status(200).json({
       success: true,
       feedback,
-      updatedRating: avgRating,
-      totalReviews: totalReviews
+      updatedRating: finalComposite.rating,
+      safetyScore: finalComposite.rating,
+      safetyTier: finalComposite.safetyTier,
+      totalReviews: finalComposite.totalReviews,
+      isNew: finalComposite.isNew
     });
   }
 
